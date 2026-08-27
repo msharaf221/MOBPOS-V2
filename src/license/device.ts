@@ -1,22 +1,58 @@
 // ============================================================
-//  بصمة الجهاز v2 — Device Fingerprint
+//  بصمة الجهاز v3 — Device Fingerprint
 //  تُستخدم لربط الترخيص بالجهاز الذي تم التفعيل عليه.
-//  البصمة محسوبة من خصائص ثابتة نسبياً في الجهاز/المتصفح،
-//  وليست رقماً عشوائياً محفوظاً (فلا يفيدها مسح بيانات المتصفح).
 //
-//  الجديد في v2 — إشارات أقوى وأكثر تمايزاً:
-//   • Canvas محسّن: رسم أغنى (تدرّجات + خطوط + نطوط متعددة)
-//     والمخرجات تُجزّأ بـ SHA-256 (حجم ثابت + ثبات أعلى)
-//   • WebGL: كرت الشاشة والتعريفات والإمكانيات
-//   • Audio Context: بصمة محرك الصوت
-//   • + كل الإشارات القديمة (UA، الشاشة، اللغة، المنطقة الزمنية…)
+//  بدلاً من الاعتماد على هاش صارم واحد يتغير بالكامل عند تغير إشارة
+//  متذبذبة (تعريف كرت الشاشة، دقة الشاشة، User-Agent...)، نحفظ مجموعة
+//  إشارات مستقلة ونقبل الجهاز عند تحقق أغلبية مستقرة (4 من 6 على الأقل).
+//  في Electron نفضّل معرف نظام التشغيل الثابت (machine-id / UUID) عبر
+//  preload IPC لأنه أكثر ثباتاً من بصمات Canvas/WebGL.
 // ============================================================
 
 import { sha256Hex } from './crypto';
 
+export const DEVICE_FINGERPRINT_VERSION = 3;
+export const DEVICE_MATCH_THRESHOLD = 4;
+
+export interface DeviceFingerprintSignal {
+  key: string;
+  value: string;
+  stable: boolean;
+}
+
+export interface DeviceFingerprint {
+  version: typeof DEVICE_FINGERPRINT_VERSION;
+  signals: DeviceFingerprintSignal[];
+  hash: string;
+}
+
+export interface DeviceMatchResult {
+  matches: boolean;
+  matchedSignals: number;
+  totalSignals: number;
+  threshold: number;
+  currentHash: string;
+}
+
+let cachedFingerprint: DeviceFingerprint | null = null;
 let cachedDeviceId: string | null = null;
 
-/** Canvas fingerprint — رسم أغنى، والمخرجات تُجزّأ لقيمة ثابتة الحجم. */
+function normalizeSignal(value: unknown): string {
+  return String(value ?? '').trim().toLowerCase() || 'unknown';
+}
+
+async function stableMachineId(): Promise<string> {
+  try {
+    const bridge = window.mobpos;
+    if (!bridge?.isDesktop || !bridge.getStableMachineId) return 'not-electron';
+    const id = await bridge.getStableMachineId();
+    return id ? `machine:${normalizeSignal(id)}` : 'no-machine-id';
+  } catch {
+    return 'machine-id-error';
+  }
+}
+
+/** Canvas fingerprint — hashed to a fixed-size value. */
 async function canvasFingerprint(): Promise<string> {
   try {
     const canvas = document.createElement('canvas');
@@ -25,8 +61,6 @@ async function canvasFingerprint(): Promise<string> {
     const ctx = canvas.getContext('2d');
     if (!ctx) return 'no-canvas';
 
-    // تدرّج لوني + نصوص بنطوط مختلفة + أشكال هندسية —
-    // أي اختلاف بسيط في محرك الرسم/التعريفات ينعكس على الناتج
     const grad = ctx.createLinearGradient(0, 0, 300, 80);
     grad.addColorStop(0, '#f60');
     grad.addColorStop(1, '#069');
@@ -52,14 +86,13 @@ async function canvasFingerprint(): Promise<string> {
     ctx.stroke();
     ctx.globalCompositeOperation = 'source-over';
 
-    // التجزئة: حجم ثابت + أقل حساسية لفروق الترميز الدقيقة بين المتصفحات
     return 'cv:' + (await sha256Hex(canvas.toDataURL()));
   } catch {
     return 'canvas-error';
   }
 }
 
-/** WebGL fingerprint — كرت الشاشة والتعريفات والإمكانيات. */
+/** WebGL fingerprint — graphics hardware/driver capabilities. */
 function webglFingerprint(): string {
   try {
     const canvas = document.createElement('canvas');
@@ -74,7 +107,6 @@ function webglFingerprint(): string {
     const renderer = String(
       dbg ? gl.getParameter((dbg as WEBGL_debug_renderer_info).UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)
     );
-    const version = String(gl.getParameter(gl.VERSION));
 
     const params = [
       gl.getParameter(gl.MAX_TEXTURE_SIZE),
@@ -90,19 +122,18 @@ function webglFingerprint(): string {
     const maxViewport = gl.getParameter(gl.MAX_VIEWPORT_DIMS) as Int32Array | null;
     const viewport = maxViewport ? Array.from(maxViewport).join('x') : '';
 
-    const exts = (gl.getSupportedExtensions() || []).join(',');
+    // Deliberately omit gl.VERSION and full extension names from the matching
+    // signal: they are highly driver/browser-version sensitive. The capability
+    // counts and renderer/vendor provide enough entropy while tolerating updates.
+    const extensionCount = (gl.getSupportedExtensions() || []).length;
 
-    return `gl:${vendor}|${renderer}|${version}|${params}|${viewport}|${exts.length}:${exts}`;
+    return `gl:${normalizeSignal(vendor)}|${normalizeSignal(renderer)}|${params}|${viewport}|ext:${extensionCount}`;
   } catch {
     return 'webgl-error';
   }
 }
 
-/**
- * Audio fingerprint — بصمة محرك الصوت عبر OfflineAudioContext:
- * مذبذب + ضاغط ديناميكي، والفروق بين المحركات تظهر في العينات الناتجة.
- * تعمل بخلفية آمنة مع مهلة زمنية (لا تعطّل حساب البصمة أبداً).
- */
+/** Audio engine fingerprint with timeout so it never blocks startup. */
 function audioFingerprint(): Promise<string> {
   return new Promise((resolve) => {
     let settled = false;
@@ -122,7 +153,6 @@ function audioFingerprint(): Promise<string> {
       if (!OfflineAC) return done('no-audio');
 
       const ctx = new OfflineAC(1, 4410, 44100);
-
       const oscillator = ctx.createOscillator();
       oscillator.type = 'triangle';
       oscillator.frequency.value = 10000;
@@ -138,7 +168,7 @@ function audioFingerprint(): Promise<string> {
       compressor.connect(ctx.destination);
       oscillator.start(0);
 
-      const timer = setTimeout(() => done('audio-timeout'), 3000);
+      const timer = window.setTimeout(() => done('audio-timeout'), 3000);
       ctx
         .startRendering()
         .then((buffer) => {
@@ -158,43 +188,74 @@ function audioFingerprint(): Promise<string> {
   });
 }
 
-/** جمع كل الإشارات — أصبحت async بسبب بصمة الصوت. */
-async function collectSignals(): Promise<string> {
+function screenBucket(): string {
+  try {
+    // Bucket the resolution in coarse 200px steps so plugging in a slightly
+    // different monitor does not invalidate the fingerprint by itself.
+    const width = Math.round((screen.width || 0) / 200) * 200;
+    const height = Math.round((screen.height || 0) / 200) * 200;
+    return `${width}x${height}|d${screen.colorDepth || 0}`;
+  } catch {
+    return 'screen-error';
+  }
+}
+
+function browserFamily(): string {
+  const ua = navigator.userAgent || '';
+  const family = /edg\//i.test(ua)
+    ? 'edge'
+    : /opr\//i.test(ua)
+      ? 'opera'
+      : /firefox\//i.test(ua)
+        ? 'firefox'
+        : /chrome\//i.test(ua)
+          ? 'chromium'
+          : /safari\//i.test(ua)
+            ? 'safari'
+            : 'unknown-browser';
+  const platform = navigator.platform || 'unknown-platform';
+  return `${family}|${platform}`;
+}
+
+async function collectDeviceFingerprint(): Promise<DeviceFingerprint> {
   const nav = navigator as Navigator & { deviceMemory?: number };
-  const [canvas, audio] = await Promise.all([
+  const [machineId, canvas, audio] = await Promise.all([
+    stableMachineId(),
     canvasFingerprint(),
     audioFingerprint(),
   ]);
 
-  const signals = [
-    navigator.userAgent || '',
-    navigator.language || '',
-    (navigator.languages || []).join(','),
-    nav.platform || '',
-    String(navigator.hardwareConcurrency || 0),
-    String(nav.deviceMemory || 0),
-    String(screen.width) + 'x' + String(screen.height),
-    String(screen.colorDepth || 0),
-    String(new Date().getTimezoneOffset()),
-    Intl.DateTimeFormat().resolvedOptions().timeZone || '',
-    String(navigator.maxTouchPoints || 0),
-    canvas,
-    webglFingerprint(),
-    audio,
+  const signals: DeviceFingerprintSignal[] = [
+    { key: 'machine', value: machineId, stable: machineId.startsWith('machine:') },
+    { key: 'platform', value: normalizeSignal(`${browserFamily()}|${navigator.language || ''}|${Intl.DateTimeFormat().resolvedOptions().timeZone || ''}`), stable: true },
+    { key: 'cpu-memory', value: normalizeSignal(`${navigator.hardwareConcurrency || 0}|${nav.deviceMemory || 0}|${navigator.maxTouchPoints || 0}`), stable: true },
+    { key: 'screen', value: normalizeSignal(screenBucket()), stable: false },
+    { key: 'graphics', value: webglFingerprint(), stable: false },
+    { key: 'canvas-audio', value: `${canvas}|${audio}`, stable: false },
   ];
-  return signals.join('||');
+
+  const hashInput = signals.map(signal => `${signal.key}=${signal.value}`).join('||');
+  const hash = await sha256Hex(hashInput);
+  return { version: DEVICE_FINGERPRINT_VERSION, signals, hash };
+}
+
+/** Returns the full fuzzy fingerprint used for new activations. */
+export async function getDeviceFingerprint(): Promise<DeviceFingerprint> {
+  if (cachedFingerprint) return cachedFingerprint;
+  cachedFingerprint = await collectDeviceFingerprint();
+  return cachedFingerprint;
 }
 
 /**
  * Compute (and cache) a stable device id like "DEV-3fa9c1b2e8d04a71".
+ * This remains as the server-facing identifier for compatibility.
  */
 export async function getDeviceId(): Promise<string> {
   if (cachedDeviceId) return cachedDeviceId;
   try {
-    const hash = await sha256Hex(await collectSignals());
-    cachedDeviceId = 'DEV-' + hash.slice(0, 16);
+    const fingerprint = await getDeviceFingerprint();
+    cachedDeviceId = 'DEV-' + fingerprint.hash.slice(0, 16);
   } catch {
-    // Fallback: random-but-persisted id
     let fallback = localStorage.getItem('msp_device_id_fallback');
     if (!fallback) {
       fallback = 'DEV-F-' + Math.random().toString(36).slice(2, 14) + Date.now().toString(36);
@@ -203,4 +264,41 @@ export async function getDeviceId(): Promise<string> {
     cachedDeviceId = fallback;
   }
   return cachedDeviceId;
+}
+
+function isDeviceFingerprint(value: unknown): value is DeviceFingerprint {
+  const candidate = value as DeviceFingerprint;
+  return !!candidate && Array.isArray(candidate.signals) && typeof candidate.hash === 'string';
+}
+
+/** Compare the current fingerprint against a stored one using majority matching. */
+export async function matchCurrentDeviceFingerprint(stored: unknown): Promise<DeviceMatchResult> {
+  const current = await getDeviceFingerprint();
+  const storedFingerprint = isDeviceFingerprint(stored) ? stored : null;
+
+  if (!storedFingerprint) {
+    return {
+      matches: false,
+      matchedSignals: 0,
+      totalSignals: current.signals.length,
+      threshold: DEVICE_MATCH_THRESHOLD,
+      currentHash: current.hash,
+    };
+  }
+
+  const currentByKey = new Map(current.signals.map(signal => [signal.key, signal.value]));
+  let matchedSignals = 0;
+  for (const signal of storedFingerprint.signals) {
+    if (currentByKey.get(signal.key) === signal.value) matchedSignals++;
+  }
+
+  // Exact hash match remains a fast success path, but no longer the only path.
+  const matches = storedFingerprint.hash === current.hash || matchedSignals >= DEVICE_MATCH_THRESHOLD;
+  return {
+    matches,
+    matchedSignals,
+    totalSignals: storedFingerprint.signals.length,
+    threshold: DEVICE_MATCH_THRESHOLD,
+    currentHash: current.hash,
+  };
 }

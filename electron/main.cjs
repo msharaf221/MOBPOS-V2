@@ -18,12 +18,32 @@ const { app, BrowserWindow, Menu, shell, session, ipcMain, dialog } = require('e
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const crypto = require('crypto');
+const { execFileSync } = require('child_process');
 const { startServer, PREFERRED_PORT } = require('./local-server.cjs');
 
 const isKiosk = process.argv.includes('--kiosk');
+const isDev = !app.isPackaged && process.env.MOBPOS_ELECTRON_DEV === '1';
+const devServerUrl = process.env.MOBPOS_ELECTRON_DEV_SERVER_URL || `http://127.0.0.1:${PREFERRED_PORT}`;
 
 let mainWindow = null;
 let serverInfo = null;
+let appUrl = '';
+let appOrigin = '';
+
+const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://accounts.google.com https://www.googleapis.com",
+  "style-src 'self' 'unsafe-inline'",
+  "font-src 'self' data:",
+  "img-src 'self' data: blob: https:",
+  "media-src 'self' data: blob:",
+  "connect-src 'self' http://127.0.0.1:8420 ws://127.0.0.1:8420 https://mobpos.onrender.com https://accounts.google.com https://www.googleapis.com https://*.googleapis.com https://*.supabase.co wss://*.supabase.co",
+  "frame-src 'self' https://accounts.google.com",
+].join('; ');
 
 // ===== Auto-update =====
 function setupAutoUpdate() {
@@ -40,6 +60,60 @@ function setupAutoUpdate() {
   } catch (err) {
     // التحديث التلقائي اختياري — لا يكسر التطبيق
     console.error('[updater setup failed]', err?.message || err);
+  }
+}
+
+function setupCspHeaders() {
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    let appliesToApp = false;
+    try {
+      const origin = new URL(details.url).origin;
+      appliesToApp = origin === appOrigin || origin === `http://127.0.0.1:${PREFERRED_PORT}`;
+    } catch {
+      appliesToApp = details.url.startsWith('file://');
+    }
+
+    if (!appliesToApp) return callback({ responseHeaders: details.responseHeaders });
+
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [CONTENT_SECURITY_POLICY],
+      },
+    });
+  });
+}
+
+function hashMachineId(value) {
+  return crypto.createHash('sha256').update(`mobpos-machine-id::${value}`).digest('hex').slice(0, 32);
+}
+
+function readStableMachineId() {
+  try {
+    let raw = '';
+    if (process.platform === 'win32') {
+      raw = execFileSync('reg', ['query', 'HKLM\\SOFTWARE\\Microsoft\\Cryptography', '/v', 'MachineGuid'], {
+        encoding: 'utf8',
+        windowsHide: true,
+      });
+      raw = (raw.match(/MachineGuid\s+REG_\w+\s+([^\r\n]+)/i) || [])[1] || raw;
+    } else if (process.platform === 'darwin') {
+      raw = execFileSync('ioreg', ['-rd1', '-c', 'IOPlatformExpertDevice'], { encoding: 'utf8' });
+      raw = (raw.match(/"IOPlatformUUID"\s=\s"([^"]+)"/) || [])[1] || raw;
+    } else {
+      for (const file of ['/etc/machine-id', '/var/lib/dbus/machine-id']) {
+        if (fs.existsSync(file)) {
+          raw = fs.readFileSync(file, 'utf8');
+          break;
+        }
+      }
+    }
+
+    raw = String(raw || '').trim();
+    return raw ? hashMachineId(`${process.platform}:${raw}`) : null;
+  } catch (err) {
+    console.error('[machine-id]', err?.message || err);
+    return null;
   }
 }
 
@@ -208,7 +282,7 @@ function createWindow() {
 
   // منع الانتقال لأي مكان خارج التطبيق المحلي
   mainWindow.webContents.on('will-navigate', (event, url) => {
-    const allowedOrigin = `http://127.0.0.1:${serverInfo.port}`;
+    const allowedOrigin = appOrigin;
     let sameOrigin = false;
     try {
       sameOrigin = new URL(url).origin === allowedOrigin;
@@ -221,7 +295,7 @@ function createWindow() {
     }
   });
 
-  mainWindow.loadURL(`http://127.0.0.1:${serverInfo.port}/`);
+  mainWindow.loadURL(appUrl);
 
   mainWindow.on('closed', () => { mainWindow = null; });
 }
@@ -325,6 +399,9 @@ function setupIpc() {
       return { ok: false };
     }
   });
+
+  // معرف نظام تشغيل ثابت ومجزأ، يُستخدم كبصمة جهاز أكثر ثباتاً داخل Electron.
+  ipcMain.handle('mobpos:get-stable-machine-id', async () => readStableMachineId());
 }
 
 // ===== App lifecycle =====
@@ -353,15 +430,24 @@ if (!gotLock) {
     setupIpc();
     setupAutoUpdate();
 
-    try {
-      serverInfo = await startServer(PREFERRED_PORT);
-      console.log(`MOBPOS local server: http://127.0.0.1:${serverInfo.port}`);
-    } catch (err) {
-      console.error('Failed to start local server:', err);
-      app.quit();
-      return;
+    if (isDev) {
+      appUrl = devServerUrl;
+      appOrigin = new URL(devServerUrl).origin;
+      console.log(`MOBPOS Vite dev server: ${appUrl}`);
+    } else {
+      try {
+        serverInfo = await startServer(PREFERRED_PORT);
+        appUrl = `http://127.0.0.1:${serverInfo.port}/`;
+        appOrigin = new URL(appUrl).origin;
+        console.log(`MOBPOS local server: ${appUrl}`);
+      } catch (err) {
+        console.error('Failed to start local server:', err);
+        app.quit();
+        return;
+      }
     }
 
+    setupCspHeaders();
     createWindow();
 
     app.on('activate', () => {

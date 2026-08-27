@@ -2,7 +2,7 @@
 //  التقارير: تصدير Excel حقيقي (XLSX) + معاينة تقارير داخل التطبيق + PDF
 // ============================================================
 
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 // الخط يُضمَّن داخل ملفات التقارير نفسها (base64) عشان الطباعة والـ PDF
 // يطلعوا بخط Cairo حتى لو الخط مش متثبت على جهاز العميل
 import cairoArabic400 from '@fontsource/cairo/files/cairo-arabic-400-normal.woff2?url';
@@ -34,45 +34,49 @@ function safeSheetName(name: string): string {
  * - الأرقام تتخزّن كأرقام (تقدر تعمل SUM عليها)
  * - عرض الأعمدة يتحسب من المحتوى
  */
-export function downloadExcel(
+export async function downloadExcel(
   fileName: string,
   headers: string[],
   rows: ReportCell[][],
   opts?: { sheetName?: string; title?: string }
-): void {
+): Promise<void> {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'MOBPOS';
+  workbook.created = new Date();
+
+  const worksheet = workbook.addWorksheet(safeSheetName(opts?.sheetName || 'تقرير'), {
+    views: [{ rightToLeft: true }],
+  });
+
   const hasTitle = !!opts?.title;
-  const aoa: ReportCell[][] = hasTitle
-    ? [[opts!.title as string], headers, ...rows]
-    : [headers, ...rows];
-
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-
-  // دمج خلية العنوان على عرض الجدول كله
   if (hasTitle) {
-    ws['!merges'] = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: Math.max(headers.length - 1, 1) } },
-    ];
+    const titleRow = worksheet.addRow([opts!.title as string]);
+    titleRow.font = { bold: true, size: 14 };
+    titleRow.alignment = { horizontal: 'center' };
+    worksheet.mergeCells(1, 1, 1, Math.max(headers.length, 1));
+  }
+
+  const headerRow = worksheet.addRow(headers);
+  headerRow.font = { bold: true };
+  headerRow.alignment = { horizontal: 'center' };
+
+  for (const row of rows) {
+    worksheet.addRow(row);
   }
 
   // عرض الأعمدة تلقائياً من محتواها
-  const colWidths = headers.map((h, ci) => {
+  headers.forEach((h, ci) => {
     let maxLen = String(h ?? '').length;
     for (const row of rows) {
       const v = row[ci];
       if (v === null || v === undefined) continue;
       maxLen = Math.max(maxLen, String(v).length);
     }
-    return { wch: Math.min(Math.max(maxLen + 4, 10), 50) };
+    worksheet.getColumn(ci + 1).width = Math.min(Math.max(maxLen + 4, 10), 50);
   });
-  ws['!cols'] = colWidths;
 
-  const wb = XLSX.utils.book_new();
-  // RTL view: من غير السطرين دول Excel بيعرض الورقة LTR حتى لو المحتوى عربي
-  wb.Workbook = { Views: [{ RTL: true }] };
-  XLSX.utils.book_append_sheet(wb, ws, safeSheetName(opts?.sheetName || 'تقرير'));
-
-  const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array', compression: true });
-  const blob = new Blob([wbout], {
+  const wbout = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([wbout as ArrayBuffer], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   });
   const url = URL.createObjectURL(blob);
