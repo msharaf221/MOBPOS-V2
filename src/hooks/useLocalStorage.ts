@@ -18,23 +18,23 @@ export function useLocalStorage<T>(key: string, initialValue: T): [T, (value: T 
 
   const [storedValue, setStoredValue] = useState<T>(readValue);
 
-  // Return a wrapped version of useState's setter function
+  // Return a wrapped version of useState's setter function.
+  // Use React's functional updater so rapid successive calls are applied to
+  // the latest pending state instead of the stale value captured in a closure.
   const setValue = useCallback((value: T | ((prev: T) => T)) => {
-    try {
-      // Allow value to be a function so we have same API as useState
-      const valueToStore = value instanceof Function ? value(storedValue) : value;
-      
-      // Save state
-      setStoredValue(valueToStore);
-      
-      // Save to local storage
-      if (typeof window !== 'undefined') {
-        window.localStorage.setItem(key, JSON.stringify(valueToStore));
+    setStoredValue(prev => {
+      try {
+        const valueToStore = value instanceof Function ? value(prev) : value;
+        if (typeof window !== 'undefined') {
+          window.localStorage.setItem(key, JSON.stringify(valueToStore));
+        }
+        return valueToStore;
+      } catch (error) {
+        console.warn(`Error setting localStorage key "${key}":`, error);
+        return prev;
       }
-    } catch (error) {
-      console.warn(`Error setting localStorage key "${key}":`, error);
-    }
-  }, [key, storedValue]);
+    });
+  }, [key]);
 
   // Reset to initial value
   const resetValue = useCallback(() => {

@@ -15,7 +15,7 @@ import {
   importPublicKey, importPrivateKey, verifySignature, signMessage,
   generateSigningKeyPair, hashPassword, verifyPasswordHash,
 } from './crypto';
-import { getDeviceId } from './device';
+import { getDeviceFingerprint, getDeviceId, matchCurrentDeviceFingerprint } from './device';
 
 // ===== Key payload (the signed content) =====
 
@@ -174,7 +174,10 @@ export async function activateLicense(keyStr: string): Promise<ActivationResult>
   }
   const payload = validation.payload;
 
-  const deviceId = await getDeviceId();
+  const [deviceId, deviceFingerprint] = await Promise.all([
+    getDeviceId(),
+    getDeviceFingerprint(),
+  ]);
 
   const serverResult = await serverActivate(payload.id, deviceId);
   if (!serverResult.ok) {
@@ -191,6 +194,7 @@ export async function activateLicense(keyStr: string): Promise<ActivationResult>
     lifetime: payload.lt,
     maxUsers: payload.u || PLAN_FEATURES[payload.p].maxUsers,
     deviceId,
+    deviceFingerprint,
     machineToken: serverResult.machineToken,
     lastVerifiedAt: new Date().toISOString(),
   };
@@ -344,10 +348,24 @@ export async function verifyStoredActivation(): Promise<StartupCheck> {
     return { status: 'expired', license: record };
   }
 
-  // Device binding
+  // Device binding: prefer the v3 fuzzy signal set when available. This tolerates
+  // normal hardware/browser drift (for example GPU driver or monitor changes)
+  // while still rejecting copied localStorage on another machine.
   const deviceId = await getDeviceId();
-  if (record.deviceId && record.deviceId !== deviceId) {
+  if (record.deviceFingerprint) {
+    const deviceMatch = await matchCurrentDeviceFingerprint(record.deviceFingerprint);
+    if (!deviceMatch.matches) {
+      return { status: 'device_mismatch', license: record };
+    }
+  } else if (record.deviceId && record.deviceId !== deviceId) {
     return { status: 'device_mismatch', license: record };
+  }
+
+  // Persist the current fuzzy fingerprint on older activation records after a
+  // successful strict check, so future starts benefit from majority matching.
+  if (!record.deviceFingerprint) {
+    record.deviceFingerprint = await getDeviceFingerprint();
+    storeLicense(record);
   }
 
   // إعادة تحقق دورية مع سيرفر التفعيل (v2) — في الخلفية ولا تعطّل الإقلاع.

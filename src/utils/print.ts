@@ -24,6 +24,7 @@ interface MobposBridge {
   windowControl?: (action: 'minimize' | 'maximize-toggle' | 'close') => Promise<void>;
   getWindowState?: () => Promise<{ maximized: boolean }>;
   onWindowState?: (cb: (state: { maximized: boolean }) => void) => () => void;
+  getStableMachineId?: () => Promise<string | null>;
 }
 
 declare global {

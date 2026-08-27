@@ -24,7 +24,8 @@ export interface ActiveLicense {
   expiresAt: string;      // ISO date, or '' for lifetime
   lifetime: boolean;
   maxUsers: number;
-  deviceId: string;       // fingerprint of the device it was activated on
+  deviceId: string;       // server-facing fingerprint hash captured at activation
+  deviceFingerprint?: unknown; // v3 fuzzy signals for local majority matching (4-of-6)
   machineToken?: string;  // إيصال سري من سيرفر التفعيل — يُصدر عند أول تفعيل ويُقدَّم عند كل إعادة تحقق
   lastVerifiedAt?: string; // آخر إعادة تحقق ناجحة مع سيرفر التفعيل (ISO)
 }

@@ -46,4 +46,7 @@ contextBridge.exposeInMainWorld('mobpos', {
 
   /** فحص التحديثات يدوياً */
   checkUpdates: () => ipcRenderer.invoke('mobpos:check-updates'),
+
+  /** معرف نظام تشغيل ثابت (مجزأ في main process) لتقوية بصمة الترخيص */
+  getStableMachineId: () => ipcRenderer.invoke('mobpos:get-stable-machine-id'),
 });
