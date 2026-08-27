@@ -38,7 +38,7 @@ export const ACTIVATION_SERVER_URL: string = 'https://mobpos.onrender.com';
  * والربط العتادي بالجهاز (Machine Token + Device Fingerprint).
  * العمليات الإدارية الحساسة (/revoke و /release) محمية بـ ADMIN_TOKEN منفصل على السيرفر ولا توجد في كود العميل إطلاقاً.
  */
-export const ACTIVATION_SERVER_TOKEN: string = 'CHANGE_ME_CLIENT_TOKEN';
+export const ACTIVATION_SERVER_TOKEN: string = 'mobpos-act-2026-7f3Kp9Qz';
 
 // مفاتيح التخزين المحلي
 export const STORAGE_KEYS = {
