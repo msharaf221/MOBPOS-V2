@@ -140,9 +140,22 @@ export async function verifyPasswordHash(
     const hash = await pbkdf2Hex(password, saltBytes, stored.iterations);
     return constantTimeEqual(hash, stored.hash);
   }
+  
   // Legacy format: single unsalted-work-factor SHA-256 round. Still supported
   // for verification so existing master passwords keep working; callers
   // should re-hash with hashPassword() after a successful legacy verify.
-  const hash = await sha256Hex(`${stored.salt}::${password}`);
-  return constantTimeEqual(hash, stored.hash);
+  const legacyHash = await sha256Hex(`${stored.salt}::${password}`);
+  if (constantTimeEqual(legacyHash, stored.hash)) {
+    return true;
+  }
+  
+  // Bug compatibility: if the hash was saved as PBKDF2 but the iterations field 
+  // was lost due to a previous bug in setupMasterPassword, we try the default PBKDF2 iterations.
+  try {
+    const saltBytes = b64urlDecode(stored.salt);
+    const pbkdf2Hash = await pbkdf2Hex(password, saltBytes, PBKDF2_ITERATIONS);
+    return constantTimeEqual(pbkdf2Hash, stored.hash);
+  } catch {
+    return false;
+  }
 }
