@@ -1,0 +1,303 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --primary: #3b82f6;
+  --primary-dark: #2563eb;
+  --success: #10b981;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+  /* Brand accent color — overridden inline at runtime via
+     document.documentElement.style.setProperty('--accent', accentColor) */
+  --accent: #3b82f6;
+}
+
+* {
+  font-family: 'Cairo', sans-serif;
+}
+
+body {
+  @apply bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100;
+  direction: rtl;
+  transition: background-color 0.3s ease, color 0.3s ease;
+  /* تطبيق سطح مكتب: مفيش تحديد نص بالغلط عند السحب أو الضغط المتكرر */
+  user-select: none;
+  -webkit-user-select: none;
+  overscroll-behavior: none;
+}
+
+/* خانات الإدخال تفضل قابلة للتحديد والنسخ عادي */
+input, textarea, [contenteditable='true'] {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+/* مناطق سحب النافذة داخل تطبيق سطح المكتب (شريط العنوان المخصص) */
+.app-drag {
+  -webkit-app-region: drag;
+}
+.app-nodrag,
+.app-drag button,
+.app-drag a,
+.app-drag input {
+  -webkit-app-region: no-drag;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background-color: #f3f4f6;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: #d1d5db;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: #9ca3af;
+}
+
+.dark ::-webkit-scrollbar-track {
+  background-color: #1f2937;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background-color: #4b5563;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background-color: #6b7280;
+}
+
+/* Print Styles */
+@media print {
+  /* Hide the root and main app container contents if a print-section exists */
+  body:has(.print-section) {
+    visibility: hidden !important;
+  }
+  
+  body:has(.print-section) .print-section {
+    visibility: visible !important;
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    border: none !important;
+    background: transparent !important;
+  }
+  
+  body:has(.print-section) .print-section * {
+    visibility: visible !important;
+  }
+
+  .no-print, .no-print * {
+    display: none !important;
+  }
+  
+  .print-only {
+    display: block !important;
+  }
+  
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  
+  /* Prevent scrollbars and clipping in print */
+  .h-screen, [class*="max-h-"] {
+    height: auto !important;
+    max-height: none !important;
+  }
+  .overflow-hidden, .overflow-y-auto, .overflow-auto {
+    overflow: visible !important;
+  }
+}
+
+/* Animation Classes */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideIn {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.3s ease-out;
+}
+
+.animate-slideIn {
+  animation: slideIn 0.3s ease-out;
+}
+
+.animate-pulse-slow {
+  animation: pulse 2s infinite;
+}
+
+/* Kanban Styles */
+.kanban-column {
+  min-height: 400px;
+}
+
+.kanban-card {
+  @apply transition-all duration-200;
+}
+
+.kanban-card:hover {
+  @apply shadow-lg scale-[1.02];
+}
+
+/* Modal Overlay */
+.modal-overlay {
+  @apply fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center;
+}
+
+@media print {
+  .modal-overlay {
+    position: absolute !important;
+    background: transparent !important;
+    display: block !important;
+  }
+}
+
+/* Form helpers */
+.input {
+  @apply w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white;
+}
+
+/* Badge Styles */
+.badge {
+  @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium;
+}
+
+.badge-success {
+  @apply bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200;
+}
+
+.badge-warning {
+  @apply bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200;
+}
+
+.badge-danger {
+  @apply bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200;
+}
+
+.badge-info {
+  @apply bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200;
+}
+
+.badge-gray {
+  @apply bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200;
+}
+
+/* ============================================================
+   Midnight Gold — premium dark/gold branding theme
+   Applied via a `.theme-midnight-gold` class on <html>, alongside
+   the regular `.dark` class (Midnight Gold implies dark mode).
+   ============================================================ */
+.theme-midnight-gold {
+  --primary: var(--accent, #d4af37);
+  --primary-dark: #b8942a;
+  color-scheme: dark;
+}
+
+.theme-midnight-gold body {
+  background-color: #0f0e0c;
+  color: #f0e6d2;
+}
+
+.theme-midnight-gold ::selection {
+  background-color: rgba(212, 175, 55, 0.35);
+}
+
+.theme-midnight-gold .input {
+  background-color: #1a1815;
+  color: #f0e6d2;
+  border-color: #3a3226;
+}
+
+.theme-midnight-gold .input:focus {
+  border-color: #d4af37;
+  outline-color: #d4af37;
+}
+
+.theme-midnight-gold .modal-overlay {
+  background-color: rgba(0, 0, 0, 0.7);
+}
+
+.theme-midnight-gold .kanban-card {
+  border-color: #3a3226;
+}
+
+.theme-midnight-gold .badge-info {
+  background-color: rgba(212, 175, 55, 0.15);
+  color: #f0c975;
+}
+
+.theme-midnight-gold .badge-success {
+  background-color: rgba(16, 185, 129, 0.15);
+  color: #6ee7b7;
+}
+
+.theme-midnight-gold .badge-warning {
+  background-color: rgba(245, 158, 11, 0.18);
+  color: #f0c975;
+}
+
+.theme-midnight-gold .badge-danger {
+  background-color: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+}
+
+.theme-midnight-gold .badge-gray {
+  background-color: #241f19;
+  color: #cbb896;
+}
+
+/* Give the generic gray/white card & surface utility classes a warm,
+   gold-tinted look so the theme feels cohesive beyond .dark defaults */
+.theme-midnight-gold .bg-white,
+.theme-midnight-gold .dark\:bg-gray-800 {
+  background-color: #1a1815 !important;
+}
+
+.theme-midnight-gold .bg-gray-50,
+.theme-midnight-gold .dark\:bg-gray-900 {
+  background-color: #0f0e0c !important;
+}
+
+.theme-midnight-gold .border-gray-200,
+.theme-midnight-gold .dark\:border-gray-700,
+.theme-midnight-gold .dark\:border-gray-600 {
+  border-color: #3a3226 !important;
+}
+
+.theme-midnight-gold ::-webkit-scrollbar-track {
+  background-color: #1a1815;
+}
+
+.theme-midnight-gold ::-webkit-scrollbar-thumb {
+  background-color: #6b5a2e;
+}
+
+.theme-midnight-gold ::-webkit-scrollbar-thumb:hover {
+  background-color: #d4af37;
+}

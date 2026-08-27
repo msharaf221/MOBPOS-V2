@@ -1,0 +1,14 @@
+{
+  "name": "mobpos-activation-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "سيرفر تفعيل مفاتيح MOBPOS — يفرض أن كل مفتاح يعمل على جهاز واحد فقط",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

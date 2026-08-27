@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0c1f4d" />
+    <link rel="icon" type="image/png" href="/icon.png" />
+    <title>MOBPOS — نظام إدارة محلات الموبايلات</title>
+    <style>
+      /* شاشة البداية — تظهر فوراً قبل تحميل React وتمسح نفسها عند التشغيل */
+      .mobpos-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        background: linear-gradient(135deg, #0c1f4d 0%, #172f6b 55%, #1e3a8a 100%);
+        color: #fff;
+        font-family: 'Cairo', 'Segoe UI', Tahoma, sans-serif;
+        direction: rtl;
+      }
+      .mobpos-splash .logo {
+        width: 84px;
+        height: 84px;
+        border-radius: 24px;
+        background: linear-gradient(145deg, #3b82f6, #1d4ed8);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 40px;
+        font-weight: 800;
+        box-shadow: 0 18px 45px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255,255,255,0.25);
+        animation: mobpos-pop 0.6s ease-out;
+      }
+      .mobpos-splash h1 {
+        margin: 0;
+        font-size: 26px;
+        letter-spacing: 1px;
+        animation: mobpos-fade 0.8s ease-out;
+      }
+      .mobpos-splash p {
+        margin: 0;
+        font-size: 13px;
+        color: #bfd2f5;
+        animation: mobpos-fade 1s ease-out;
+      }
+      .mobpos-splash .bar {
+        width: 190px;
+        height: 4px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.15);
+        overflow: hidden;
+      }
+      .mobpos-splash .bar span {
+        display: block;
+        height: 100%;
+        width: 40%;
+        border-radius: 999px;
+        background: #93c5fd;
+        animation: mobpos-slide 1.1s ease-in-out infinite;
+      }
+      @keyframes mobpos-slide {
+        0% { transform: translateX(160%); }
+        100% { transform: translateX(-480%); }
+      }
+      @keyframes mobpos-fade {
+        from { opacity: 0; transform: translateY(6px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes mobpos-pop {
+        from { opacity: 0; transform: scale(0.82); }
+        to { opacity: 1; transform: scale(1); }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div class="mobpos-splash">
+        <div class="logo">M</div>
+        <h1>MOBPOS</h1>
+        <p>نظام إدارة محلات الموبايلات</p>
+        <div class="bar"><span></span></div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

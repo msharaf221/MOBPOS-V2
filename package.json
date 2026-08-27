@@ -1,0 +1,45 @@
+{
+  "name": "mobpos",
+  "productName": "MOBPOS",
+  "private": true,
+  "version": "1.0.0",
+  "description": "نظام إدارة محلات الموبايلات — Mobile Shop Management System",
+  "author": "MOBPOS",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "electron:dev": "npm run build && electron .",
+    "dist:win": "npm run build && electron-builder --win --x64",
+    "dist:win:publish": "npm run build && electron-builder --win --x64 --publish always",
+    "dist:win:portable": "npm run build && electron-builder --win portable --x64"
+  },
+  "dependencies": {
+    "@fontsource/cairo": "^5.3.0",
+    "@types/uuid": "^10.0.0",
+    "clsx": "2.1.1",
+    "electron-updater": "^6.8.9",
+    "lucide-react": "^1.18.0",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "recharts": "^3.8.1",
+    "tailwind-merge": "3.4.0",
+    "uuid": "^14.0.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.1.17",
+    "@types/node": "22.19.17",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "4.3.4",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
+    "tailwindcss": "4.1.17",
+    "typescript": "5.9.3",
+    "vite": "5.4.19",
+    "vite-plugin-singlefile": "2.3.0"
+  }
+}

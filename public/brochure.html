@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mobile Shop Pro — بروشور تسويقي</title>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Cairo',sans-serif;background:#0a0a0a;color:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    @page{size:A4;margin:0}
+    .page{width:210mm;min-height:297mm;margin:0 auto;position:relative;overflow:hidden;page-break-after:always}
+    @media screen{.page{margin:0 auto;}}
+    img{display:block;width:100%;height:100%;object-fit:cover}
+
+    /* ===================== PAGE 1: HERO ===================== */
+    .p1{position:relative;background:#000}
+    .p1 .bg{position:absolute;inset:0;z-index:0}
+    .p1 .bg img{filter:brightness(0.25)}
+    .p1 .overlay{position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,0.3) 0%,rgba(15,23,42,0.9) 60%,#0f172a 100%);z-index:1}
+    .p1 .content{position:relative;z-index:2;padding:50px;height:297mm;display:flex;flex-direction:column;justify-content:flex-end}
+    .p1 .logo{position:absolute;top:40px;right:50px;display:flex;align-items:center;gap:12px;font-size:22px;font-weight:800}
+    .p1 .logo-box{width:50px;height:50px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:26px;box-shadow:0 8px 25px rgba(59,130,246,0.4)}
+    .p1 .top-badge{position:absolute;top:48px;left:50px;background:rgba(16,185,129,0.15);border:1px solid rgba(16,185,129,0.4);color:#34d399;padding:8px 20px;border-radius:100px;font-size:12px;font-weight:700;backdrop-filter:blur(10px)}
+    .p1 h1{font-size:58px;font-weight:900;line-height:1.15;margin-bottom:20px}
+    .p1 h1 em{font-style:normal;background:linear-gradient(135deg,#60a5fa,#c084fc);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+    .p1 .sub{font-size:19px;color:rgba(255,255,255,0.7);max-width:520px;line-height:1.8;margin-bottom:50px}
+    .p1 .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+    .p1 .stat{background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:16px;padding:22px 16px;text-align:center;backdrop-filter:blur(10px)}
+    .p1 .stat .n{font-size:34px;font-weight:900;background:linear-gradient(135deg,#60a5fa,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+    .p1 .stat .l{font-size:11px;color:rgba(255,255,255,0.5);margin-top:4px}
+
+    /* ===================== PAGE 2: PROBLEM / SOLUTION ===================== */
+    .p2{background:#fff;color:#111;padding:0}
+    .p2-top{background:linear-gradient(135deg,#0f172a,#1e3a5f);color:#fff;padding:50px 50px 160px;position:relative}
+    .p2-top h2{font-size:36px;font-weight:900;margin-bottom:12px}
+    .p2-top p{font-size:16px;color:rgba(255,255,255,0.7);max-width:500px;line-height:1.8}
+    .problems{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:30px}
+    .prob{background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.25);border-radius:14px;padding:18px;text-align:center}
+    .prob .ic{font-size:28px;margin-bottom:8px}
+    .prob h4{font-size:14px;font-weight:700;color:#fca5a5}
+    .prob p{font-size:11px;color:rgba(255,255,255,0.5);margin-top:4px}
+    .p2-bottom{padding:0 50px 50px;margin-top:-110px;position:relative;z-index:2}
+    .solution-card{background:#fff;border-radius:24px;box-shadow:0 25px 60px rgba(0,0,0,0.12);padding:40px;border:1px solid #e5e7eb}
+    .solution-card h3{font-size:26px;font-weight:900;color:#111;margin-bottom:8px;display:flex;align-items:center;gap:12px}
+    .solution-card>p{font-size:14px;color:#6b7280;margin-bottom:24px;line-height:1.7}
+    .sol-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
+    .sol-item{display:flex;align-items:flex-start;gap:12px;padding:14px;background:#f9fafb;border-radius:14px;border:1px solid #f3f4f6}
+    .sol-item .sol-ic{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+    .sol-item h4{font-size:13px;font-weight:700;color:#111;margin-bottom:2px}
+    .sol-item p{font-size:11px;color:#6b7280;line-height:1.5}
+
+    /* ===================== PAGE 3: SCREENSHOTS SECTION ===================== */
+    .p3{background:#f8fafc;color:#111;padding:50px}
+    .sec-head{text-align:center;margin-bottom:36px}
+    .sec-tag{display:inline-block;background:#dbeafe;color:#2563eb;padding:6px 20px;border-radius:100px;font-size:12px;font-weight:700;margin-bottom:14px}
+    .sec-title{font-size:34px;font-weight:900;color:#0f172a}
+    .sec-desc{font-size:14px;color:#6b7280;margin-top:6px}
+    .showcase{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+    .show-card{border-radius:20px;overflow:hidden;position:relative;height:220px;border:1px solid #e5e7eb}
+    .show-card img{transition:transform 0.3s}
+    .show-card .show-overlay{position:absolute;inset:0;background:linear-gradient(0deg,rgba(0,0,0,0.85) 0%,rgba(0,0,0,0.1) 60%);display:flex;flex-direction:column;justify-content:flex-end;padding:20px}
+    .show-card h4{color:#fff;font-size:16px;font-weight:800}
+    .show-card p{color:rgba(255,255,255,0.7);font-size:12px;margin-top:4px}
+    .show-full{grid-column:span 2;height:240px}
+    .num-section{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:30px}
+    .num-card{background:#fff;border:1px solid #e5e7eb;border-radius:18px;padding:24px;text-align:center}
+    .num-card .big{font-size:38px;font-weight:900;background:linear-gradient(135deg,#2563eb,#7c3aed);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+    .num-card .lbl{font-size:12px;color:#6b7280;margin-top:4px}
+
+    /* ===================== PAGE 4: FEATURES DEEP DIVE ===================== */
+    .p4{background:#fff;color:#111;padding:50px}
+    .feat-row{display:flex;gap:24px;margin-bottom:28px;align-items:stretch}
+    .feat-row .feat-img{width:200px;flex-shrink:0;border-radius:18px;overflow:hidden;border:1px solid #e5e7eb}
+    .feat-row .feat-body{flex:1;display:flex;flex-direction:column;justify-content:center}
+    .feat-row h3{font-size:20px;font-weight:800;color:#0f172a;margin-bottom:6px;display:flex;align-items:center;gap:10px}
+    .feat-row>div>p{font-size:13px;color:#6b7280;line-height:1.7;margin-bottom:12px}
+    .feat-tags{display:flex;flex-wrap:wrap;gap:6px}
+    .feat-tag{background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;padding:5px 12px;font-size:11px;color:#475569;font-weight:600}
+
+    /* ===================== PAGE 5: PRICING & CTA ===================== */
+    .p5{background:linear-gradient(180deg,#f8fafc 0%,#fff 40%,#0f172a 40%);color:#111;padding:50px;display:flex;flex-direction:column}
+    .pricing{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-bottom:40px}
+    .pr-card{background:#fff;border:2px solid #e5e7eb;border-radius:22px;padding:28px 22px;text-align:center;position:relative}
+    .pr-card.pop{border-color:#2563eb;box-shadow:0 12px 40px rgba(37,99,235,0.15);transform:scale(1.04)}
+    .pr-card.pop::before{content:'⭐ الأكثر طلباً';position:absolute;top:-14px;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,#2563eb,#7c3aed);color:#fff;padding:5px 18px;border-radius:100px;font-size:11px;font-weight:700;white-space:nowrap}
+    .pr-card h3{font-size:16px;font-weight:700}
+    .pr-card .price{font-size:42px;font-weight:900;color:#2563eb;margin:10px 0}
+    .pr-card .price small{font-size:14px;color:#9ca3af;font-weight:500}
+    .pr-card .desc{font-size:12px;color:#9ca3af;margin-bottom:16px}
+    .pr-card ul{list-style:none;text-align:right}
+    .pr-card ul li{font-size:12px;padding:5px 0;color:#4b5563;display:flex;align-items:center;gap:6px}
+    .pr-card ul li::before{content:'✓';color:#10b981;font-weight:900;font-size:13px}
+    .cta-final{flex:1;background:linear-gradient(135deg,#0f172a,#1e3a5f);border-radius:28px;padding:50px;color:#fff;text-align:center;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;overflow:hidden}
+    .cta-final::before{content:'';position:absolute;width:500px;height:500px;background:radial-gradient(circle,rgba(59,130,246,0.12),transparent 70%);top:-200px;left:-100px}
+    .cta-final::after{content:'';position:absolute;width:400px;height:400px;background:radial-gradient(circle,rgba(139,92,246,0.1),transparent 70%);bottom:-200px;right:-100px}
+    .cta-final h2{font-size:36px;font-weight:900;position:relative;margin-bottom:10px}
+    .cta-final>p{font-size:16px;color:rgba(255,255,255,0.7);max-width:460px;position:relative;margin-bottom:28px}
+    .cta-contacts{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;position:relative;width:100%;max-width:420px}
+    .cta-contact{background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:16px;padding:18px;text-align:center;backdrop-filter:blur(10px)}
+    .cta-contact .lbl{font-size:11px;color:rgba(255,255,255,0.5)}
+    .cta-contact .val{font-size:20px;font-weight:800;font-family:monospace;margin-top:4px;letter-spacing:1px}
+    .footer{text-align:center;padding:16px;font-size:10px;color:rgba(255,255,255,0.3);position:relative}
+  </style>
+</head>
+<body>
+
+<!-- ============================= PAGE 1: HERO ============================= -->
+<div class="page p1">
+  <div class="bg"><img src="https://images.pexels.com/photos/12968298/pexels-photo-12968298.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=1200&w=900" alt=""></div>
+  <div class="overlay"></div>
+  <div class="content">
+    <div class="logo"><div class="logo-box">📱</div> Mobile Shop Pro</div>
+    <div class="top-badge">✅ الإصدار 1.0 — 2025</div>
+    <h1>النظام الأذكى<br>لإدارة <em>محلك</em></h1>
+    <p class="sub">نقطة بيع، مخزون، صيانة، تتبع IMEI، عملاء، محاسبة، وتقارير — كل اللي محتاجه لإدارة محل موبايلات ناجح في نظام واحد متكامل.</p>
+    <div class="stats">
+      <div class="stat"><div class="n">120+</div><div class="l">منتج في المخزون</div></div>
+      <div class="stat"><div class="n">150+</div><div class="l">جهاز IMEI</div></div>
+      <div class="stat"><div class="n">50+</div><div class="l">عميل نشط</div></div>
+      <div class="stat"><div class="n">∞</div><div class="l">تخزين بلا حدود</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================= PAGE 2: PROBLEM / SOLUTION ============================= -->
+<div class="page p2">
+  <div class="p2-top">
+    <h2>😩 مشاكل المحلات التقليدية</h2>
+    <p>معظم محلات الموبايلات بتعاني من نفس المشاكل كل يوم...</p>
+    <div class="problems">
+      <div class="prob"><div class="ic">📝</div><h4>دفاتر ورقية</h4><p>ضياع البيانات وصعوبة البحث</p></div>
+      <div class="prob"><div class="ic">😵</div><h4>مافيش تتبع IMEI</h4><p>مين اشترى إيه ومتى</p></div>
+      <div class="prob"><div class="ic">💸</div><h4>مش عارف ربحك</h4><p>الفلوس داخلة وخارجة بدون حساب</p></div>
+      <div class="prob"><div class="ic">🔧</div><h4>صيانة عشوائية</h4><p>مفيش تتبع لتذاكر الصيانة</p></div>
+      <div class="prob"><div class="ic">📦</div><h4>مخزون مش منظم</h4><p>مش عارف إيه اللي خلص</p></div>
+      <div class="prob"><div class="ic">👥</div><h4>عملاء ضايعين</h4><p>مافيش سجل مشتريات للعملاء</p></div>
+    </div>
+  </div>
+  <div class="p2-bottom">
+    <div class="solution-card">
+      <h3>✅ الحل: Mobile Shop Pro</h3>
+      <p>نظام واحد بيحل كل المشاكل دي ويخلي إدارة محلك سهلة واحترافية</p>
+      <div class="sol-grid">
+        <div class="sol-item">
+          <div class="sol-ic" style="background:#dbeafe;color:#2563eb">🛒</div>
+          <div><h4>نقطة بيع سريعة</h4><p>باركود، خصومات، فواتير، ربط IMEI تلقائي</p></div>
+        </div>
+        <div class="sol-item">
+          <div class="sol-ic" style="background:#fce7f3;color:#db2777">📱</div>
+          <div><h4>تتبع IMEI كامل</h4><p>رقمين IMEI، مواصفات، ضمان، سجل كامل</p></div>
+        </div>
+        <div class="sol-item">
+          <div class="sol-ic" style="background:#d1fae5;color:#059669">🔧</div>
+          <div><h4>صيانة احترافية</h4><p>لوحة Kanban، قطع غيار، حساب ربح فوري</p></div>
+        </div>
+        <div class="sol-item">
+          <div class="sol-ic" style="background:#fef3c7;color:#d97706">💰</div>
+          <div><h4>محاسبة كاملة</h4><p>إيرادات، مصروفات، أرباح، تقارير مالية</p></div>
+        </div>
+        <div class="sol-item">
+          <div class="sol-ic" style="background:#ede9fe;color:#7c3aed">👥</div>
+          <div><h4>إدارة عملاء</h4><p>سجل مشتريات، أجهزة، صيانة لكل عميل</p></div>
+        </div>
+        <div class="sol-item">
+          <div class="sol-ic" style="background:#e0e7ff;color:#4338ca">📊</div>
+          <div><h4>تقارير ورسوم بيانية</h4><p>إحصائيات يومية وشهرية تفاعلية</p></div>
+        </div>
+        <div class="sol-item">
+          <div class="sol-ic" style="background:#fee2e2;color:#dc2626">🔐</div>
+          <div><h4>صلاحيات متعددة</h4><p>مدير، مشرف، موظف — كل واحد بصلاحياته</p></div>
+        </div>
+        <div class="sol-item">
+          <div class="sol-ic" style="background:#cffafe;color:#0891b2">🌙</div>
+          <div><h4>تصميم حديث</h4><p>وضع ليلي/نهاري، متجاوب مع كل الأجهزة</p></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================= PAGE 3: SHOWCASE ============================= -->
+<div class="page p3">
+  <div class="sec-head">
+    <div class="sec-tag">📸 النظام من الداخل</div>
+    <h2 class="sec-title">مصمم لراحتك</h2>
+    <p class="sec-desc">واجهة احترافية سهلة الاستخدام لكل أقسام المحل</p>
+  </div>
+
+  <div class="showcase">
+    <div class="show-card">
+      <img src="https://images.pexels.com/photos/28919439/pexels-photo-28919439.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=500&w=600" alt="">
+      <div class="show-overlay">
+        <h4>🛒 نقطة البيع</h4>
+        <p>واجهة سريعة مع باركود وإدارة السلة والفواتير</p>
+      </div>
+    </div>
+    <div class="show-card">
+      <img src="https://images.pexels.com/photos/31862950/pexels-photo-31862950.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=500&w=600" alt="">
+      <div class="show-overlay">
+        <h4>🔧 ورشة الصيانة</h4>
+        <p>لوحة Kanban مع حساب التكاليف والأرباح الفورية</p>
+      </div>
+    </div>
+    <div class="show-card show-full">
+      <img src="https://images.pexels.com/photos/577195/pexels-photo-577195.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=500&w=1200" alt="">
+      <div class="show-overlay">
+        <h4>📊 لوحة التحكم والتقارير المالية</h4>
+        <p>رسوم بيانية تفاعلية — إيرادات، مصروفات، أرباح، مخزون منخفض، ضمانات</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="num-section">
+    <div class="num-card"><div class="big">22</div><div class="lbl">فئة منتجات</div></div>
+    <div class="num-card"><div class="big">5</div><div class="lbl">خزائن مالية</div></div>
+    <div class="num-card"><div class="big">8</div><div class="lbl">موظفين</div></div>
+    <div class="num-card"><div class="big">3</div><div class="lbl">مستويات صلاحيات</div></div>
+  </div>
+</div>
+
+<!-- ============================= PAGE 4: FEATURES DEEP DIVE ============================= -->
+<div class="page p4">
+  <div class="sec-head">
+    <div class="sec-tag">🔍 نظرة عميقة</div>
+    <h2 class="sec-title">كل ميزة بالتفصيل</h2>
+    <p class="sec-desc">مش بس برنامج — ده شريكك في إدارة المحل</p>
+  </div>
+
+  <div class="feat-row">
+    <div class="feat-img"><img src="https://images.pexels.com/photos/28919443/pexels-photo-28919443.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=400&w=350" alt=""></div>
+    <div class="feat-body">
+      <h3>📱 نظام IMEI المتقدم</h3>
+      <p>كل جهاز ليه سجل كامل — من لحظة دخوله المحل لحد ما يتباع ويتعمله صيانة. تتبع كل حاجة برقمين IMEI.</p>
+      <div class="feat-tags">
+        <span class="feat-tag">✓ رقمين IMEI</span>
+        <span class="feat-tag">✓ رام + تخزين + لون</span>
+        <span class="feat-tag">✓ جديد / مستعمل / مجدد</span>
+        <span class="feat-tag">✓ تتبع ضمان</span>
+        <span class="feat-tag">✓ نقل ملكية</span>
+        <span class="feat-tag">✓ سجل كامل</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="feat-row" style="flex-direction:row-reverse">
+    <div class="feat-img"><img src="https://images.pexels.com/photos/31862953/pexels-photo-31862953.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=400&w=350" alt=""></div>
+    <div class="feat-body">
+      <h3>🔧 صيانة احترافية — Kanban</h3>
+      <p>لوحة ذكية بـ 4 أعمدة (استلام → إصلاح → مكتمل → تسليم). اكتب تكلفة القطعة + اللي أخدته من الزبون = الربح يتحسب فوراً.</p>
+      <div class="feat-tags">
+        <span class="feat-tag">✓ Kanban Board</span>
+        <span class="feat-tag">✓ أرقام تسلسلية</span>
+        <span class="feat-tag">✓ إدخال يدوي للقطع</span>
+        <span class="feat-tag">✓ حساب ربح فوري</span>
+        <span class="feat-tag">✓ طباعة إيصال</span>
+        <span class="feat-tag">✓ ربط IMEI</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="feat-row">
+    <div class="feat-img"><img src="https://images.pexels.com/photos/8475161/pexels-photo-8475161.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=400&w=350" alt=""></div>
+    <div class="feat-body">
+      <h3>🛒 نقطة بيع (POS) متكاملة</h3>
+      <p>واجهة بيع سريعة — امسح الباركود، اختار العميل، حدد IMEI، طبّع الفاتورة. كل شيء بخطوات بسيطة.</p>
+      <div class="feat-tags">
+        <span class="feat-tag">✓ مسح باركود</span>
+        <span class="feat-tag">✓ اختيار IMEI</span>
+        <span class="feat-tag">✓ خصومات</span>
+        <span class="feat-tag">✓ ربط بالعميل</span>
+        <span class="feat-tag">✓ طباعة فاتورة</span>
+        <span class="feat-tag">✓ نقدي / بطاقة</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="feat-row" style="flex-direction:row-reverse">
+    <div class="feat-img"><img src="https://images.pexels.com/photos/12969403/pexels-photo-12969403.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=400&w=350" alt=""></div>
+    <div class="feat-body">
+      <h3>💰 المالية والأرباح</h3>
+      <p>اعرف ربحك الحقيقي! تقارير مالية شاملة مع رسوم بيانية — مصروفات، إيرادات، أرباح المبيعات والصيانة كلها في مكان واحد.</p>
+      <div class="feat-tags">
+        <span class="feat-tag">✓ تقرير أرباح</span>
+        <span class="feat-tag">✓ رسوم بيانية</span>
+        <span class="feat-tag">✓ مصروفات وإيرادات</span>
+        <span class="feat-tag">✓ فلترة بالفترة</span>
+        <span class="feat-tag">✓ خزائن متعددة</span>
+        <span class="feat-tag">✓ تحويلات</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================= PAGE 5: PRICING & CTA ============================= -->
+<div class="page p5">
+  <div class="sec-head">
+    <div class="sec-tag">💎 الباقات</div>
+    <h2 class="sec-title">اختار الباقة المناسبة</h2>
+  </div>
+
+  <div class="pricing">
+    <div class="pr-card">
+      <h3>🟢 أساسي</h3>
+      <div class="price">مجاني</div>
+      <div class="desc">للمحلات الصغيرة</div>
+      <ul>
+        <li>نقطة بيع</li>
+        <li>إدارة مخزون</li>
+        <li>عملاء</li>
+        <li>لوحة تحكم</li>
+        <li>تخزين محلي</li>
+      </ul>
+    </div>
+    <div class="pr-card pop">
+      <h3>🔵 احترافي</h3>
+      <div class="price">499<small> ج.م/شهر</small></div>
+      <div class="desc">للمحلات المتوسطة والكبيرة</div>
+      <ul>
+        <li>كل مميزات الأساسي</li>
+        <li>نظام IMEI المتقدم</li>
+        <li>صيانة Kanban</li>
+        <li>المالية والأرباح</li>
+        <li>صلاحيات متعددة</li>
+        <li>تقارير متقدمة</li>
+        <li>نسخ احتياطية</li>
+        <li>دعم فني</li>
+      </ul>
+    </div>
+    <div class="pr-card">
+      <h3>🟣 مؤسسي</h3>
+      <div class="price">999<small> ج.م/شهر</small></div>
+      <div class="desc">لسلسلة محلات</div>
+      <ul>
+        <li>كل مميزات الاحترافي</li>
+        <li>فروع متعددة</li>
+        <li>تخزين سحابي</li>
+        <li>API للربط</li>
+        <li>تقارير مخصصة</li>
+        <li>دعم أولوية 24/7</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="cta-final">
+    <h2>ابدأ دلوقتي مجاناً 🚀</h2>
+    <p>جرّب النظام الكامل مجاناً لمدة 14 يوم.<br>مش محتاج بطاقة ائتمان.</p>
+    <div class="cta-contacts">
+      <div class="cta-contact"><div class="lbl">📞 تواصل معانا</div><div class="val">0100-000-0000</div></div>
+      <div class="cta-contact"><div class="lbl">📧 إيميل</div><div class="val">info@mobileshop.pro</div></div>
+      <div class="cta-contact"><div class="lbl">🌐 الموقع</div><div class="val">mobileshop.pro</div></div>
+      <div class="cta-contact"><div class="lbl">💬 واتساب</div><div class="val">0100-000-0000</div></div>
+    </div>
+    <div class="footer">© 2025 Mobile Shop Pro — جميع الحقوق محفوظة | صُنع بـ ❤️ في مصر</div>
+  </div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,56 @@
+# ============================================================
+#  إعدادات بناء ملف EXE — electron-builder
+#  الأمر: npm run dist:win  (ينتج ملف تثبيت + نسخة محمولة)
+# ============================================================
+
+appId: com.mobpos.system
+productName: MOBPOS
+copyright: Copyright © 2026 MOBPOS
+
+directories:
+  output: release          # مجلد ملفات EXE الناتجة (لا يُرفع للجيتهاب)
+  buildResources: build    # مجلد الأيقونات
+
+files:
+  - dist/**/*
+  - electron/**/*
+  - package.json
+  # electron-builder يضم تلقائياً حزم dependencies (مثل electron-updater) ويستثني devDependencies
+
+asar: true
+compression: maximum
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+  icon: build/icon.ico
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+nsis:
+  oneClick: false                       # يظهر معالج التثبيت
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true           # أيقونة على سطح المكتب
+  createStartMenuShortcut: true
+  shortcutName: MOBPOS
+  deleteAppDataOnUninstall: false       # بيانات المحل تبقى بعد إلغاء التثبيت
+  artifactName: ${productName}-Setup-${version}.${ext}
+
+portable:
+  artifactName: ${productName}-Portable-${version}.${ext}
+
+# ===== التحديث التلقائي =====
+# ينشر ملف Setup على GitHub Releases فيفحصه التطبيق ويثبّته تلقائياً.
+# أنشئ Release على GitHub بنفس رقم الإصدار ورفع ملفات release/ ليتفعّل.
+publish:
+  provider: github
+  owner: msharaf221
+  repo: MOBPOS
+  releaseType: release
+
+# ملاحظة: بيانات النظام (IndexedDB) تُحفظ في:
+#   %APPDATA%\mobpos\
+# ولا تُمسح إلا إذا اخترت حذف بيانات التطبيق يدوياً
