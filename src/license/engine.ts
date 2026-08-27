@@ -432,8 +432,8 @@ export async function hasMasterPassword(): Promise<boolean> {
 }
 
 export async function setupMasterPassword(password: string): Promise<void> {
-  const { salt, hash } = await hashPassword(password);
-  localStorage.setItem(STORAGE_KEYS.masterPasswordHash, JSON.stringify({ salt, hash }));
+  const { salt, hash, iterations } = await hashPassword(password);
+  localStorage.setItem(STORAGE_KEYS.masterPasswordHash, JSON.stringify({ salt, hash, iterations }));
 }
 
 export async function verifyMasterPassword(password: string): Promise<boolean> {
