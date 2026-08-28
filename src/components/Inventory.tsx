@@ -909,7 +909,7 @@ export default function Inventory({
                     printBarcodeItem.name,
                     printBarcodeItem.sellPrice,
                     printBarcodeItem.barcode,
-                    localStorage.getItem('shopName') || 'موبايل شوب',
+                    localStorage.getItem('shopName') || 'MOBPOS',
                     barcodeCopies
                   );
                   setPrintBarcodeItem(null);

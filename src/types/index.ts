@@ -1,4 +1,4 @@
-// Types for Mobile Shop Management System
+// Types for MOBPOS Management System
 
 // User & Auth Types
 export interface User {

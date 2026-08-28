@@ -961,7 +961,7 @@ export default function MaintenanceBoard({
           >
             <div className="p-6" id="maintenance-receipt">
               <div className="text-center mb-6">
-                <h2 className="text-2xl font-bold">📱 موبايل شوب</h2>
+                <h2 className="text-2xl font-bold">MOBPOS</h2>
                 <p className="text-gray-500">إيصال صيانة</p>
               </div>
 

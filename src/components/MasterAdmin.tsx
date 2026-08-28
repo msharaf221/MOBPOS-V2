@@ -221,7 +221,7 @@ export default function MasterAdmin({ onBack }: MasterAdminProps) {
           حفظ والدخول
         </button>
         <p className="mt-4 text-xs text-red-200/40 leading-relaxed">
-          🔒 كلمة المرور تُحفظ مشفّرة (SHA-256) في هذا المتصفح فقط. لا توجد أي كلمة مرور مكتوبة داخل كود النظام.
+          🔒 كلمة المرور تُحفظ مجزأة بأمان (PBKDF2-HMAC-SHA-256 بملح فريد) في هذا المتصفح فقط. لا توجد أي كلمة مرور مكتوبة داخل كود النظام.
         </p>
       </AuthShell>
     );

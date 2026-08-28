@@ -17,7 +17,7 @@ import {
 
 export const defaultAppSettings: AppSettings = {
 
-  shopName: 'موبايل شوب',
+  shopName: 'MOBPOS',
   shopPhone: '01000000000',
   shopAddress: 'القاهرة - مصر',
   receiptFooter: 'شكراً لتعاملكم معنا 💙',
