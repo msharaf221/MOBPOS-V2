@@ -294,12 +294,20 @@ export async function reverifyLicense(license: ActiveLicense): Promise<ReverifyS
 
   if (result.reason === 'server_unreachable') return 'server_unreachable';
 
-  // رفض قاطع من السيرفر → إبطال محلي فوري
-  clearLicense();
+  // Clear the local license only on explicit, authoritative rejections. A
+  // revoked key or a key that is demonstrably bound to a *different* device is
+  // safe to block. Other failures (unknown_key / bad_token / unknown) are most
+  // often caused by the activation server losing its JSON store (e.g. a free
+  // ephemeral host redeploy/restart) or by a stale v1 record. The local key is
+  // still ECDSA-signed, not expired, and matches this device — so do not throw
+  // the user back to the activation screen.
+  if (result.reason === 'revoked' || result.reason === 'used_on_other_device') {
+    clearLicense();
+    return result.reason === 'revoked' ? 'revoked' : 'used_on_other_device';
+  }
+
   switch (result.reason) {
-    case 'revoked': return 'revoked';
     case 'bad_token': return 'bad_token';
-    case 'used_on_other_device': return 'used_on_other_device';
     case 'unknown_key': return 'unknown_key';
     default: return 'unknown';
   }
