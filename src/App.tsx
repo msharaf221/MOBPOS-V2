@@ -403,7 +403,9 @@ export default function App() {
           <Safes
             safes={store.safes}
             transactions={store.transactions}
+            currentUser={store.currentUser}
             onAddSafe={store.addSafe}
+            onDeleteSafe={store.deleteSafe}
             onTransfer={store.transferBetweenSafes}
           />
         );

@@ -889,6 +889,28 @@ export function useStore() {
   }, [setSafes]);
 
   // Transaction functions (for manual income/expense)
+  const deleteSafe = useCallback((id: string): { ok: boolean; error?: string } => {
+    if (currentUser?.role !== 'admin') {
+      return { ok: false, error: 'حذف الخزانة متاح لمدير النظام فقط' };
+    }
+
+    const safe = safes.find(s => s.id === id);
+    if (!safe) return { ok: false, error: 'الخزنة غير موجودة' };
+    if (safe.isDefault) return { ok: false, error: 'لا يمكن حذف الخزنة الافتراضية' };
+    if (safes.length <= 1) return { ok: false, error: 'لا يمكن حذف آخر خزنة في النظام' };
+    if ((safe.balance || 0) !== 0) {
+      return { ok: false, error: 'رصيد الخزنة غير صفري — حوّل الرصيد إلى خزنة أخرى أو صفّره أولاً' };
+    }
+    const hasHistory = transactions.some(t => t.safeId === id)
+      || sideAccountEntries.some(e => e.safeId === id);
+    if (hasHistory) {
+      return { ok: false, error: 'توجد حركات أو حسابات جانبية مرتبطة بهذه الخزنة — لا يمكن حذفها للحفاظ على السجلات المالية' };
+    }
+
+    setSafes(prev => prev.filter(s => s.id !== id));
+    return { ok: true };
+  }, [currentUser, safes, transactions, sideAccountEntries, setSafes]);
+
   const addTransaction = useCallback((
     type: 'income' | 'expense',
     amount: number,
@@ -1162,6 +1184,7 @@ export function useStore() {
 
     // Safes
     addSafe,
+    deleteSafe,
     transferBetweenSafes,
 
     // Transactions

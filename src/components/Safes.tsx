@@ -1,15 +1,17 @@
 import { useState } from 'react';
-import { Plus, ArrowRightLeft, Wallet, TrendingUp, TrendingDown, X } from 'lucide-react';
-import { Safe, Transaction } from '../types';
+import { Plus, ArrowRightLeft, Wallet, TrendingUp, TrendingDown, X, Trash2 } from 'lucide-react';
+import { Safe, Transaction, User } from '../types';
 
 interface SafesProps {
   safes: Safe[];
   transactions: Transaction[];
+  currentUser: User | null;
   onAddSafe: (safe: Omit<Safe, 'id'>) => void;
+  onDeleteSafe: (id: string) => { ok: boolean; error?: string };
   onTransfer: (fromId: string, toId: string, amount: number) => void;
 }
 
-export default function Safes({ safes, transactions, onAddSafe, onTransfer }: SafesProps) {
+export default function Safes({ safes, transactions, currentUser, onAddSafe, onDeleteSafe, onTransfer }: SafesProps) {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [newSafe, setNewSafe] = useState({ name: '', balance: 0, isDefault: false });
@@ -42,6 +44,14 @@ export default function Safes({ safes, transactions, onAddSafe, onTransfer }: Sa
     onTransfer(transfer.fromId, transfer.toId, transfer.amount);
     setShowTransferModal(false);
     setTransfer({ fromId: '', toId: '', amount: 0 });
+  };
+
+  const handleDeleteSafe = (safe: Safe) => {
+    if (!confirm(`هل تريد حذف خزنة "${safe.name}"؟`)) return;
+    const result = onDeleteSafe(safe.id);
+    if (!result.ok) {
+      alert(result.error || 'تعذر حذف الخزنة');
+    }
   };
 
   const formatCurrency = (value: number) => {
@@ -88,7 +98,7 @@ export default function Safes({ safes, transactions, onAddSafe, onTransfer }: Sa
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-800 dark:text-white">الخزائن</h1>
-          <p className="text-gray-500 dark:text-gray-400">إدارة الخزائن والتحويلات</p>
+          <p className="text-gray-500 dark:text-gray-400">إدارة الخزائن والتحويلات — حذف الخزائن متاح لمدير النظام فقط</p>
         </div>
         <div className="flex gap-2">
           <button
@@ -140,6 +150,15 @@ export default function Safes({ safes, transactions, onAddSafe, onTransfer }: Sa
                   )}
                 </div>
               </div>
+              {currentUser?.role === 'admin' && !safe.isDefault && (
+                <button
+                  onClick={() => handleDeleteSafe(safe)}
+                  className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"
+                  title="حذف الخزنة"
+                >
+                  <Trash2 size={18} />
+                </button>
+              )}
             </div>
             <p className="text-2xl font-bold text-gray-800 dark:text-white">
               {formatCurrency(safe.balance)}
