@@ -26,8 +26,8 @@ npm run dist:win
 
 | الملف | الوصف |
 |---|---|
-| `MOBPOS-Setup-1.0.0.exe` | **برنامج تثبيت** كامل (سطح مكتب + قائمة ابدأ) — وزّعه على المحلات |
-| `MOBPOS-Portable-1.0.0.exe` | **نسخة محمولة** تشتغل بضغطة بدون تثبيت (من فلاشة مثلاً) |
+| `MOBPOS-Setup-1.0.1.exe` | **برنامج تثبيت** كامل (سطح مكتب + قائمة ابدأ) — وزّعه على المحلات |
+| `MOBPOS-Portable-1.0.1.exe` | **نسخة محمولة** تشتغل بضغطة بدون تثبيت (من فلاشة مثلاً) |
 | `latest.yml` | **ملف بيانات التحديث التلقائي** (يحتوي على رقم الإصدار والهاش) — **إلزامي لـ electron-updater** |
 
 لو عايز النسخة المحمولة فقط: `npm run dist:win:portable`
@@ -59,13 +59,40 @@ MOBPOS.exe --kiosk
 بدون ملف `latest.yml`، لن يتمكن التطبيق من قراءة بيانات الإصدار الجديد أو التحقق من التجزئة (Hash) وسيفشل التحديث التلقائي بصمت.
 
 ### خطوات إصدار ونشر تحديث جديد:
-1. ارفع رقم الإصدار في `package.json` (مثلاً من `1.0.0` إلى `1.0.1`).
+
+**الطريقة المؤتمتة (الموصى بها):**
+
+0. **مرة واحدة فقط:** فعّل ملف الـ workflow — محفوظ في `ci/release.yml` لأن توكن
+   GitHub في جلسات Arena ما لوش صلاحية `workflows` فمش قادر ينشئ ملفات تحت
+   `.github/workflows/`:
+   ```bash
+   npm run setup:ci                                  # بينسخه لـ .github/workflows/release.yml
+   git add .github/workflows/release.yml
+   git commit -m "ci: enable release workflow"
+   git push
+   ```
+1. ارفع رقم الإصدار في `package.json` (مثلاً `1.0.1`) وأضف قسم الإصدار في `CHANGELOG.md`.
+2. اعمل commit وارفع tag بنفس الرقم:
+   ```bash
+   git commit -am "release: v1.0.1"
+   git tag v1.0.1
+   git push origin main --tags
+   ```
+3. GitHub Actions (`.github/workflows/release.yml`) هيبني `Setup` + `Portable` + `latest.yml`
+   على `windows-latest` وينشرهم على **GitHub Release** باسم `v1.0.1` — ومحتوى Release Notes
+   بيتاخد تلقائياً من قسم الإصدار في `CHANGELOG.md`.
+4. سيكتشف التطبيق عند العملاء التحديث تلقائياً ويقوم بتحميله وتثبيته ✅.
+
+> الـ workflow بيرفض البناء لو رقم الـ tag مختلف عن `package.json`، وبيقف بخطأ
+> لو `latest.yml` ما اتولّدش — عشان التحديث التلقائي ما يبوظش بصمت.
+
+**الطريقة اليدوية (على جهاز ويندوز):**
+1. ارفع رقم الإصدار في `package.json`.
 2. ابنِ الحزمة: `npm run dist:win`.
 3. أنشئ **GitHub Release** جديد على `msharaf221/MOBPOS-V2` بنفس رقم الإصدار (Tag: `v1.0.1`).
 4. **ارفع الملفين معاً كـ Release Assets:**
    - `MOBPOS-Setup-1.0.1.exe`
    - `latest.yml` *(إلزامي)*
-5. سيكتشف التطبيق عند العملاء التحديث تلقائياً ويقوم بتحميله وتثبيته ✅.
 
 ## ☁️ ملاحظة Google Drive داخل الـ EXE
 

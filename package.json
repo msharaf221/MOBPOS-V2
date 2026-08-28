@@ -2,7 +2,7 @@
   "name": "mobpos",
   "productName": "MOBPOS",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "نظام إدارة محلات الموبايلات — MOBPOS Management System",
   "author": "MOBPOS",
   "type": "module",
@@ -10,8 +10,11 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test src/utils/alerts.test.ts",
     "preview": "vite preview",
     "electron:dev": "node scripts/electron-dev.cjs",
+    "setup:ci": "node scripts/install-workflow.cjs",
     "dist:win": "npm run build && electron-builder --win --x64",
     "dist:win:publish": "npm run build && electron-builder --win --x64 --publish always",
     "dist:win:portable": "npm run build && electron-builder --win portable --x64"

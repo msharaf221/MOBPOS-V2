@@ -1490,7 +1490,7 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                 </div>
                 <h2 className="text-2xl font-bold text-gray-800 dark:text-white">MOBPOS</h2>
                 <p className="text-gray-500 dark:text-gray-400 mt-1">نظام إدارة محل الموبايلات المتكامل</p>
-                <p className="text-sm text-blue-600 dark:text-blue-400 font-mono mt-2">الإصدار 1.0.0</p>
+                <p className="text-sm text-blue-600 dark:text-blue-400 font-mono mt-2">الإصدار {__APP_VERSION__}</p>
               </div>
 
               <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
