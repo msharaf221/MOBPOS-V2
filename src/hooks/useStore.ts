@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { useIndexedDB, useIndexedDBSetting, indexedDBUtils } from './useIndexedDB';
 import { v4 as uuidv4 } from 'uuid';
 import { hashPasswordForStorage, verifyLoginPassword, needsRehash } from '../utils/passwords';
@@ -14,6 +14,7 @@ import {
   initialTransactions, initialSuppliers, initialStockWastes, initialInventoryAudits,
   initialSideAccountEntries, initialNotifications
 } from '../data/initialData';
+import { buildAutoNotifications, mergeAutoNotifications } from '../utils/alerts';
 
 export const defaultAppSettings: AppSettings = {
 
@@ -1007,13 +1008,47 @@ export function useStore() {
     ]);
   }, [currentUser, setSafes, setTransactions]);
 
-  // Notification functions
+  // ── Notifications engine ────────────────────────────────────────────────
+  // Alerts derived from the shop's real data (low stock, expiring warranties,
+  // delayed repairs, outstanding debts). Ids are deterministic, so the merge
+  // below can diff the stored list against the live one: new alerts appear,
+  // alerts whose condition was fixed disappear on their own, and the
+  // read/dismissed state of the survivors is preserved.
+  const autoAlerts = useMemo(
+    () => buildAutoNotifications({ inventory, imeiUnits, maintenance, customers }),
+    [inventory, imeiUnits, maintenance, customers]
+  );
+
+  useEffect(() => {
+    if (notificationsLoading) return;
+    // `mergeAutoNotifications` returns the very same array reference when
+    // nothing actually changed, which keeps this effect from looping.
+    const next = mergeAutoNotifications(notifications, autoAlerts);
+    if (next !== notifications) setNotifications(next);
+  }, [autoAlerts, notifications, notificationsLoading, setNotifications]);
+
   const markNotificationAsRead = useCallback((id: string) => {
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
   }, [setNotifications]);
 
   const markAllNotificationsAsRead = useCallback(() => {
     setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+  }, [setNotifications]);
+
+  const dismissNotification = useCallback((id: string) => {
+    setNotifications(prev => prev.flatMap(n => {
+      if (n.id !== id) return [n];
+      // Auto alerts are kept but flagged dismissed, so the engine will not
+      // resurrect them while their condition still holds. Anything else
+      // (imported/legacy rows) is removed for good.
+      return n.source === 'auto' ? [{ ...n, isRead: true, dismissed: true }] : [];
+    }));
+  }, [setNotifications]);
+
+  const clearAllNotifications = useCallback(() => {
+    setNotifications(prev => prev.flatMap(n =>
+      n.source === 'auto' ? [{ ...n, isRead: true, dismissed: true }] : []
+    ));
   }, [setNotifications]);
 
   // Statistics
@@ -1232,6 +1267,8 @@ export function useStore() {
     // Notifications
     markNotificationAsRead,
     markAllNotificationsAsRead,
+    dismissNotification,
+    clearAllNotifications,
 
     // Stats
     getStatistics,

@@ -493,6 +493,9 @@ export default function App() {
         onToggleDarkMode={() => store.setIsDarkMode(!store.isDarkMode)}
         notifications={store.notifications}
         onMarkNotificationRead={store.markNotificationAsRead}
+        onMarkAllNotificationsRead={store.markAllNotificationsAsRead}
+        onDismissNotification={store.dismissNotification}
+        onClearAllNotifications={store.clearAllNotifications}
         license={license}
         onDeactivateLicense={handleDeactivateLicense}
         shopName={store.appSettings.shopName || license?.shopName || 'MOBPOS'}

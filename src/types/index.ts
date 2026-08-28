@@ -262,13 +262,37 @@ export interface Purchase {
 }
 
 // Notification Types
+export type NotificationType =
+  | 'low_stock'
+  | 'warranty_expiring'
+  | 'maintenance_delayed'
+  | 'customer_debt'
+  | 'info';
+
 export interface Notification {
   id: string;
-  type: 'low_stock' | 'warranty_expiring' | 'maintenance_delayed' | 'info';
+  type: NotificationType;
   title: string;
   message: string;
   isRead: boolean;
   createdAt: string;
+  /**
+   * Where the notification came from:
+   *  - 'auto'   → generated live from shop data by `src/utils/alerts.ts`
+   *               (removed automatically once its condition no longer holds).
+   *  - 'system' → one-off event pushed by the app itself.
+   *  - undefined → legacy row imported from an old backup (hidden by the
+   *                one-time cleanup migration in `useStore`).
+   */
+  source?: 'auto' | 'system';
+  /** Page id to open when the notification is clicked (e.g. 'inventory'). */
+  link?: string;
+  /**
+   * Hidden from the list and from the unread badge. Kept in the store (instead
+   * of deleted) so the alerts engine never resurrects an alert the user has
+   * already dismissed while its condition is still true.
+   */
+  dismissed?: boolean;
 }
 
 // App State Types

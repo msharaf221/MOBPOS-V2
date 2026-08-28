@@ -1,5 +1,8 @@
 /// <reference types="vite/client" />
 
+/** App version injected from package.json by vite.config.ts (`define`). */
+declare const __APP_VERSION__: string;
+
 // واردات الملفات الخام كروابط (vite-plugin-singlefile يحوّلها base64 data-URIs)
 declare module '*.woff2?url' {
   const src: string;
