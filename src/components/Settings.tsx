@@ -7,6 +7,9 @@ import {
   History, Trash2, Loader2, KeyRound, XCircle, Crown, ImagePlus, X
 } from 'lucide-react';
 import { User, AppSettings } from '../types';
+import { ActiveLicense } from '../license/types';
+import LicenseManager from './LicenseManager';
+import UpdateChecker from './UpdateChecker';
 
 // Curated accent color presets shown as clickable swatches in the
 // "Branding" section of the appearance tab.
@@ -45,12 +48,15 @@ interface SettingsProps {
   onSaveSettings: (settings: AppSettings) => void;
   onChangePassword: (userId: string, oldPassword: string, newPassword: string) => Promise<{ ok: boolean; error?: string }>;
   onOpenMaster?: () => void;
+  license: ActiveLicense | null;
+  onLicenseUpdated: (license: ActiveLicense) => void;
+  onLicenseDeactivated: () => void;
 }
 
-export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, onResetData, settings, onSaveSettings, onChangePassword, onOpenMaster }: SettingsProps) {
+export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, onResetData, settings, onSaveSettings, onChangePassword, onOpenMaster, license, onLicenseUpdated, onLicenseDeactivated }: SettingsProps) {
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [activeTab, setActiveTab] = useState<'general' | 'appearance' | 'security' | 'data' | 'about'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'license' | 'appearance' | 'security' | 'data' | 'about'>('general');
   const [shopName, setShopName] = useState(settings.shopName);
   const [currency, setCurrency] = useState(localStorage.getItem("app_currency") || "EGP");
   const [shopPhone, setShopPhone] = useState(settings.shopPhone);
@@ -394,6 +400,7 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
 
   const tabs = [
     { id: 'general' as const, label: 'عام', icon: Store },
+    { id: 'license' as const, label: 'الترخيص والتحديثات', icon: KeyRound },
     { id: 'appearance' as const, label: 'المظهر', icon: Palette },
     { id: 'security' as const, label: 'الأمان', icon: Lock },
     { id: 'data' as const, label: 'البيانات', icon: Database },
@@ -549,6 +556,18 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
               >
                 💾 حفظ الإعدادات
               </button>
+            </div>
+          )}
+
+          {/* ===== TAB: License & Updates ===== */}
+          {activeTab === 'license' && (
+            <div className="space-y-6">
+              <LicenseManager
+                license={license}
+                onLicenseUpdated={onLicenseUpdated}
+                onDeactivate={onLicenseDeactivated}
+              />
+              <UpdateChecker />
             </div>
           )}
 
