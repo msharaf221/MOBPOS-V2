@@ -17,7 +17,7 @@ import {
 
 export const defaultAppSettings: AppSettings = {
 
-  shopName: 'موبايل شوب',
+  shopName: 'MOBPOS',
   shopPhone: '01000000000',
   shopAddress: 'القاهرة - مصر',
   receiptFooter: 'شكراً لتعاملكم معنا 💙',
@@ -60,7 +60,8 @@ export function useStore() {
     userLoading || darkModeLoading || appSettingsLoading;
 
   // Auth functions
-  // كلمات السر مخزنة مجزأة (SHA-256) — مع إجبار تغيير كلمة المرور الافتراضية
+  // كلمات السر مخزنة مجزأة (PBKDF2-HMAC-SHA-256 بملح فريد) مع توافق رجعي
+  // للهاشات القديمة (SHA-256/نص عادي) وإجبار تغيير كلمة المرور الافتراضية.
   const login = useCallback(async (username: string, password: string): Promise<User | null> => {
     const user = users.find(u => u.username === username);
     if (!user) return null;
@@ -765,14 +766,36 @@ export function useStore() {
 
   const deleteSideAccountEntry = useCallback((id: string) => {
     const entry = sideAccountEntries.find(e => e.id === id);
-    if (entry?.safeId && entry.safeDelta) {
-      setSafes(prev => prev.map(s => s.id === entry.safeId ? { ...s, balance: s.balance - entry.safeDelta } : s));
+    if (!entry) return;
+
+    // Reverse every cash effect this entry ever had:
+    //  - the original cash movement (capital / side_account transaction)
+    //  - settlement transactions created for receivable/payable entries
+    // The original transaction uses entry.transactionId, while each settlement
+    // uses referenceId = entry.id, so both are matched here.
+    const relatedTransactions = transactions.filter(t =>
+      t.id === entry.transactionId || t.referenceId === entry.id
+    );
+    const deltasBySafe: Record<string, number> = {};
+    relatedTransactions.forEach(t => {
+      if (t.safeId) deltasBySafe[t.safeId] = (deltasBySafe[t.safeId] || 0) + t.amount;
+    });
+
+    if (Object.keys(deltasBySafe).length > 0) {
+      setSafes(prev => prev.map(s =>
+        deltasBySafe[s.id]
+          ? { ...s, balance: Math.round((s.balance - deltasBySafe[s.id]) * 100) / 100 }
+          : s
+      ));
     }
-    if (entry?.transactionId) {
-      setTransactions(prev => prev.filter(t => t.id !== entry.transactionId));
+
+    if (relatedTransactions.length > 0) {
+      const idsToRemove = new Set(relatedTransactions.map(t => t.id));
+      setTransactions(prev => prev.filter(t => !idsToRemove.has(t.id)));
     }
+
     setSideAccountEntries(prev => prev.filter(e => e.id !== id));
-  }, [sideAccountEntries, setSafes, setSideAccountEntries, setTransactions]);
+  }, [sideAccountEntries, transactions, setSafes, setSideAccountEntries, setTransactions]);
 
   // Maintenance functions
   const generateTicketNumber = useCallback(() => {
@@ -889,6 +912,28 @@ export function useStore() {
   }, [setSafes]);
 
   // Transaction functions (for manual income/expense)
+  const deleteSafe = useCallback((id: string): { ok: boolean; error?: string } => {
+    if (currentUser?.role !== 'admin') {
+      return { ok: false, error: 'حذف الخزانة متاح لمدير النظام فقط' };
+    }
+
+    const safe = safes.find(s => s.id === id);
+    if (!safe) return { ok: false, error: 'الخزنة غير موجودة' };
+    if (safe.isDefault) return { ok: false, error: 'لا يمكن حذف الخزنة الافتراضية' };
+    if (safes.length <= 1) return { ok: false, error: 'لا يمكن حذف آخر خزنة في النظام' };
+    if ((safe.balance || 0) !== 0) {
+      return { ok: false, error: 'رصيد الخزنة غير صفري — حوّل الرصيد إلى خزنة أخرى أو صفّره أولاً' };
+    }
+    const hasHistory = transactions.some(t => t.safeId === id)
+      || sideAccountEntries.some(e => e.safeId === id);
+    if (hasHistory) {
+      return { ok: false, error: 'توجد حركات أو حسابات جانبية مرتبطة بهذه الخزنة — لا يمكن حذفها للحفاظ على السجلات المالية' };
+    }
+
+    setSafes(prev => prev.filter(s => s.id !== id));
+    return { ok: true };
+  }, [currentUser, safes, transactions, sideAccountEntries, setSafes]);
+
   const addTransaction = useCallback((
     type: 'income' | 'expense',
     amount: number,
@@ -1005,7 +1050,22 @@ export function useStore() {
     const pendingMaintenance = maintenance.filter(m => m.status === 'received' || m.status === 'in_progress').length;
     const completedMaintenance = maintenance.filter(m => m.status === 'delivered').length;
 
-    const lowStockItems = inventory.filter(i => !i.hasIMEI && i.quantity <= i.minQuantity);
+    // Low stock uses the same "real quantity" rule as the Inventory page: for
+    // device templates the stock is the number of available IMEI units, not the
+    // template's `quantity` field (which is 0 for IMEI products).
+    const lowStockItems = inventory
+      .filter(i => {
+        const realQuantity = i.hasIMEI
+          ? imeiUnits.filter(u => u.inventoryId === i.id && u.status === 'available').length
+          : i.quantity;
+        return realQuantity <= i.minQuantity;
+      })
+      .map(i => {
+        const realQuantity = i.hasIMEI
+          ? imeiUnits.filter(u => u.inventoryId === i.id && u.status === 'available').length
+          : i.quantity;
+        return { ...i, realQuantity };
+      });
 
     const expiringWarranties = imeiUnits.filter(u => {
       if (!u.warrantyEndDate || u.status !== 'sold') return false;
@@ -1162,6 +1222,7 @@ export function useStore() {
 
     // Safes
     addSafe,
+    deleteSafe,
     transferBetweenSafes,
 
     // Transactions

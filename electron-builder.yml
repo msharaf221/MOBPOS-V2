@@ -48,7 +48,7 @@ portable:
 publish:
   provider: github
   owner: msharaf221
-  repo: MOBPOS
+  repo: MOBPOS-V2
   releaseType: release
 
 # ملاحظة: بيانات النظام (IndexedDB) تُحفظ في:

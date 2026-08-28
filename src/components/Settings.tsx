@@ -1488,7 +1488,7 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                 <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl mx-auto flex items-center justify-center text-4xl mb-4 shadow-lg shadow-blue-500/30">
                   📱
                 </div>
-                <h2 className="text-2xl font-bold text-gray-800 dark:text-white">موبايل شوب</h2>
+                <h2 className="text-2xl font-bold text-gray-800 dark:text-white">MOBPOS</h2>
                 <p className="text-gray-500 dark:text-gray-400 mt-1">نظام إدارة محل الموبايلات المتكامل</p>
                 <p className="text-sm text-blue-600 dark:text-blue-400 font-mono mt-2">الإصدار 1.0.0</p>
               </div>
@@ -1528,7 +1528,7 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                     { label: 'التصميم', value: 'Tailwind CSS v4' },
                     { label: 'الرسوم البيانية', value: 'Recharts' },
                     { label: 'الأيقونات', value: 'Lucide React' },
-                    { label: 'أداة البناء', value: 'Vite 5' },
+                    { label: 'أداة البناء', value: 'Vite 8' },
                     { label: 'التخزين', value: 'IndexedDB (متصفح)' },
                     { label: 'النسخ الاحتياطي', value: 'يومي تلقائي + Google Drive' },
                   ].map(item => (

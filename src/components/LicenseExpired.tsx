@@ -46,7 +46,7 @@ export default function LicenseExpired({ expiredLicense, onRenewed, onDeactivate
       const data = await indexedDBUtils.exportAllData();
       
       const backup = {
-        app: 'Mobile Shop Pro',
+        app: 'MOBPOS',
         version: '1.0',
         exportedAt: new Date().toISOString(),
         shopName: expiredLicense.shopName,
@@ -58,7 +58,7 @@ export default function LicenseExpired({ expiredLicense, onRenewed, onDeactivate
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `mobileshop-backup-${expiredLicense.shopName}-${new Date().toISOString().split('T')[0]}.json`;
+      a.download = `mobpos-backup-${expiredLicense.shopName}-${new Date().toISOString().split('T')[0]}.json`;
       a.click();
       URL.revokeObjectURL(url);
       setBackupDone(true);

@@ -3,7 +3,7 @@
   "productName": "MOBPOS",
   "private": true,
   "version": "1.0.0",
-  "description": "نظام إدارة محلات الموبايلات — Mobile Shop Management System",
+  "description": "نظام إدارة محلات الموبايلات — MOBPOS Management System",
   "author": "MOBPOS",
   "type": "module",
   "main": "electron/main.cjs",

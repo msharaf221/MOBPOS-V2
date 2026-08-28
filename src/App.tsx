@@ -240,7 +240,7 @@ export default function App() {
           <div className="w-20 h-20 bg-white/10 backdrop-blur rounded-2xl mx-auto mb-4 flex items-center justify-center animate-pulse">
             <span className="text-4xl">📱</span>
           </div>
-          <h1 className="text-2xl font-bold text-white mb-2">{store.appSettings.shopName || license?.shopName || 'موبايل شوب'}</h1>
+          <h1 className="text-2xl font-bold text-white mb-2">{store.appSettings.shopName || license?.shopName || 'MOBPOS'}</h1>
           <p className="text-blue-200 mb-4">جاري تحميل البيانات...</p>
           <div className="w-48 h-2 bg-white/20 rounded-full mx-auto overflow-hidden">
             <div className="h-full bg-white rounded-full animate-pulse" style={{ width: '60%' }}></div>
@@ -262,7 +262,7 @@ export default function App() {
         currentUser={store.currentUser}
         onChangePassword={store.changePassword}
         onLogout={store.logout}
-        shopName={store.appSettings.shopName || license?.shopName || 'موبايل شوب'}
+        shopName={store.appSettings.shopName || license?.shopName || 'MOBPOS'}
       />
     );
   }
@@ -309,7 +309,7 @@ export default function App() {
             customers={store.customers}
             categories={store.categories}
             safes={store.safes}
-            shopName={store.appSettings.shopName || license?.shopName || 'موبايل شوب'}
+            shopName={store.appSettings.shopName || license?.shopName || 'MOBPOS'}
             receiptFooter={store.appSettings.receiptFooter}
             onCreateSale={store.createSale}
             onAddCustomer={store.addCustomer}
@@ -360,6 +360,7 @@ export default function App() {
           <MaintenanceBoard
             maintenance={store.maintenance}
             inventory={store.inventory}
+            categories={store.categories}
             safes={store.safes}
             customers={store.customers}
             onCreateMaintenance={store.createMaintenance}
@@ -393,7 +394,7 @@ export default function App() {
             inventory={store.inventory}
             imeiUnits={store.imeiUnits}
             users={store.users}
-            shopName={store.appSettings.shopName || license?.shopName || 'موبايل شوب'}
+            shopName={store.appSettings.shopName || license?.shopName || 'MOBPOS'}
             receiptFooter={store.appSettings.receiptFooter}
             onProcessReturn={store.processSaleReturn}
           />
@@ -403,7 +404,9 @@ export default function App() {
           <Safes
             safes={store.safes}
             transactions={store.transactions}
+            currentUser={store.currentUser}
             onAddSafe={store.addSafe}
+            onDeleteSafe={store.deleteSafe}
             onTransfer={store.transferBetweenSafes}
           />
         );
@@ -416,7 +419,7 @@ export default function App() {
             maintenance={store.maintenance}
             saleReturns={store.saleReturns}
             stockWastes={store.stockWastes}
-            shopName={store.appSettings.shopName || license?.shopName || 'موبايل شوب'}
+            shopName={store.appSettings.shopName || license?.shopName || 'MOBPOS'}
             onAddTransaction={store.addTransaction}
             onDeleteTransaction={store.deleteTransaction}
             onRecordWalletTransaction={store.recordWalletTransaction}
@@ -492,7 +495,7 @@ export default function App() {
         onMarkNotificationRead={store.markNotificationAsRead}
         license={license}
         onDeactivateLicense={handleDeactivateLicense}
-        shopName={store.appSettings.shopName || license?.shopName || 'موبايل شوب'}
+        shopName={store.appSettings.shopName || license?.shopName || 'MOBPOS'}
       >
         {renderPage()}
       </Layout>

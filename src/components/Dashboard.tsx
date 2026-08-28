@@ -23,7 +23,7 @@ interface DashboardProps {
     soldIMEI: number;
     pendingMaintenance: number;
     completedMaintenance: number;
-    lowStockItems: InventoryItem[];
+    lowStockItems: Array<InventoryItem & { realQuantity: number }>;
     expiringWarranties: IMEIUnit[];
     totalCustomers: number;
   };
@@ -309,7 +309,7 @@ formatter={(value) => formatCurrency(Number(value) || 0)}
                     <p className="text-sm text-gray-500 dark:text-gray-400">الحد الأدنى: {item.minQuantity}</p>
                   </div>
                   <span className="px-3 py-1 bg-yellow-500 text-white text-sm font-bold rounded-full">
-                    {item.quantity}
+                    {typeof item.realQuantity === 'number' ? item.realQuantity : item.quantity}
                   </span>
                 </div>
               ))

@@ -3,12 +3,13 @@ import {
   Plus, Clock, Wrench, CheckCircle, Truck, X, Phone,
   Smartphone, DollarSign, Package, Printer
 } from 'lucide-react';
-import { Maintenance, MaintenancePart, InventoryItem, Safe, Customer } from '../types';
+import { Maintenance, MaintenancePart, InventoryItem, Safe, Customer, Category } from '../types';
 import { printReceipt } from '../utils/print';
 
 interface MaintenanceBoardProps {
   maintenance: Maintenance[];
   inventory: InventoryItem[];
+  categories: Category[];
   safes: Safe[];
   customers: Customer[];
   onCreateMaintenance: (data: Omit<Maintenance, 'id' | 'ticketNumber' | 'status' | 'finalCost' | 'collectedAmount' | 'parts' | 'additionalExpenses' | 'profit' | 'completedAt' | 'deliveredAt'>) => void;
@@ -30,6 +31,7 @@ const statusConfig: Record<MaintenanceStatus, { label: string; color: string; bg
 export default function MaintenanceBoard({
   maintenance,
   inventory,
+  categories,
   safes,
   onCreateMaintenance,
   onUpdateMaintenance,
@@ -75,12 +77,11 @@ export default function MaintenanceBoard({
     [maintenance, selectedMaintenanceId]
   );
 
-  // Get spare parts from inventory
-  const spareParts = inventory.filter(i => {
-    const category = i.categoryId;
-    // Filter for spare parts categories (cat8-cat12)
-    return ['cat8', 'cat9', 'cat10', 'cat11', 'cat12'].includes(category);
-  });
+  // Get spare parts from inventory based on the category type so custom
+  // spare-part categories are supported too (not only the default cat ids).
+  const spareParts = inventory.filter(i =>
+    categories.find(c => c.id === i.categoryId)?.type === 'spare_part'
+  );
 
   // Group maintenance by status
   const groupedMaintenance = {
@@ -960,7 +961,7 @@ export default function MaintenanceBoard({
           >
             <div className="p-6" id="maintenance-receipt">
               <div className="text-center mb-6">
-                <h2 className="text-2xl font-bold">📱 موبايل شوب</h2>
+                <h2 className="text-2xl font-bold">MOBPOS</h2>
                 <p className="text-gray-500">إيصال صيانة</p>
               </div>
 

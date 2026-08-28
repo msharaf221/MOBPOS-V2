@@ -262,6 +262,7 @@ export default function IMEIManager({
             <option value="sold">مباع</option>
             <option value="maintenance">صيانة</option>
             <option value="returned">مرتجع</option>
+            <option value="wasted">تالف</option>
           </select>
 
           {/* Product Filter */}

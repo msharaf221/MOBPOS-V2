@@ -13,7 +13,7 @@ export default function ForcePasswordChange({
   currentUser,
   onChangePassword,
   onLogout,
-  shopName = 'موبايل شوب'
+  shopName = 'MOBPOS'
 }: ForcePasswordChangeProps) {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
