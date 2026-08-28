@@ -26,3 +26,6 @@ Thumbs.db
 # Tool caches
 .cache/
 .vite/
+
+# Activation server runtime data (contains license bindings / machine tokens)
+activation-server/data/

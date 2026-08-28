@@ -12,9 +12,9 @@
 <p align="center">
   <img src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=white" />
   <img src="https://img.shields.io/badge/TypeScript-5.9-3178C6?style=flat-square&logo=typescript&logoColor=white" />
-  <img src="https://img.shields.io/badge/Tailwind_CSS-4.1-38B2AC?style=flat-square&logo=tailwind-css&logoColor=white" />
-  <img src="https://img.shields.io/badge/Vite-5-646CFF?style=flat-square&logo=vite&logoColor=white" />
-  <img src="https://img.shields.io/badge/Electron-33-47848F?style=flat-square&logo=electron&logoColor=white" />
+  <img src="https://img.shields.io/badge/Tailwind_CSS-4.3-38B2AC?style=flat-square&logo=tailwind-css&logoColor=white" />
+  <img src="https://img.shields.io/badge/Vite-8-646CFF?style=flat-square&logo=vite&logoColor=white" />
+  <img src="https://img.shields.io/badge/Electron-44-47848F?style=flat-square&logo=electron&logoColor=white" />
   <img src="https://img.shields.io/badge/IndexedDB-Local_Storage-FF6600?style=flat-square" />
   <img src="https://img.shields.io/badge/License-Proprietary-green?style=flat-square" />
 </p>
@@ -164,7 +164,7 @@
 - **الموظف:** يرى لوحة التحكم، نقطة البيع، الصيانة، والعملاء فقط
 - **المشرف:** يرى كل شيء ما عدا الموظفين والإعدادات
 - **مدير النظام:** صلاحيات كاملة على كل النظام
-- **كلمات مرور مشفرة** بـ SHA-256 مع ترقية تلقائية للحسابات القديمة
+- **كلمات مرور مشفرة** (PBKDF2-HMAC-SHA-256 بملح عشوائي لكل مستخدم) مع ترقية تلقائية للحسابات القديمة
 - **تغيير كلمة المرور** مع التحقق من القديمة
 - عرض **جدول الصلاحيات** لكل دور
 
@@ -268,7 +268,7 @@ npm run dist:win:portable # Portable فقط
 
 ## 🛡️ الأمان
 
-- 🔒 **كلمات مرور مشفرة** بـ SHA-256 — لا تُخزن كنص عادي أبداً، مع إجبار تغيير كلمة المرور الافتراضية عند أول دخول
+- 🔒 **كلمات مرور مجزأة بأمان** — PBKDF2-HMAC-SHA-256 بملح فريد لكل مستخدم، لا تُخزن كنص عادي أبداً، مع إجبار تغيير كلمة المرور الافتراضية عند أول دخول
 - 🔑 **تغيير كلمة المرور** مع التحقق من القديمة
 - 🖥️ **بصمة الجهاز** للترخيص — كل تفعيل على جهاز واحد
 - 📝 **مفاتيح ترخيص موقعة** بتشفير ECDSA P-256
@@ -284,13 +284,13 @@ npm run dist:win:portable # Portable فقط
 |---|---|
 | **React 19** | إطار العمل الأساسي للواجهات |
 | **TypeScript 5.9** | لغة البرمجة الأساسية |
-| **Vite 5** | بناء وتشغيل المشروع |
+| **Vite 8** | بناء وتشغيل المشروع |
 | **Tailwind CSS 4** | تصميم الواجهات |
 | **Lucide React** | أيقونات الواجهة (200+ أيقونة) |
-| **Zustand** (نمط مخصص) | إدارة حالة التطبيق |
-| **IndexedDB (idb)** | قاعدة بيانات محلية في المتصفح |
+| **Custom Store (useStore + Context)** | إدارة حالة التطبيق (نمط Zustand مخصص بدون تبعيات خارجية) |
+| **IndexedDB** | قاعدة بيانات محلية في المتصفح (عملاء مخصصون بدون `idb`) |
 | **Recharts** | الرسوم البيانية التفاعلية |
-| **Electron 33** | تحويل التطبيق لبرنامج ويندوز |
+| **Electron 44** | تحويل التطبيق لبرنامج ويندوز |
 | **electron-builder** | بناء ملف EXE + نسخة محمولة |
 | **electron-updater** | التحديث التلقائي |
 | **Supabase** | مزامنة البيانات بين الأجهزة (اختياري) |
@@ -311,8 +311,8 @@ npm run dist:win:portable # Portable فقط
 
 ```bash
 # 1. استنساخ المشروع
-git clone https://github.com/msharaf221/MOBPOS.git
-cd MOBPOS
+git clone https://github.com/msharaf221/MOBPOS-V2.git
+cd MOBPOS-V2
 
 # 2. تثبيت الحزم
 npm install
@@ -462,7 +462,7 @@ MOBPOS/
 
 ## 📄 الترخيص
 
-هذا المشروع مرخص تحت رخصة **MIT** — للاستخدام التجاري يتطلب تفعيل ترخيص.
+هذا المشروع **مملوك (Proprietary)** — غير مرخص تحت MIT. الكود متاح للاطلاع، لكن الاستخدام التجاري يتطلب تفعيل ترخيص رسمي من خلال نظام الترخيص المدمج.
 
 ---
 
@@ -470,8 +470,8 @@ MOBPOS/
 
 | القناة | الرابط |
 |---|---|
-| **GitHub** | [msharaf221/MOBPOS](https://github.com/msharaf221/MOBPOS) |
-| **Issues** | [افتح تذكرة دعم](https://github.com/msharaf221/MOBPOS/issues) |
+| **GitHub** | [msharaf221/MOBPOS-V2](https://github.com/msharaf221/MOBPOS-V2) |
+| **Issues** | [افتح تذكرة دعم](https://github.com/msharaf221/MOBPOS-V2/issues) |
 
 ---
 

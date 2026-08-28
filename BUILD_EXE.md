@@ -12,8 +12,8 @@
 
 ```bash
 # 1) انسخ المشروع على جهازك (أو اسحبه من الجيتهاب)
-git clone https://github.com/msharaf221/MOBPOS.git
-cd MOBPOS
+git clone https://github.com/msharaf221/MOBPOS-V2.git
+cd MOBPOS-V2
 
 # 2) ثبّت الحزم (هتحمّل إلكترون تلقائياً ~100MB)
 npm install
@@ -61,7 +61,7 @@ MOBPOS.exe --kiosk
 ### خطوات إصدار ونشر تحديث جديد:
 1. ارفع رقم الإصدار في `package.json` (مثلاً من `1.0.0` إلى `1.0.1`).
 2. ابنِ الحزمة: `npm run dist:win`.
-3. أنشئ **GitHub Release** جديد على `msharaf221/MOBPOS` بنفس رقم الإصدار (Tag: `v1.0.1`).
+3. أنشئ **GitHub Release** جديد على `msharaf221/MOBPOS-V2` بنفس رقم الإصدار (Tag: `v1.0.1`).
 4. **ارفع الملفين معاً كـ Release Assets:**
    - `MOBPOS-Setup-1.0.1.exe`
    - `latest.yml` *(إلزامي)*

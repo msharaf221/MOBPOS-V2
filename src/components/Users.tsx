@@ -88,7 +88,7 @@ export default function Users({ users, currentUser, onUpdate }: UsersProps) {
       }
     }
 
-    // كلمات السر تُحفظ مجزأة (SHA-256) — لا نص عادي في قاعدة البيانات
+    // كلمات السر تُحفظ مجزأة (PBKDF2-HMAC-SHA-256 بملح فريد) — لا نص عادي في قاعدة البيانات
     const hashed = formData.password ? await hashPasswordForStorage(formData.password) : '';
 
     if (editingUser) {

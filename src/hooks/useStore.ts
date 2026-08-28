@@ -60,7 +60,8 @@ export function useStore() {
     userLoading || darkModeLoading || appSettingsLoading;
 
   // Auth functions
-  // كلمات السر مخزنة مجزأة (SHA-256) — مع إجبار تغيير كلمة المرور الافتراضية
+  // كلمات السر مخزنة مجزأة (PBKDF2-HMAC-SHA-256 بملح فريد) مع توافق رجعي
+  // للهاشات القديمة (SHA-256/نص عادي) وإجبار تغيير كلمة المرور الافتراضية.
   const login = useCallback(async (username: string, password: string): Promise<User | null> => {
     const user = users.find(u => u.username === username);
     if (!user) return null;
