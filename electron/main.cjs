@@ -388,17 +388,32 @@ function setupIpc() {
     return mainWindow.isKiosk();
   });
 
-  // فحص التحديثات يدوياً
+  // فحص التحديثات يدوياً — يستخدم واجهة electron-updater v6:
+  //   UpdateCheckResult = { isUpdateAvailable, updateInfo, versionInfo }
+  // الإصدار القديم كان بيشيك `result.updateInfo` وهو موجود دايماً حتى لو مفيش تحديث.
   ipcMain.handle('mobpos:check-updates', async () => {
     try {
-      if (!app.isPackaged) return { ok: false, dev: true };
+      if (!app.isPackaged) return { ok: true, dev: true, currentVersion: app.getVersion() };
       const { autoUpdater } = require('electron-updater');
       const result = await autoUpdater.checkForUpdates();
-      return { ok: true, updateAvailable: !!(result && result.updateInfo) };
+      const currentVersion = app.getVersion();
+      if (!result) {
+        return { ok: true, updateAvailable: false, currentVersion };
+      }
+      return {
+        ok: true,
+        updateAvailable: !!result.isUpdateAvailable,
+        currentVersion,
+        latestVersion: result.updateInfo?.version,
+        releaseNotes: result.updateInfo?.releaseNotes ?? null,
+      };
     } catch {
       return { ok: false };
     }
   });
+
+  // رقم الإصدار الحالي للتطبيق — يظهر في كارت «تحديثات التطبيق».
+  ipcMain.handle('mobpos:app-version', async () => app.getVersion());
 
   // معرف نظام تشغيل ثابت ومجزأ، يُستخدم كبصمة جهاز أكثر ثباتاً داخل Electron.
   ipcMain.handle('mobpos:get-stable-machine-id', async () => readStableMachineId());

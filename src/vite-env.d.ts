@@ -17,11 +17,21 @@ declare module '*.png?url' {
   export default src;
 }
 
+interface MobposUpdateCheckResponse {
+  ok: boolean;
+  dev?: boolean;
+  updateAvailable?: boolean;
+  currentVersion?: string;
+  latestVersion?: string;
+  releaseNotes?: string | Array<{ version?: string; note?: string; title?: string }> | null;
+}
+
 interface MobposBridge {
   isDesktop?: boolean;
   printSilent?: () => Promise<boolean>;
   toggleKiosk?: () => Promise<boolean>;
-  checkUpdates?: () => Promise<{ ok: boolean; dev?: boolean; updateAvailable?: boolean }>;
+  checkUpdates?: () => Promise<MobposUpdateCheckResponse>;
+  getAppVersion?: () => Promise<string>;
   printHtml?: (html: string, opts?: { silent?: boolean }) => Promise<boolean>;
   savePdf?: (html: string, fileName: string) => Promise<{ ok: boolean; canceled?: boolean; path?: string; error?: string }>;
   windowControl?: (action: 'minimize' | 'maximize-toggle' | 'close') => Promise<void>;

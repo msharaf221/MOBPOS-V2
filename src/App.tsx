@@ -467,6 +467,13 @@ export default function App() {
             onSaveSettings={store.setAppSettings}
             onChangePassword={store.changePassword}
             onOpenMaster={() => setMasterOverlay(true)}
+            license={license}
+            onLicenseUpdated={(updated) => setLicense(updated)}
+            onLicenseDeactivated={() => {
+              clearLicense();
+              setLicense(null);
+              setScreen('license');
+            }}
           />
         );
       default:
