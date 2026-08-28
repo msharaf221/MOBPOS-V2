@@ -670,6 +670,12 @@ export default function POS({
       return;
     }
 
+    if (paymentMethod === 'cash' && cashReceived !== '' && Number(cashReceived) < total) {
+      posSound.playError();
+      showToast(`المستلم من العميل أقل من المطلوب (${formatCurrency(total)})`, 'error');
+      return;
+    }
+
     const saleItems: Omit<SaleItem, 'id'>[] = cart.map(item => ({
       inventoryId: item.inventoryId,
       imeiUnitId: item.imeiUnitId,

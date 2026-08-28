@@ -765,14 +765,36 @@ export function useStore() {
 
   const deleteSideAccountEntry = useCallback((id: string) => {
     const entry = sideAccountEntries.find(e => e.id === id);
-    if (entry?.safeId && entry.safeDelta) {
-      setSafes(prev => prev.map(s => s.id === entry.safeId ? { ...s, balance: s.balance - entry.safeDelta } : s));
+    if (!entry) return;
+
+    // Reverse every cash effect this entry ever had:
+    //  - the original cash movement (capital / side_account transaction)
+    //  - settlement transactions created for receivable/payable entries
+    // The original transaction uses entry.transactionId, while each settlement
+    // uses referenceId = entry.id, so both are matched here.
+    const relatedTransactions = transactions.filter(t =>
+      t.id === entry.transactionId || t.referenceId === entry.id
+    );
+    const deltasBySafe: Record<string, number> = {};
+    relatedTransactions.forEach(t => {
+      if (t.safeId) deltasBySafe[t.safeId] = (deltasBySafe[t.safeId] || 0) + t.amount;
+    });
+
+    if (Object.keys(deltasBySafe).length > 0) {
+      setSafes(prev => prev.map(s =>
+        deltasBySafe[s.id]
+          ? { ...s, balance: Math.round((s.balance - deltasBySafe[s.id]) * 100) / 100 }
+          : s
+      ));
     }
-    if (entry?.transactionId) {
-      setTransactions(prev => prev.filter(t => t.id !== entry.transactionId));
+
+    if (relatedTransactions.length > 0) {
+      const idsToRemove = new Set(relatedTransactions.map(t => t.id));
+      setTransactions(prev => prev.filter(t => !idsToRemove.has(t.id)));
     }
+
     setSideAccountEntries(prev => prev.filter(e => e.id !== id));
-  }, [sideAccountEntries, setSafes, setSideAccountEntries, setTransactions]);
+  }, [sideAccountEntries, transactions, setSafes, setSideAccountEntries, setTransactions]);
 
   // Maintenance functions
   const generateTicketNumber = useCallback(() => {
@@ -1027,7 +1049,22 @@ export function useStore() {
     const pendingMaintenance = maintenance.filter(m => m.status === 'received' || m.status === 'in_progress').length;
     const completedMaintenance = maintenance.filter(m => m.status === 'delivered').length;
 
-    const lowStockItems = inventory.filter(i => !i.hasIMEI && i.quantity <= i.minQuantity);
+    // Low stock uses the same "real quantity" rule as the Inventory page: for
+    // device templates the stock is the number of available IMEI units, not the
+    // template's `quantity` field (which is 0 for IMEI products).
+    const lowStockItems = inventory
+      .filter(i => {
+        const realQuantity = i.hasIMEI
+          ? imeiUnits.filter(u => u.inventoryId === i.id && u.status === 'available').length
+          : i.quantity;
+        return realQuantity <= i.minQuantity;
+      })
+      .map(i => {
+        const realQuantity = i.hasIMEI
+          ? imeiUnits.filter(u => u.inventoryId === i.id && u.status === 'available').length
+          : i.quantity;
+        return { ...i, realQuantity };
+      });
 
     const expiringWarranties = imeiUnits.filter(u => {
       if (!u.warrantyEndDate || u.status !== 'sold') return false;

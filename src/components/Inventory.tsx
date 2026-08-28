@@ -262,12 +262,15 @@ export default function Inventory({
               downloadExcel(
                 `inventory-${new Date().toISOString().slice(0, 10)}`,
                 ['الصنف', 'الكود', 'الباركود', 'الفئة', 'سعر الشراء', 'سعر البيع', 'الكمية', 'الحد الأدنى', 'قيمة المخزون'],
-                inventory.map(i => [
-                  i.name, i.code, i.barcode,
-                  categories.find(c => c.id === i.categoryId)?.name || '',
-                  i.costPrice, i.sellPrice, i.quantity, i.minQuantity,
-                  i.costPrice * i.quantity,
-                ])
+                inventory.map(i => {
+                  const actualQty = getActualQuantity(i);
+                  return [
+                    i.name, i.code, i.barcode,
+                    categories.find(c => c.id === i.categoryId)?.name || '',
+                    i.costPrice, i.sellPrice, actualQty, i.minQuantity,
+                    i.costPrice * actualQty,
+                  ];
+                })
               )
             }
             className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition"

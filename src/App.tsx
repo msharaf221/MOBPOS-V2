@@ -360,6 +360,7 @@ export default function App() {
           <MaintenanceBoard
             maintenance={store.maintenance}
             inventory={store.inventory}
+            categories={store.categories}
             safes={store.safes}
             customers={store.customers}
             onCreateMaintenance={store.createMaintenance}
