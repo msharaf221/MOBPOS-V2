@@ -45,6 +45,8 @@ portable:
 # ===== التحديث التلقائي =====
 # ينشر ملف Setup على GitHub Releases فيفحصه التطبيق ويثبّته تلقائياً.
 # أنشئ Release على GitHub بنفس رقم الإصدار ورفع ملفات release/ ليتفعّل.
+# ⚠️  تطبيق العميل يطلب latest.yml بدون أي مصادقة — فلو الريبو private التحديث
+#     هيتعطل (404). تحقق بعد أي release بالأمر:  npm run verify:updates
 publish:
   provider: github
   owner: msharaf221

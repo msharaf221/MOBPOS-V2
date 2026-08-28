@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useIndexedDB, useIndexedDBSetting, indexedDBUtils } from './useIndexedDB';
 import { v4 as uuidv4 } from 'uuid';
 import { hashPasswordForStorage, verifyLoginPassword, needsRehash } from '../utils/passwords';
@@ -49,9 +49,23 @@ export function useStore() {
   const [notifications, setNotifications, notificationsLoading] = useIndexedDB<Notification>('notifications', initialNotifications);
   
   // Settings
-  const [currentUser, setCurrentUser, userLoading] = useIndexedDBSetting<User | null>('currentUser', null);
+  // ⚠️  الجلسة (المستخدم الحالي) محفوظة في الذاكرة فقط — عمداً مش مخزنة في
+  // IndexedDB: عند قفل التطبيق أو النظام (أو حتى انقطاع الكهرباء) الجلسة
+  // بتتلمس أوتوماتيك، وكل ما النظام يتفتح تاني تظهر شاشة تسجيل الدخول
+  // (اسم المستخدم + كلمة المرور) — مفيش حد يلاقي حساب فاتح وبيانات مكشوفة.
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const userLoading = false;
   const [isDarkMode, setIsDarkMode, darkModeLoading] = useIndexedDBSetting<boolean>('darkMode', false);
   const [appSettings, setAppSettings, appSettingsLoading] = useIndexedDBSetting<AppSettings>('shopSettings', defaultAppSettings);
+
+  // تنظيف لمرة واحدة عند أول تشغيل بعد الترقية:
+  // الإصدارات القديمة (≤1.0.1) كانت بتخزن الجلسة في IndexedDB — لو في جلسة
+  // قديمة متبقية من نسخة قديمة، امسحها عشان ما يتفتحش التطبيق على حساب فاتح.
+  useEffect(() => {
+    indexedDBUtils.remove('appSettings', 'currentUser').catch(() => {
+      /* ما فيش مفتاح قديم — لا حاجة للتنظيف */
+    });
+  }, []);
 
   // Loading state
   const isLoading = usersLoading || customersLoading || categoriesLoading || 
