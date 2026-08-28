@@ -12,6 +12,7 @@
     "build": "vite build",
     "typecheck": "tsc --noEmit",
     "test": "node --test src/utils/alerts.test.ts",
+    "verify:updates": "node scripts/verify-update-feed.cjs",
     "preview": "vite preview",
     "electron:dev": "node scripts/electron-dev.cjs",
     "setup:ci": "node scripts/install-workflow.cjs",

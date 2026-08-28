@@ -106,3 +106,9 @@ jobs:
               --notes-file notes.md \
               "${ASSETS[@]}"
           fi
+
+      # نفس الفحص اللي بيعمله تطبيق العميل (latest.yml + حجم ملف التثبيت + sha512).
+      # بيفشل الريلان لو فيه أي حاجة بتخلي التحديث التلقائي ما يوصلش للعملاء.
+      - name: Verify update feed (as the installed clients will see it)
+        shell: bash
+        run: node scripts/verify-update-feed.cjs --token="$GITHUB_TOKEN"
