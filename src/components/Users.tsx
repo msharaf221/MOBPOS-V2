@@ -79,6 +79,10 @@ export default function Users({ users, currentUser, onUpdate }: UsersProps) {
       alert('جميع الحقول مطلوبة');
       return;
     }
+    if (formData.password && (formData.password.length < 6 || formData.password.length > 512)) {
+      alert('كلمة المرور يجب أن تكون بين 6 و512 حرفاً');
+      return;
+    }
 
     // Check if username exists (for new users or changed username)
     if (!editingUser || editingUser.username !== formData.username) {

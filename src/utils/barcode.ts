@@ -113,6 +113,15 @@ export function generateBarcodeSvg(barcode: string, height = 48): string {
 /**
  * Print Barcode Sticker / Label Modal Utility
  */
+function escapeHtml(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 export function printBarcodeSticker(
   itemName: string,
   price: number,
@@ -120,6 +129,10 @@ export function printBarcodeSticker(
   shopName: string,
   copies = 1
 ) {
+  const safeItemName = escapeHtml(itemName);
+  const safeBarcode = escapeHtml(barcode);
+  const safeShopName = escapeHtml(shopName);
+  const copyCount = Math.min(1000, Math.max(1, Math.floor(Number(copies) || 1)));
   const formattedPrice = new Intl.NumberFormat('ar-EG', {
     style: 'currency',
     currency: 'EGP',
@@ -135,13 +148,13 @@ export function printBarcodeSticker(
   }
 
   let labelsHtml = '';
-  for (let i = 0; i < copies; i++) {
+  for (let i = 0; i < copyCount; i++) {
     labelsHtml += `
       <div class="sticker-card">
-        <div class="shop-title">${shopName}</div>
-        <div class="item-name">${itemName}</div>
+        <div class="shop-title">${safeShopName}</div>
+        <div class="item-name">${safeItemName}</div>
         <div class="barcode-svg">${svgBarcode}</div>
-        <div class="barcode-text">${barcode}</div>
+        <div class="barcode-text">${safeBarcode}</div>
         <div class="price-tag">${formattedPrice}</div>
       </div>
     `;
@@ -152,7 +165,7 @@ export function printBarcodeSticker(
     <html dir="rtl" lang="ar">
     <head>
       <meta charset="utf-8" />
-      <title>طباعة باركود - ${itemName}</title>
+      <title>طباعة باركود - ${safeItemName}</title>
       <style>
         @page {
           size: auto;

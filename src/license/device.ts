@@ -175,7 +175,11 @@ function audioFingerprint(): Promise<string> {
           clearTimeout(timer);
           const samples = buffer.getChannelData(0);
           let sum = 0;
-          for (let i = 4500; i < 5000; i++) sum += Math.abs(samples[i]);
+          // The render buffer is 4410 frames long; the old 4500..5000
+          // range always read undefined and produced the same "NaN" signal
+          // on every device.
+          const start = Math.max(0, samples.length - 500);
+          for (let i = start; i < samples.length; i++) sum += Math.abs(samples[i]);
           done('au:' + sum.toFixed(8));
         })
         .catch(() => {

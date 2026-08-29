@@ -26,26 +26,30 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, 'data');
 const DATA_FILE = process.env.DATA_FILE || path.join(DATA_DIR, 'activations.json');
-const PORT = process.env.PORT || 8787;
+const PORT = Number(process.env.PORT || 8787);
+const TRUST_PROXY = process.env.TRUST_PROXY === '1';
 
 // توكن الإدارة (إلزامي لحماية /revoke و /release و /key/:id)
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
 
-// توكن العميل (اختياري، لحماية /activate و /verify)
+// توكن العميل (إلزامي، لحماية /activate و /verify)
 const ACTIVATION_TOKEN = process.env.ACTIVATION_TOKEN || '';
 
 // التحقق الإلزامي من وجود ADMIN_TOKEN عند بدء السيرفر (Fail-Closed)
-if (!ADMIN_TOKEN || ADMIN_TOKEN.trim() === '') {
+if (!ADMIN_TOKEN || ADMIN_TOKEN.trim() === '' || !ACTIVATION_TOKEN || ACTIVATION_TOKEN.trim() === '') {
   console.error('================================================================');
-  console.error('⛔ خطأ فادح: متغير البيئة ADMIN_TOKEN إلزامي لبدء السيرفر!');
-  console.error('FATAL ERROR: ADMIN_TOKEN environment variable is required.');
-  console.error('يرجى ضبط ADMIN_TOKEN بقيمة سرية قوية لحماية العمليات الإدارية.');
-  console.error('مثال: ADMIN_TOKEN=your-strong-secret-token');
+  console.error('⛔ خطأ فادح: ADMIN_TOKEN و ACTIVATION_TOKEN إلزاميان لبدء السيرفر!');
+  console.error('FATAL ERROR: ADMIN_TOKEN and ACTIVATION_TOKEN are required.');
+  console.error('اضبط سراً قوياً لكل منهما، ولا تضع ADMIN_TOKEN في كود العميل.');
   console.error('================================================================');
   process.exit(1);
 }
 
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
+  console.error('FATAL ERROR: PORT must be an integer between 1 and 65535.');
+  process.exit(1);
+}
+fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
 
 // ===== Storage (atomic writes) =====
 // `db` is created with a null prototype and every key is validated against an
@@ -63,26 +67,27 @@ try {
   db = Object.create(null);
 }
 
-let writeTimer = null;
 let dirty = false;
 function writeNow() {
-  clearTimeout(writeTimer);
-  writeTimer = null;
   if (!dirty) return;
-  const tmp = DATA_FILE + '.tmp';
+  const tmp = `${DATA_FILE}.${process.pid}.tmp`;
   try {
-    fs.writeFileSync(tmp, JSON.stringify(db, null, 2));
+    // Activation is a security decision. Do not acknowledge it before the
+    // atomic replacement succeeds; otherwise a crash in the debounce window
+    // could make the same key available again after restart.
+    fs.writeFileSync(tmp, JSON.stringify(db, null, 2), { mode: 0o600 });
     fs.renameSync(tmp, DATA_FILE);
     dirty = false;
   } catch (err) {
-    console.error('persist failed:', err.message);
+    console.error('persist failed; stopping to avoid accepting activations that cannot be recovered:', err.message);
+    try { fs.rmSync(tmp, { force: true }); } catch { /* best effort */ }
+    dirty = false;
+    process.exit(1);
   }
 }
 function persist() {
-  // debounce + atomic replace
   dirty = true;
-  clearTimeout(writeTimer);
-  writeTimer = setTimeout(writeNow, 100);
+  writeNow();
 }
 
 // Flush any pending debounced write before the process actually exits, so a
@@ -117,6 +122,35 @@ function validDeviceId(deviceId) {
   return typeof deviceId === 'string' && DEVICE_ID_RE.test(deviceId);
 }
 
+function sanitizeLoadedDb(raw) {
+  const safe = Object.create(null);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return safe;
+  for (const [keyId, value] of Object.entries(raw)) {
+    if (!validKeyIds(keyId) || !value || typeof value !== 'object' || Array.isArray(value)) continue;
+    const rec = value;
+    if (!validDeviceId(rec.deviceId) || typeof rec.activatedAt !== 'string') continue;
+    if (rec.machineToken !== undefined &&
+        (typeof rec.machineToken !== 'string' || !/^[a-f0-9]{48}$/i.test(rec.machineToken))) continue;
+    safe[keyId] = {
+      deviceId: rec.deviceId,
+      machineToken: rec.machineToken,
+      activatedAt: rec.activatedAt,
+      lastSeen: typeof rec.lastSeen === 'string' ? rec.lastSeen : rec.activatedAt,
+      hits: Number.isSafeInteger(rec.hits) && rec.hits > 0 ? rec.hits : 1,
+      ...(rec.revoked === true ? { revoked: true, revokedAt: typeof rec.revokedAt === 'string' ? rec.revokedAt : new Date().toISOString() } : {}),
+    };
+  }
+  return safe;
+}
+
+db = sanitizeLoadedDb(db);
+try {
+  if (fs.existsSync(DATA_FILE)) fs.chmodSync(DATA_FILE, 0o600);
+} catch (err) {
+  console.error('FATAL ERROR: activation data file is not private:', err.message);
+  process.exit(1);
+}
+
 /** Constant-time comparison of a request's bearer token against the expected secret. */
 function safeTokenEquals(provided, expected) {
   const a = Buffer.from(String(provided));
@@ -131,6 +165,7 @@ function maskDevice(deviceId) {
 
 // ===== App =====
 const app = express();
+if (TRUST_PROXY) app.set('trust proxy', 1);
 app.use(express.json({ limit: '10kb' }));
 
 // CORS (the client app may run from any origin)
@@ -144,12 +179,18 @@ app.use((req, res, next) => {
 
 // In-memory Rate Limiter (30 requests/minute per IP)
 const rateLimitMap = new Map();
+const cleanupTimer = setInterval(() => {
+  const now = Date.now();
+  for (const [key, val] of rateLimitMap.entries()) {
+    if (now > val.resetTime) rateLimitMap.delete(key);
+  }
+}, 5 * 60 * 1000);
+cleanupTimer.unref?.();
 function rateLimiter(limit = 30, windowMs = 60 * 1000) {
   return (req, res, next) => {
-    const forwarded = req.headers['x-forwarded-for'];
-    const ip = (typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : null) ||
-               req.socket.remoteAddress ||
-               'unknown';
+    // Never trust a client-supplied X-Forwarded-For unless this deployment is
+    // explicitly behind one trusted reverse proxy.
+    const ip = (TRUST_PROXY ? req.ip : req.socket.remoteAddress) || 'unknown';
     const now = Date.now();
     let record = rateLimitMap.get(ip);
     if (!record || now > record.resetTime) {
@@ -180,9 +221,8 @@ function rateLimiter(limit = 30, windowMs = 60 * 1000) {
   };
 }
 
-// Optional bearer token protection for client endpoints (/activate, /verify)
+// Mandatory bearer token protection for client endpoints (/activate, /verify)
 function authCheck(req, res, next) {
-  if (!ACTIVATION_TOKEN) return next();
   const header = req.headers.authorization || '';
   if (safeTokenEquals(header, `Bearer ${ACTIVATION_TOKEN}`)) return next();
   return res.status(401).json({ ok: false, reason: 'unauthorized' });
@@ -267,26 +307,20 @@ app.post('/verify', rateLimiter(30, 60000), authCheck, (req, res) => {
 
   const now = new Date().toISOString();
 
-  // ترقية سجل v1 قديم (لا يوجد توكن بعد) — نفس الجهاز المرتبط يستلم توكنه
+  // A legacy v1 row has no token to check, so migrate it once. Once a v2
+  // token exists, an omitted token must not be treated as a reinstall: that
+  // would let anyone who can spoof the public deviceId obtain a valid token.
   if (!rec.machineToken) {
     rec.machineToken = newMachineToken();
     rec.lastSeen = now;
-    rec.hits = (rec.hits || 0) + 1;
+    rec.hits = Math.min(Number.MAX_SAFE_INTEGER, (rec.hits || 0) + 1);
     persist();
     console.log(`[MIGRATE] key ${keyId} upgraded to v2 during verify`);
     return res.json({ ok: true, machineToken: rec.machineToken, migrated: true });
   }
 
-  // عميل v1 (قبل الترقية) لا يملك توكناً بعد — نسلّمه إياه (هو الجهاز المرتبط أصلاً)
-  if (!machineToken) {
-    rec.lastSeen = now;
-    rec.hits = (rec.hits || 0) + 1;
-    persist();
-    return res.json({ ok: true, machineToken: rec.machineToken, migrated: true });
-  }
-
-  if (machineToken !== rec.machineToken) {
-    console.warn(`[VERIFY-REJECT] bad machine token for key ${keyId}`);
+  if (typeof machineToken !== 'string' || !safeTokenEquals(machineToken, rec.machineToken)) {
+    console.warn(`[VERIFY-REJECT] bad or missing machine token for key ${keyId}`);
     return res.status(403).json({ ok: false, reason: 'bad_token' });
   }
 
@@ -348,9 +382,6 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`MOBPOS activation server v2 running on http://0.0.0.0:${PORT}`);
   console.log(`Data file: ${DATA_FILE}`);
   console.log(`ADMIN_TOKEN is active (mandatory for /revoke, /release, /key/:id).`);
-  if (ACTIVATION_TOKEN) {
-    console.log('ACTIVATION_TOKEN is active for client endpoints (/activate, /verify).');
-  } else {
-    console.log('ACTIVATION_TOKEN is not set — client endpoints (/activate, /verify) are open (rate-limited).');
-  }
+  console.log('ACTIVATION_TOKEN is active for client endpoints (/activate, /verify).');
+  console.log(`TRUST_PROXY is ${TRUST_PROXY ? 'enabled (one trusted reverse proxy)' : 'disabled'}.`);
 });

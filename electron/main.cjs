@@ -36,7 +36,7 @@ const CONTENT_SECURITY_POLICY = [
   "base-uri 'self'",
   "object-src 'none'",
   "frame-ancestors 'none'",
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://accounts.google.com https://www.googleapis.com",
+  "script-src 'self' 'unsafe-inline' https://accounts.google.com https://www.googleapis.com",
   "style-src 'self' 'unsafe-inline'",
   "font-src 'self' data:",
   "img-src 'self' data: blob: https:",
@@ -126,10 +126,17 @@ function readStableMachineId() {
  * النافذة ممنوع منها التنقل أو فتح أي شيء.
  */
 function withReportWindow(html, job) {
+  if (typeof html !== 'string' || html.length > 20 * 1024 * 1024) return Promise.resolve(false);
   return new Promise((resolve) => {
-    const tmpFile = path.join(os.tmpdir(), `mobpos-report-${Date.now()}-${Math.random().toString(36).slice(2)}.html`);
+    let reportDir = null;
+    let tmpFile = null;
+    let fallbackTimer = null;
     let settled = false;
-    const cleanup = () => { fs.unlink(tmpFile, () => undefined); };
+    const cleanup = () => {
+      if (fallbackTimer) clearTimeout(fallbackTimer);
+      if (tmpFile) fs.unlink(tmpFile, () => undefined);
+      if (reportDir) fs.rm(reportDir, { recursive: true, force: true }, () => undefined);
+    };
     const finish = (value) => {
       if (settled) return;
       settled = true;
@@ -139,7 +146,11 @@ function withReportWindow(html, job) {
 
     let win = null;
     try {
-      fs.writeFileSync(tmpFile, html, 'utf8');
+      // mkdtemp creates a private directory (0700 on supported platforms),
+      // avoiding predictable temp-file/symlink races for report HTML.
+      reportDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mobpos-report-'));
+      tmpFile = path.join(reportDir, 'report.html');
+      fs.writeFileSync(tmpFile, html, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
 
       win = new BrowserWindow({
         show: false,
@@ -184,7 +195,7 @@ function withReportWindow(html, job) {
     }
 
     // حماية: لو علق لأي سبب، اقفل بعد دقيقة
-    setTimeout(() => {
+    fallbackTimer = setTimeout(() => {
       if (!settled) {
         if (win && !win.isDestroyed()) win.destroy();
         finish(false);

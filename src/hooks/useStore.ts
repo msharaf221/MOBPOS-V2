@@ -16,6 +16,13 @@ import {
 } from '../data/initialData';
 import { buildAutoNotifications, mergeAutoNotifications } from '../utils/alerts';
 
+const MAX_TEXT_LENGTH = 2_000;
+const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+const isPositiveInteger = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value > 0;
+const roundMoney = (value: number) => Math.round(value * 100) / 100;
+const validText = (value: unknown, max = MAX_TEXT_LENGTH): value is string =>
+  typeof value === 'string' && value.trim().length > 0 && value.length <= max;
+
 export const defaultAppSettings: AppSettings = {
 
   shopName: 'MOBPOS',
@@ -101,6 +108,54 @@ export function useStore() {
     setCurrentUser(null);
   }, [setCurrentUser]);
 
+  // Components receive validated collection updates rather than the raw
+  // IndexedDB setters. This keeps identity, roles, balances, and references
+  // protected even when a UI callback is called with forged data.
+  const updateUsers = useCallback((nextUsers: User[]) => {
+    if (!Array.isArray(nextUsers) || nextUsers.length === 0) return;
+    const ids = new Set<string>();
+    const usernames = new Set<string>();
+    if (!nextUsers.every(user => {
+      if (!user || !validText(user.id, 200) || !validText(user.username, 100) || !validText(user.name, 200) ||
+          typeof user.password !== 'string' || user.password.length > 20_000 ||
+          !['admin', 'manager', 'staff'].includes(user.role) || typeof user.createdAt !== 'string' ||
+          ids.has(user.id) || usernames.has(user.username.toLowerCase())) return false;
+      ids.add(user.id); usernames.add(user.username.toLowerCase());
+      return true;
+    }) || !nextUsers.some(user => user.role === 'admin')) return;
+    if (currentUser) {
+      const updatedCurrent = nextUsers.find(user => user.id === currentUser.id);
+      if (!updatedCurrent || updatedCurrent.role !== currentUser.role) return;
+      setCurrentUser(updatedCurrent);
+    }
+    setUsers(nextUsers);
+  }, [currentUser, setCurrentUser, setUsers]);
+
+  const updateSuppliers = useCallback((nextSuppliers: Supplier[]) => {
+    if (!Array.isArray(nextSuppliers)) return;
+    const ids = new Set<string>();
+    const currentIds = new Set(nextSuppliers.map(s => s.id));
+    if (!nextSuppliers.every(supplier => {
+      if (!supplier || !validText(supplier.id, 200) || !validText(supplier.name, 200) ||
+          typeof supplier.phone !== 'string' || supplier.phone.length > 50 || typeof supplier.address !== 'string' ||
+          !isFiniteNumber(supplier.balance) || ids.has(supplier.id)) return false;
+      ids.add(supplier.id);
+      return true;
+    })) return;
+    // Never allow removing a supplier referenced by a stock-waste record.
+    if (suppliers.some(s => !currentIds.has(s.id) && stockWastes.some(w => w.supplierId === s.id))) return;
+    const normalized = nextSuppliers.map(supplier => {
+      const existing = suppliers.find(s => s.id === supplier.id);
+      return {
+        ...supplier,
+        name: supplier.name.trim(), phone: supplier.phone.trim(), address: supplier.address.trim(),
+        // Supplier balances are derived from purchasing/ledger operations.
+        balance: existing ? existing.balance : 0,
+      };
+    });
+    setSuppliers(normalized);
+  }, [setSuppliers, stockWastes, suppliers]);
+
   // Change a user's password (validates the old one first, stores hashed)
   const changePassword = useCallback(async (
     userId: string,
@@ -111,8 +166,8 @@ export function useStore() {
     if (!user) return { ok: false, error: 'المستخدم غير موجود' };
     const oldOk = await verifyLoginPassword(oldPassword, user.password);
     if (!oldOk) return { ok: false, error: 'كلمة المرور الحالية غير صحيحة' };
-    if (!newPassword || newPassword.length < 6) {
-      return { ok: false, error: 'كلمة المرور الجديدة يجب ألا تقل عن 6 أحرف' };
+    if (!newPassword || newPassword.length < 6 || newPassword.length > 512) {
+      return { ok: false, error: 'كلمة المرور الجديدة يجب أن تكون بين 6 و512 حرفاً' };
     }
     if (newPassword === oldPassword) {
       return { ok: false, error: 'كلمة المرور الجديدة يجب أن تختلف عن الحالية' };
@@ -130,28 +185,62 @@ export function useStore() {
 
   // Customer functions
   const addCustomer = useCallback((customer: Omit<Customer, 'id' | 'createdAt' | 'balance'>) => {
+    const name = customer.name?.trim();
+    const phone = customer.phone?.trim();
+    if (!validText(name, 200) || !validText(phone, 50) || (customer.address || '').length > MAX_TEXT_LENGTH) {
+      return null;
+    }
+    if (customers.some(c => c.phone.trim() === phone)) return null;
+
     const newCustomer: Customer = {
-      ...customer,
+      name,
+      phone,
+      address: (customer.address || '').trim(),
       id: uuidv4(),
       balance: 0,
       createdAt: new Date().toISOString()
     };
     setCustomers(prev => [...prev, newCustomer]);
     return newCustomer;
-  }, [setCustomers]);
+  }, [customers, setCustomers]);
 
   const updateCustomer = useCallback((id: string, updates: Partial<Customer>) => {
-    setCustomers(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c));
-  }, [setCustomers]);
+    const name = updates.name?.trim();
+    const phone = updates.phone?.trim();
+    if (updates.name !== undefined && !validText(name, 200)) return;
+    if (updates.phone !== undefined && !validText(phone, 50)) return;
+    if (updates.address !== undefined && updates.address.length > MAX_TEXT_LENGTH) return;
+    if (phone && customers.some(c => c.id !== id && c.phone.trim() === phone)) return;
 
-  const deleteCustomer = useCallback((id: string) => {
+    // Balance, identity, and creation time are ledger-owned fields. They must
+    // never be writable from an edit form or an untrusted caller.
+    const safeUpdates: Partial<Customer> = {
+      ...(name !== undefined ? { name } : {}),
+      ...(phone !== undefined ? { phone } : {}),
+      ...(updates.address !== undefined ? { address: updates.address.trim() } : {}),
+    };
+    setCustomers(prev => prev.map(c => c.id === id ? { ...c, ...safeUpdates } : c));
+  }, [customers, setCustomers]);
+
+  const deleteCustomer = useCallback((id: string): { ok: boolean; error?: string } => {
+    const customer = customers.find(c => c.id === id);
+    if (!customer) return { ok: false, error: 'العميل غير موجود' };
+    if ((customer.balance || 0) !== 0 || sales.some(s => s.customerId === id) || imeiUnits.some(u => u.customerId === id)) {
+      return { ok: false, error: 'لا يمكن حذف عميل له رصيد أو فواتير أو أجهزة مرتبطة؛ للحفاظ على السجل المالي' };
+    }
     setCustomers(prev => prev.filter(c => c.id !== id));
-  }, [setCustomers]);
+    return { ok: true };
+  }, [customers, sales, imeiUnits, setCustomers]);
 
   const recordCustomerPayment = useCallback((customerId: string, amount: number, safeId: string, notes: string) => {
+    const customer = customers.find(c => c.id === customerId);
+    const safe = safes.find(s => s.id === safeId);
+    if (!customer || !safe || !isFiniteNumber(amount) || amount <= 0 || amount > Math.max(0, customer.balance || 0)) return null;
+    const safeNotes = typeof notes === 'string' ? notes.slice(0, MAX_TEXT_LENGTH) : '';
+
     // Decrease customer debt
     setCustomers(prev => prev.map(c => 
-      c.id === customerId ? { ...c, balance: (c.balance || 0) - amount } : c
+      c.id === customerId ? { ...c, balance: roundMoney(Math.max(0, (c.balance || 0) - amount)) } : c
     ));
     // Increase safe balance
     setSafes(prev => prev.map(s => 
@@ -162,7 +251,7 @@ export function useStore() {
       id: uuidv4(),
       type: 'customer_payment',
       amount,
-      description: `دفعة من حساب العميل${notes ? ` - ${notes}` : ''}`,
+      description: `دفعة من حساب العميل${safeNotes ? ` - ${safeNotes}` : ''}`,
       referenceId: customerId,
       safeId,
       userId: currentUser?.id || '',
@@ -170,7 +259,7 @@ export function useStore() {
     };
     setTransactions(prev => [...prev, transaction]);
     return transaction;
-  }, [currentUser, setCustomers, setSafes, setTransactions]);
+  }, [currentUser, customers, safes, setCustomers, setSafes, setTransactions]);
 
   const recordWalletTransaction = useCallback((
     type: 'deposit' | 'withdrawal',
@@ -181,7 +270,15 @@ export function useStore() {
     cashSafeId: string,
     notes: string
   ) => {
-    const profit = fee - cost;
+    const wallet = safes.find(s => s.id === walletId);
+    const cashSafe = safes.find(s => s.id === cashSafeId);
+    if (!wallet || !cashSafe || !isFiniteNumber(amount) || amount <= 0 || !isFiniteNumber(fee) || fee < 0 ||
+        fee > amount || !isFiniteNumber(cost) || cost < 0 || typeof notes !== 'string' || notes.length > MAX_TEXT_LENGTH) return null;
+    const walletOut = type === 'deposit' ? amount + cost : 0;
+    const cashOut = type === 'withdrawal' ? amount - fee : 0;
+    if ((type === 'deposit' && wallet.balance < walletOut) ||
+        (type === 'withdrawal' && (wallet.balance < amount || cashSafe.balance < cashOut))) return null;
+    const profit = roundMoney(fee - cost);
 
     // Update safes
     setSafes(prev => prev.map(s => {
@@ -226,52 +323,121 @@ export function useStore() {
 
     setTransactions(prev => [...prev, ...transactionsToAdd]);
     return transactionsToAdd;
-  }, [currentUser, setSafes, setTransactions]);
+  }, [currentUser, safes, setSafes, setTransactions]);
 
   // Category functions
   const addCategory = useCallback((category: Omit<Category, 'id'>) => {
-    const newCategory: Category = { ...category, id: uuidv4() };
+    if (!validText(category.name, 200) || !['device', 'accessory', 'spare_part'].includes(category.type)) return null;
+    if (categories.some(c => c.name.trim().toLowerCase() === category.name.trim().toLowerCase())) return null;
+    const newCategory: Category = { name: category.name.trim(), type: category.type, id: uuidv4() };
     setCategories(prev => [...prev, newCategory]);
     return newCategory;
-  }, [setCategories]);
+  }, [categories, setCategories]);
 
   // Inventory functions
   const addInventoryItem = useCallback((item: Omit<InventoryItem, 'id' | 'createdAt'>) => {
+    if (!validText(item.name, 200) || !validText(item.code, 100) || typeof item.barcode !== 'string' || item.barcode.length > 100 ||
+        !categories.some(c => c.id === item.categoryId) ||
+        !isFiniteNumber(item.costPrice) || item.costPrice < 0 || !isFiniteNumber(item.sellPrice) || item.sellPrice < 0 ||
+        !Number.isInteger(item.quantity) || item.quantity < 0 || !Number.isInteger(item.minQuantity) || item.minQuantity < 0 ||
+        typeof item.hasIMEI !== 'boolean') return null;
+    if (inventory.some(i => i.code.trim().toLowerCase() === item.code.trim().toLowerCase() || (item.barcode && i.barcode === item.barcode))) return null;
+    if (item.hasIMEI && item.quantity !== 0) return null;
+
     const newItem: InventoryItem = {
       ...item,
+      name: item.name.trim(), code: item.code.trim(), barcode: item.barcode.trim(),
+      costPrice: roundMoney(item.costPrice), sellPrice: roundMoney(item.sellPrice),
       id: uuidv4(),
       createdAt: new Date().toISOString()
     };
     setInventory(prev => [...prev, newItem]);
     return newItem;
-  }, [setInventory]);
+  }, [categories, inventory, setInventory]);
 
   const updateInventoryItem = useCallback((id: string, updates: Partial<InventoryItem>) => {
-    setInventory(prev => prev.map(i => i.id === id ? { ...i, ...updates } : i));
-  }, [setInventory]);
+    const existing = inventory.find(i => i.id === id);
+    if (!existing) return;
+    if (updates.name !== undefined && !validText(updates.name, 200)) return;
+    if (updates.code !== undefined && !validText(updates.code, 100)) return;
+    if (updates.barcode !== undefined && (typeof updates.barcode !== 'string' || updates.barcode.length > 100)) return;
+    if (updates.categoryId !== undefined && !categories.some(c => c.id === updates.categoryId)) return;
+    for (const value of [updates.costPrice, updates.sellPrice, updates.quantity, updates.minQuantity]) {
+      if (value !== undefined && (!isFiniteNumber(value) || value < 0)) return;
+    }
+    if (updates.quantity !== undefined && !Number.isInteger(updates.quantity)) return;
+    if (updates.minQuantity !== undefined && !Number.isInteger(updates.minQuantity)) return;
+    if (existing.hasIMEI && updates.quantity !== undefined && updates.quantity !== 0) return;
+    if (updates.hasIMEI === true && (updates.quantity ?? existing.quantity) !== 0) return;
+    if (updates.hasIMEI === false && existing.hasIMEI && imeiUnits.some(u => u.inventoryId === id)) return;
+    if (updates.code && inventory.some(i => i.id !== id && i.code.trim().toLowerCase() === updates.code!.trim().toLowerCase())) return;
+    if (updates.barcode && inventory.some(i => i.id !== id && i.barcode === updates.barcode)) return;
 
-  const deleteInventoryItem = useCallback((id: string) => {
+    const safeUpdates: Partial<InventoryItem> = { ...updates };
+    delete safeUpdates.id;
+    delete safeUpdates.createdAt;
+    if (safeUpdates.name) safeUpdates.name = safeUpdates.name.trim();
+    if (safeUpdates.code) safeUpdates.code = safeUpdates.code.trim();
+    if (safeUpdates.barcode !== undefined) safeUpdates.barcode = safeUpdates.barcode.trim();
+    if (safeUpdates.costPrice !== undefined) safeUpdates.costPrice = roundMoney(safeUpdates.costPrice);
+    if (safeUpdates.sellPrice !== undefined) safeUpdates.sellPrice = roundMoney(safeUpdates.sellPrice);
+    setInventory(prev => prev.map(i => i.id === id ? { ...i, ...safeUpdates } : i));
+  }, [categories, inventory, setInventory]);
+
+  const deleteInventoryItem = useCallback((id: string): { ok: boolean; error?: string } => {
+    if (imeiUnits.some(u => u.inventoryId === id) || sales.some(s => s.items.some(i => i.inventoryId === id)) ||
+        maintenance.some(m => m.parts.some(p => p.inventoryId === id))) {
+      return { ok: false, error: 'لا يمكن حذف منتج مرتبط بفواتير أو أجهزة IMEI أو صيانة' };
+    }
     setInventory(prev => prev.filter(i => i.id !== id));
-  }, [setInventory]);
+    return { ok: true };
+  }, [imeiUnits, sales, maintenance, setInventory]);
 
   // IMEI functions
   const addIMEIUnit = useCallback((unit: Omit<IMEIUnit, 'id' | 'createdAt'>) => {
+    const inventoryItem = inventory.find(i => i.id === unit.inventoryId);
+    const imei1 = unit.imei1?.trim();
+    const imei2 = unit.imei2?.trim() || '';
+    const statuses: IMEIUnit['status'][] = ['available', 'sold', 'returned', 'maintenance', 'wasted'];
+    if (!inventoryItem?.hasIMEI || !validText(imei1, 40) || imei1 === imei2 ||
+        (imei2 && imei2.length > 40) || !statuses.includes(unit.status) ||
+        !isFiniteNumber(unit.purchasePrice) || unit.purchasePrice < 0 ||
+        imeiUnits.some(u => u.imei1 === imei1 || u.imei2 === imei1 || (imei2 && (u.imei1 === imei2 || u.imei2 === imei2)))) return null;
     const newUnit: IMEIUnit = {
       ...unit,
+      imei1, imei2,
+      purchasePrice: roundMoney(unit.purchasePrice),
       id: uuidv4(),
       createdAt: new Date().toISOString()
     };
     setImeiUnits(prev => [...prev, newUnit]);
     return newUnit;
-  }, [setImeiUnits]);
+  }, [inventory, imeiUnits, setImeiUnits]);
 
   const updateIMEIUnit = useCallback((id: string, updates: Partial<IMEIUnit>) => {
-    setImeiUnits(prev => prev.map(u => u.id === id ? { ...u, ...updates } : u));
-  }, [setImeiUnits]);
+    const existing = imeiUnits.find(u => u.id === id);
+    if (!existing) return;
+    if (updates.inventoryId !== undefined && !inventory.some(i => i.id === updates.inventoryId && i.hasIMEI)) return;
+    if (updates.imei1 !== undefined && !validText(updates.imei1, 40)) return;
+    if (updates.imei2 !== undefined && updates.imei2.length > 40) return;
+    if (updates.purchasePrice !== undefined && (!isFiniteNumber(updates.purchasePrice) || updates.purchasePrice < 0)) return;
+    if (updates.imei1 && imeiUnits.some(u => u.id !== id && (u.imei1 === updates.imei1 || u.imei2 === updates.imei1))) return;
+    if (updates.imei2 && imeiUnits.some(u => u.id !== id && (u.imei1 === updates.imei2 || u.imei2 === updates.imei2))) return;
+    const safeUpdates = { ...updates, ...(updates.purchasePrice !== undefined ? { purchasePrice: roundMoney(updates.purchasePrice) } : {}) };
+    delete safeUpdates.id;
+    delete safeUpdates.createdAt;
+    setImeiUnits(prev => prev.map(u => u.id === id ? { ...u, ...safeUpdates } : u));
+  }, [imeiUnits, inventory, setImeiUnits]);
 
-  const deleteIMEIUnit = useCallback((id: string) => {
+  const deleteIMEIUnit = useCallback((id: string): { ok: boolean; error?: string } => {
+    const unit = imeiUnits.find(u => u.id === id);
+    if (!unit) return { ok: false, error: 'وحدة IMEI غير موجودة' };
+    if (unit.status === 'sold' || sales.some(s => s.items.some(i => i.imeiUnitId === id))) {
+      return { ok: false, error: 'لا يمكن حذف جهاز تم بيعه؛ استخدم المرتجع للحفاظ على السجل' };
+    }
     setImeiUnits(prev => prev.filter(u => u.id !== id));
-  }, [setImeiUnits]);
+    return { ok: true };
+  }, [imeiUnits, sales, setImeiUnits]);
 
   const findIMEIByNumber = useCallback((imei: string) => {
     return imeiUnits.find(u => u.imei1 === imei || u.imei2 === imei);
@@ -306,17 +472,60 @@ export function useStore() {
     paymentMethod: 'cash' | 'card' | 'installment',
     safeId: string,
     notes: string
-  ) => {
-    const saleItems: SaleItem[] = items.map(item => ({
-      ...item,
-      returnedQuantity: 0,
-      id: uuidv4()
-    }));
+  ): Sale | null => {
+    if (!Array.isArray(items) || items.length === 0 || !isFiniteNumber(discount) || discount < 0 ||
+        !isFiniteNumber(paidAmount) || paidAmount < 0 || !['cash', 'card', 'installment'].includes(paymentMethod)) return null;
 
-    const subtotal = saleItems.reduce((sum, item) => sum + item.total, 0);
-    const total = subtotal - discount;
-    const remaining = total - paidAmount;
-    const profit = saleItems.reduce((sum, item) => sum + (item.total - (item.costPrice * item.quantity)), 0) - discount;
+    const customer = customerId ? customers.find(c => c.id === customerId) : undefined;
+    const safe = safes.find(s => s.id === safeId);
+    if ((customerId && !customer) || !safe || typeof notes !== 'string' || notes.length > MAX_TEXT_LENGTH) return null;
+
+    const quantitiesToDeduct: Record<string, number> = {};
+    const usedIMEI = new Set<string>();
+    const saleItems: SaleItem[] = [];
+    for (const item of items) {
+      const inventoryItem = inventory.find(inv => inv.id === item.inventoryId);
+      if (!inventoryItem || !isPositiveInteger(item.quantity) || !isFiniteNumber(item.unitPrice) || item.unitPrice < 0) return null;
+
+      if (item.imeiUnitId) {
+        const unit = imeiUnits.find(u => u.id === item.imeiUnitId);
+        if (!inventoryItem.hasIMEI || item.quantity !== 1 || !unit || unit.inventoryId !== inventoryItem.id ||
+            unit.status !== 'available' || usedIMEI.has(unit.id)) return null;
+        usedIMEI.add(unit.id);
+      } else {
+        if (inventoryItem.hasIMEI) return null;
+        quantitiesToDeduct[inventoryItem.id] = (quantitiesToDeduct[inventoryItem.id] || 0) + item.quantity;
+      }
+
+      const costPrice = item.imeiUnitId
+        ? imeiUnits.find(u => u.id === item.imeiUnitId)?.purchasePrice || 0
+        : inventoryItem.costPrice;
+      const total = roundMoney(item.unitPrice * item.quantity);
+      if (!isFiniteNumber(costPrice) || costPrice < 0 || !isFiniteNumber(total)) return null;
+      saleItems.push({
+        id: uuidv4(),
+        inventoryId: inventoryItem.id,
+        imeiUnitId: item.imeiUnitId,
+        quantity: item.quantity,
+        unitPrice: roundMoney(item.unitPrice),
+        costPrice: roundMoney(costPrice),
+        total,
+        returnedQuantity: 0,
+      });
+    }
+
+    for (const [inventoryId, quantity] of Object.entries(quantitiesToDeduct)) {
+      const item = inventory.find(inv => inv.id === inventoryId);
+      if (!item || quantity > item.quantity) return null;
+    }
+
+    const subtotal = roundMoney(saleItems.reduce((sum, item) => sum + item.total, 0));
+    if (discount > subtotal) return null;
+    const total = roundMoney(subtotal - discount);
+    if (paidAmount > total) return null;
+    const remaining = roundMoney(total - paidAmount);
+    if (remaining > 0 && !customer) return null;
+    const profit = roundMoney(saleItems.reduce((sum, item) => sum + (item.total - item.costPrice * item.quantity), 0) - discount);
 
     const newSale: Sale = {
       id: uuidv4(),
@@ -324,69 +533,51 @@ export function useStore() {
       customerId,
       items: saleItems,
       subtotal,
-      discount,
+      discount: roundMoney(discount),
       total,
-      paid: paidAmount,
+      paid: roundMoney(paidAmount),
       remaining,
       profit,
       paymentMethod,
       cashierId: currentUser?.id || '',
       safeId,
-      notes,
+      notes: notes.slice(0, MAX_TEXT_LENGTH),
       createdAt: new Date().toISOString()
     };
 
-    // Update IMEI units status
+    // The validations above run against one snapshot and the functional state
+    // updates below preserve each individual write. UI double-submit is
+    // guarded separately, while this layer prevents negative stock and stale
+    // IMEI units from being recorded in the first place.
     saleItems.forEach(item => {
       if (item.imeiUnitId) {
         updateIMEIUnit(item.imeiUnitId, {
-          status: 'sold',
-          saleId: newSale.id,
-          customerId
+          status: 'sold', saleId: newSale.id, customerId
         });
-      }
-    });
-
-    // Update inventory quantities for non-IMEI items (group by product to avoid race conditions)
-    const quantitiesToDeduct: Record<string, number> = {};
-    saleItems.forEach(item => {
-      if (!item.imeiUnitId) {
-        quantitiesToDeduct[item.inventoryId] = (quantitiesToDeduct[item.inventoryId] || 0) + item.quantity;
       }
     });
     setInventory(prev => prev.map(inv => {
       const deduct = quantitiesToDeduct[inv.id];
-      return deduct ? { ...inv, quantity: Math.max(0, inv.quantity - deduct) } : inv;
+      return deduct ? { ...inv, quantity: inv.quantity - deduct } : inv;
     }));
+    setSafes(prev => prev.map(s => s.id === safeId ? { ...s, balance: roundMoney(s.balance + paidAmount) } : s));
 
-    // Update safe balance with paidAmount instead of total
-    setSafes(prev => prev.map(s => 
-      s.id === safeId ? { ...s, balance: s.balance + paidAmount } : s
-    ));
-
-    // Update customer balance if there's remaining amount
     if (remaining > 0 && customerId) {
-      setCustomers(prev => prev.map(c => 
-        c.id === customerId ? { ...c, balance: (c.balance || 0) + remaining } : c
-      ));
+      setCustomers(prev => prev.map(c => c.id === customerId ? { ...c, balance: roundMoney((c.balance || 0) + remaining) } : c));
     }
 
-    // Add transaction for the paid amount
-    const transaction: Transaction = {
-      id: uuidv4(),
-      type: 'sale',
-      amount: paidAmount,
-      description: `فاتورة بيع ${newSale.invoiceNumber}`,
-      referenceId: newSale.id,
-      safeId,
-      userId: currentUser?.id || '',
-      createdAt: new Date().toISOString()
-    };
-    setTransactions(prev => [...prev, transaction]);
-
+    if (paidAmount > 0) {
+      const transaction: Transaction = {
+        id: uuidv4(), type: 'sale', amount: roundMoney(paidAmount),
+        description: `فاتورة بيع ${newSale.invoiceNumber}`,
+        referenceId: newSale.id, safeId, userId: currentUser?.id || '',
+        createdAt: newSale.createdAt
+      };
+      setTransactions(prev => [...prev, transaction]);
+    }
     setSales(prev => [...prev, newSale]);
     return newSale;
-  }, [currentUser, generateInvoiceNumber, inventory, updateIMEIUnit, setInventory, setSafes, setCustomers, setTransactions, setSales]);
+  }, [currentUser, customers, generateInvoiceNumber, imeiUnits, inventory, safes, setCustomers, setInventory, setImeiUnits, setSafes, setSales, setTransactions, updateIMEIUnit]);
 
   const processSaleReturn = useCallback((
     saleId: string,
@@ -396,89 +587,72 @@ export function useStore() {
   ) => {
     const sale = sales.find(s => s.id === saleId);
     const saleItem = sale?.items.find(item => item.id === saleItemId);
-    if (!sale || !saleItem) return null;
+    if (!sale || !saleItem || !isPositiveInteger(quantity) || typeof reason !== 'string' || reason.length > MAX_TEXT_LENGTH ||
+        !isFiniteNumber(sale.total) || sale.total < 0 || !isFiniteNumber(sale.subtotal) || sale.subtotal < 0 ||
+        !isFiniteNumber(sale.discount) || sale.discount < 0 || !isFiniteNumber(sale.paid) || sale.paid < 0 ||
+        !isFiniteNumber(saleItem.total) || saleItem.total < 0 || !isPositiveInteger(saleItem.quantity)) return null;
 
     const alreadyReturned = saleItem.returnedQuantity || 0;
+    if (!Number.isInteger(alreadyReturned) || alreadyReturned < 0 || alreadyReturned > saleItem.quantity) return null;
     const returnableQuantity = saleItem.quantity - alreadyReturned;
-    if (quantity <= 0 || quantity > returnableQuantity) return null;
+    if (quantity > returnableQuantity) return null;
+    if (saleItem.imeiUnitId && quantity !== 1) return null;
 
-    // A returned item is only worth as much cash-back as was actually
-    // collected for it. On installment sales (paid < total), refunding the
-    // full item price from the safe would pay out cash that was never
-    // received; the unpaid portion is instead forgiven from the customer's
-    // debt (they no longer owe for an item they gave back).
-    const refundAmount = (saleItem.total / saleItem.quantity) * quantity;
-    const paidRatio = sale.total > 0 ? Math.min(1, sale.paid / sale.total) : 0;
-    const cashRefund = Math.round(refundAmount * paidRatio * 100) / 100;
-    const debtForgiven = Math.round((refundAmount - cashRefund) * 100) / 100;
+    // Allocate the invoice discount proportionally. The previous code refunded
+    // the pre-discount line total, which inflated both cash refunds and debt
+    // forgiveness whenever an invoice had a discount.
+    const grossRefund = roundMoney((saleItem.total / saleItem.quantity) * quantity);
+    const discountShare = sale.subtotal > 0 ? roundMoney(sale.discount * grossRefund / sale.subtotal) : 0;
+    const refundAmount = roundMoney(Math.max(0, grossRefund - discountShare));
+    const paidRatio = sale.total > 0 ? Math.min(1, Math.max(0, sale.paid / sale.total)) : 0;
+    const cashRefund = roundMoney(refundAmount * paidRatio);
+    const debtForgiven = roundMoney(refundAmount - cashRefund);
+    if (cashRefund > 0 && !safes.some(s => s.id === sale.safeId)) return null;
     const now = new Date().toISOString();
     const returnRecord: SaleReturn = {
-      id: uuidv4(),
-      saleId,
-      saleItemId,
-      inventoryId: saleItem.inventoryId,
-      imeiUnitId: saleItem.imeiUnitId,
-      quantity,
-      refundAmount: cashRefund,
-      reason,
-      createdAt: now,
-      processedBy: currentUser?.id || ''
+      id: uuidv4(), saleId, saleItemId, inventoryId: saleItem.inventoryId,
+      imeiUnitId: saleItem.imeiUnitId, quantity, refundAmount: cashRefund,
+      reason: reason.trim(), createdAt: now, processedBy: currentUser?.id || ''
     };
 
     setSaleReturns(prev => [...prev, returnRecord]);
-
     setSales(prev => prev.map(s => {
       if (s.id !== saleId) return s;
       return {
         ...s,
-        items: s.items.map(item =>
-          item.id === saleItemId
-            ? { ...item, returnedQuantity: (item.returnedQuantity || 0) + quantity }
-            : item
-        )
+        subtotal: roundMoney(Math.max(0, s.subtotal - grossRefund)),
+        discount: roundMoney(Math.max(0, s.discount - discountShare)),
+        total: roundMoney(Math.max(0, s.total - refundAmount)),
+        paid: roundMoney(Math.max(0, s.paid - cashRefund)),
+        remaining: roundMoney(Math.max(0, s.remaining - debtForgiven)),
+        profit: roundMoney(s.profit - (grossRefund - saleItem.costPrice * quantity - discountShare)),
+        items: s.items.map(item => item.id === saleItemId
+          ? { ...item, returnedQuantity: (item.returnedQuantity || 0) + quantity } : item)
       };
     }));
 
     if (saleItem.imeiUnitId) {
-      updateIMEIUnit(saleItem.imeiUnitId, {
-        status: 'available',
-        saleId: '',
-        customerId: ''
-      });
+      updateIMEIUnit(saleItem.imeiUnitId, { status: 'available', saleId: '', customerId: '' });
     } else {
-      setInventory(prev => prev.map(inv =>
-        inv.id === saleItem.inventoryId
-          ? { ...inv, quantity: inv.quantity + quantity }
-          : inv
-      ));
+      setInventory(prev => prev.map(inv => inv.id === saleItem.inventoryId
+        ? { ...inv, quantity: inv.quantity + quantity } : inv));
     }
 
     if (cashRefund > 0) {
-      setSafes(prev => prev.map(s =>
-        s.id === sale.safeId ? { ...s, balance: s.balance - cashRefund } : s
-      ));
-
-      const transaction: Transaction = {
-        id: uuidv4(),
-        type: 'return',
-        amount: -cashRefund,
-        description: `مرتجع ${sale.invoiceNumber}`,
-        referenceId: returnRecord.id,
-        safeId: sale.safeId,
-        userId: currentUser?.id || '',
-        createdAt: now
-      };
-      setTransactions(prev => [...prev, transaction]);
+      setSafes(prev => prev.map(s => s.id === sale.safeId
+        ? { ...s, balance: roundMoney(s.balance - cashRefund) } : s));
+      setTransactions(prev => [...prev, {
+        id: uuidv4(), type: 'return', amount: -cashRefund,
+        description: `مرتجع ${sale.invoiceNumber}`, referenceId: returnRecord.id,
+        safeId: sale.safeId, userId: currentUser?.id || '', createdAt: now
+      }]);
     }
-
     if (debtForgiven > 0 && sale.customerId) {
-      setCustomers(prev => prev.map(c =>
-        c.id === sale.customerId ? { ...c, balance: c.balance - debtForgiven } : c
-      ));
+      setCustomers(prev => prev.map(c => c.id === sale.customerId
+        ? { ...c, balance: roundMoney(Math.max(0, c.balance - debtForgiven)) } : c));
     }
-
     return returnRecord;
-  }, [currentUser, sales, setSaleReturns, setSales, updateIMEIUnit, setInventory, setSafes, setTransactions, setCustomers]);
+  }, [currentUser, safes, sales, setCustomers, setInventory, setSaleReturns, setSales, setSafes, setTransactions, updateIMEIUnit]);
 
   const recordStockWaste = useCallback((
     inventoryId: string,
@@ -488,7 +662,10 @@ export function useStore() {
     notes: string
   ) => {
     const item = inventory.find(inv => inv.id === inventoryId);
-    if (!item || quantity <= 0) return null;
+    if (!item || !isPositiveInteger(quantity) || quantity > (item.hasIMEI ? imeiUnits.filter(u => u.inventoryId === inventoryId && u.status === 'available').length : item.quantity) ||
+        typeof supplierId !== 'string' || typeof reason !== 'string' || reason.length > MAX_TEXT_LENGTH ||
+        typeof notes !== 'string' || notes.length > MAX_TEXT_LENGTH ||
+        (supplierId && !suppliers.some(s => s.id === supplierId))) return null;
 
     if (item.hasIMEI) {
       const availableUnits = imeiUnits
@@ -549,7 +726,7 @@ export function useStore() {
     }
 
     return wasteRecord;
-  }, [currentUser, imeiUnits, inventory, setInventory, setStockWastes, setTransactions, updateIMEIUnit]);
+  }, [currentUser, imeiUnits, inventory, setInventory, setStockWastes, setTransactions, suppliers, updateIMEIUnit]);
 
   // Inventory audit functions
   const getInventoryAuditQuantity = useCallback((item: InventoryItem) => {
@@ -571,12 +748,20 @@ export function useStore() {
     notes: string,
     applyNow: boolean
   ) => {
+    if (!validText(title, 200) || !Array.isArray(rows) || rows.length === 0 || typeof notes !== 'string' || notes.length > MAX_TEXT_LENGTH) return null;
+    const rowIds = new Set<string>();
+    if (!rows.every(row => {
+      if (!row || !inventory.some(inv => inv.id === row.inventoryId) || rowIds.has(row.inventoryId) ||
+          !Number.isInteger(row.countedQuantity) || row.countedQuantity < 0 || typeof row.notes !== 'string' || row.notes.length > MAX_TEXT_LENGTH) return false;
+      rowIds.add(row.inventoryId);
+      return true;
+    })) return null;
     const nowIso = new Date().toISOString();
     const auditItems: InventoryAuditItem[] = rows.map(row => {
       const item = inventory.find(inv => inv.id === row.inventoryId);
       const category = categories.find(cat => cat.id === item?.categoryId);
       const systemQuantity = item ? getInventoryAuditQuantity(item) : 0;
-      const countedQuantity = Math.max(0, Number(row.countedQuantity) || 0);
+      const countedQuantity = row.countedQuantity;
       const difference = countedQuantity - systemQuantity;
       const costPrice = item?.costPrice || 0;
       return {
@@ -630,9 +815,14 @@ export function useStore() {
     const audit = inventoryAudits.find(a => a.id === auditId);
     if (!audit || audit.status === 'applied') return null;
 
+    if (!Array.isArray(audit.items) || audit.items.some(row =>
+      !row || typeof row.inventoryId !== 'string' || !inventory.some(item => item.id === row.inventoryId) ||
+      !Number.isInteger(row.countedQuantity) || row.countedQuantity < 0
+    )) return null;
+
     const newQuantities: Record<string, number> = {};
     audit.items.forEach(row => {
-      if (!row.hasIMEI) newQuantities[row.inventoryId] = row.countedQuantity;
+      if (!row.hasIMEI && inventory.some(item => item.id === row.inventoryId)) newQuantities[row.inventoryId] = row.countedQuantity;
     });
 
     setInventory(prev => prev.map(item =>
@@ -645,7 +835,7 @@ export function useStore() {
     const updatedAudit: InventoryAudit = { ...audit, status: 'applied', appliedAt };
     setInventoryAudits(prev => prev.map(a => a.id === auditId ? updatedAudit : a));
     return updatedAudit;
-  }, [inventoryAudits, setInventory, setInventoryAudits]);
+  }, [inventory, inventoryAudits, setInventory, setInventoryAudits]);
 
   const deleteInventoryAudit = useCallback((auditId: string) => {
     setInventoryAudits(prev => prev.filter(a => a.id !== auditId));
@@ -664,10 +854,24 @@ export function useStore() {
     dueDate: string;
     newSafeName?: string;
   }) => {
-    const amount = Math.abs(Number(input.amount) || 0);
-    if (!input.partyName || amount <= 0) return null;
+    const sideTypes: SideAccountEntryType[] = ['receivable', 'payable', 'incoming', 'outgoing'];
+    const impacts: SideAccountImpact[] = ['none', 'main_safe', 'capital', 'separate_safe'];
+    const amount = input.amount;
+    const paidAmount = input.paidAmount;
+    if (!validText(input.partyName, 200) || !sideTypes.includes(input.type) || !impacts.includes(input.impact) ||
+        !isFiniteNumber(amount) || amount <= 0 || !isFiniteNumber(paidAmount) || paidAmount < 0 || paidAmount > amount ||
+        typeof input.description !== 'string' || input.description.length > MAX_TEXT_LENGTH ||
+        typeof input.notes !== 'string' || input.notes.length > MAX_TEXT_LENGTH ||
+        typeof input.dueDate !== 'string' || input.dueDate.length > 30 ||
+        (input.newSafeName !== undefined && input.newSafeName.length > 200)) return null;
 
     let safeId = input.safeId;
+    if (input.impact === 'separate_safe' && !input.newSafeName?.trim()) return null;
+    if (input.impact !== 'separate_safe' && input.impact !== 'none' &&
+        (!safeId || !safes.some(s => s.id === safeId))) {
+      safeId = safes.find(s => s.isDefault)?.id || safes[0]?.id || '';
+      if (!safeId) return null;
+    }
     let safeDelta = 0;
     let transactionId = '';
     const nowIso = new Date().toISOString();
@@ -709,14 +913,15 @@ export function useStore() {
       setTransactions(prev => [...prev, transaction]);
     }
 
-    const remaining = Math.max(0, amount - Math.abs(Number(input.paidAmount) || 0));
+    const safePaidAmount = roundMoney(paidAmount);
+    const remaining = Math.max(0, roundMoney(amount - safePaidAmount));
     const newEntry: SideAccountEntry = {
       id: uuidv4(),
       partyName: input.partyName.trim(),
       type: input.type,
       impact: input.impact,
-      amount,
-      paidAmount: Math.min(amount, Math.abs(Number(input.paidAmount) || 0)),
+      amount: roundMoney(amount),
+      paidAmount: safePaidAmount,
       status: input.type === 'receivable' || input.type === 'payable'
         ? (remaining <= 0 ? 'settled' : remaining < amount ? 'partial' : 'open')
         : 'settled',
@@ -741,16 +946,25 @@ export function useStore() {
     if (!entry) return;
 
     let paidAmount = entry.paidAmount;
+    if (updates.notes !== undefined && (typeof updates.notes !== 'string' || updates.notes.length > MAX_TEXT_LENGTH)) return;
+    if (updates.dueDate !== undefined && (typeof updates.dueDate !== 'string' || updates.dueDate.length > 30)) return;
+    if (updates.safeId !== undefined && !safes.some(s => s.id === updates.safeId)) return;
     if (updates.paidAmount !== undefined) {
-      paidAmount = Math.min(entry.amount, Math.max(0, Number(updates.paidAmount) || 0));
-      const delta = Math.round((paidAmount - entry.paidAmount) * 100) / 100;
+      if (!isFiniteNumber(updates.paidAmount) || updates.paidAmount < 0 || updates.paidAmount > entry.amount) return;
+      paidAmount = roundMoney(updates.paidAmount);
+      const delta = roundMoney(paidAmount - entry.paidAmount);
 
       // Settling a receivable/payable moves real cash — unlike
       // incoming/outgoing entries, this wasn't recorded against any safe at
       // creation time, so record it now against the chosen (or default) safe.
       if (delta !== 0 && (entry.type === 'receivable' || entry.type === 'payable')) {
-        const targetSafeId = updates.safeId || entry.safeId || safes.find(s => s.isDefault)?.id || safes[0]?.id || '';
-        if (targetSafeId) {
+        const settlementTransactions = transactions.filter(t => t.referenceId === entry.id && t.safeId);
+        const lastSettlementSafeId = settlementTransactions[settlementTransactions.length - 1]?.safeId;
+        const targetSafeId = delta < 0
+          ? (lastSettlementSafeId || entry.safeId || '')
+          : (updates.safeId || entry.safeId || safes.find(s => s.isDefault)?.id || safes[0]?.id || '');
+        if (!targetSafeId || !safes.some(s => s.id === targetSafeId)) return;
+        {
           // Collecting a receivable = cash in; paying off a payable = cash out.
           const safeDelta = entry.type === 'receivable' ? delta : -delta;
           setSafes(prev => prev.map(s => s.id === targetSafeId ? { ...s, balance: s.balance + safeDelta } : s));
@@ -770,14 +984,19 @@ export function useStore() {
       }
     }
 
-    const status = updates.status || (
-      entry.type === 'receivable' || entry.type === 'payable'
-        ? paidAmount >= entry.amount ? 'settled' : paidAmount > 0 ? 'partial' : 'open'
-        : entry.status
-    );
+    const status = entry.type === 'receivable' || entry.type === 'payable'
+      ? paidAmount >= entry.amount ? 'settled' : paidAmount > 0 ? 'partial' : 'open'
+      : entry.status;
+    const safeUpdates = {
+      ...(updates.notes !== undefined ? { notes: updates.notes } : {}),
+      ...(updates.dueDate !== undefined ? { dueDate: updates.dueDate } : {}),
+      ...(updates.safeId !== undefined ? { safeId: updates.safeId } : {}),
+      paidAmount,
+      status,
+    };
 
-    setSideAccountEntries(prev => prev.map(e => (e.id === id ? { ...e, ...updates, paidAmount, status } : e)));
-  }, [currentUser, safes, sideAccountEntries, setSafes, setSideAccountEntries, setTransactions]);
+    setSideAccountEntries(prev => prev.map(e => (e.id === id ? { ...e, ...safeUpdates } : e)));
+  }, [currentUser, safes, sideAccountEntries, transactions, setSafes, setSideAccountEntries, setTransactions]);
 
   const deleteSideAccountEntry = useCallback((id: string) => {
     const entry = sideAccountEntries.find(e => e.id === id);
@@ -820,8 +1039,17 @@ export function useStore() {
   }, [maintenance]);
 
   const createMaintenance = useCallback((data: Omit<Maintenance, 'id' | 'ticketNumber' | 'status' | 'finalCost' | 'collectedAmount' | 'parts' | 'additionalExpenses' | 'profit' | 'completedAt' | 'deliveredAt'>) => {
+    if (!validText(data.customerName, 200) || !validText(data.customerPhone, 50) || !validText(data.deviceType, 200) ||
+        typeof data.deviceModel !== 'string' || data.deviceModel.length > MAX_TEXT_LENGTH ||
+        typeof data.imeiLink !== 'string' || data.imeiLink.length > 40 || typeof data.problem !== 'string' || data.problem.length > MAX_TEXT_LENGTH ||
+        typeof data.diagnosis !== 'string' || data.diagnosis.length > MAX_TEXT_LENGTH ||
+        !isFiniteNumber(data.estimatedCost) || data.estimatedCost < 0 || typeof data.technicianId !== 'string' || data.technicianId.length > 100 ||
+        typeof data.safeId !== 'string' || data.safeId.length > 100 || typeof data.receivedAt !== 'string' ||
+        typeof data.notes !== 'string' || data.notes.length > MAX_TEXT_LENGTH) return null;
     const newMaintenance: Maintenance = {
       ...data,
+      customerName: data.customerName.trim(), customerPhone: data.customerPhone.trim(), deviceType: data.deviceType.trim(),
+      estimatedCost: roundMoney(data.estimatedCost),
       id: uuidv4(),
       ticketNumber: generateTicketNumber(),
       status: 'received',
@@ -838,36 +1066,63 @@ export function useStore() {
   }, [generateTicketNumber, setMaintenance]);
 
   const updateMaintenance = useCallback((id: string, updates: Partial<Maintenance>) => {
-    setMaintenance(prev => prev.map(m => m.id === id ? { ...m, ...updates } : m));
-  }, [setMaintenance]);
+    const existing = maintenance.find(m => m.id === id);
+    if (!existing || existing.status === 'delivered' || existing.status === 'cancelled') return;
+    const validStatuses: Maintenance['status'][] = ['received', 'in_progress', 'completed', 'cancelled'];
+    if (updates.status !== undefined && !validStatuses.includes(updates.status)) return;
+    for (const value of [updates.estimatedCost, updates.additionalExpenses, updates.collectedAmount]) {
+      if (value !== undefined && (!isFiniteNumber(value) || value < 0)) return;
+    }
+    for (const value of [updates.customerName, updates.customerPhone, updates.deviceType, updates.deviceModel, updates.imeiLink, updates.problem, updates.diagnosis, updates.notes]) {
+      if (value !== undefined && (typeof value !== 'string' || value.length > MAX_TEXT_LENGTH)) return;
+    }
+    const safeUpdates: Partial<Maintenance> = { ...updates };
+    delete safeUpdates.id;
+    delete safeUpdates.ticketNumber;
+    delete safeUpdates.parts;
+    delete safeUpdates.finalCost;
+    delete safeUpdates.profit;
+    delete safeUpdates.deliveredAt;
+    if (safeUpdates.estimatedCost !== undefined) safeUpdates.estimatedCost = roundMoney(safeUpdates.estimatedCost);
+    if (safeUpdates.additionalExpenses !== undefined) safeUpdates.additionalExpenses = roundMoney(safeUpdates.additionalExpenses);
+    if (safeUpdates.collectedAmount !== undefined) safeUpdates.collectedAmount = roundMoney(safeUpdates.collectedAmount);
+    setMaintenance(prev => prev.map(m => m.id === id ? { ...m, ...safeUpdates } : m));
+  }, [maintenance, setMaintenance]);
 
   const addMaintenancePart = useCallback((maintenanceId: string, part: Omit<MaintenancePart, 'id'>) => {
-    const newPart: MaintenancePart = { ...part, id: uuidv4() };
-    
-    setMaintenance(prev => prev.map(m => {
-      if (m.id === maintenanceId) {
-        return { ...m, parts: [...m.parts, newPart] };
-      }
-      return m;
-    }));
+    const maint = maintenance.find(m => m.id === maintenanceId);
+    if (!maint || maint.status === 'delivered' || maint.status === 'cancelled' || typeof part.inventoryId !== 'string' ||
+        !isPositiveInteger(part.quantity) || !validText(part.name, 200) || !isFiniteNumber(part.unitCost) || part.unitCost < 0) return null;
 
-    // Deduct from inventory (use functional update for accuracy)
-    if (!part.inventoryId.startsWith('manual-')) {
-      setInventory(prev => prev.map(inv =>
-        inv.id === part.inventoryId
-          ? { ...inv, quantity: Math.max(0, inv.quantity - part.quantity) }
-          : inv
-      ));
+    let safePart: MaintenancePart;
+    if (part.inventoryId.startsWith('manual-')) {
+      safePart = { ...part, name: part.name.trim(), unitCost: roundMoney(part.unitCost), total: roundMoney(part.unitCost * part.quantity), id: uuidv4() };
+    } else {
+      const inventoryItem = inventory.find(inv => inv.id === part.inventoryId);
+      if (!inventoryItem || inventoryItem.hasIMEI || inventoryItem.quantity < part.quantity) return null;
+      // Use current inventory values rather than trusting a client-provided
+      // name/cost/total, then deduct exactly the amount recorded in the part.
+      safePart = {
+        id: uuidv4(), inventoryId: inventoryItem.id, name: inventoryItem.name,
+        quantity: part.quantity, unitCost: roundMoney(inventoryItem.costPrice),
+        total: roundMoney(inventoryItem.costPrice * part.quantity)
+      };
     }
 
-    return newPart;
-  }, [setInventory, setMaintenance]);
+    setMaintenance(prev => prev.map(m => m.id === maintenanceId ? { ...m, parts: [...m.parts, safePart] } : m));
+    if (!safePart.inventoryId.startsWith('manual-')) {
+      setInventory(prev => prev.map(inv => inv.id === safePart.inventoryId
+        ? { ...inv, quantity: inv.quantity - safePart.quantity } : inv));
+    }
+    return safePart;
+  }, [inventory, maintenance, setInventory, setMaintenance]);
 
   const removeMaintenancePart = useCallback((maintenanceId: string, partId: string) => {
     const maint = maintenance.find(m => m.id === maintenanceId);
     const part = maint?.parts.find(p => p.id === partId);
+    if (!maint || !part || maint.status === 'delivered' || maint.status === 'cancelled') return;
     
-    if (part && !part.inventoryId.startsWith('manual-')) {
+    if (!part.inventoryId.startsWith('manual-')) {
       // Return to inventory (use functional update for accuracy)
       setInventory(prev => prev.map(inv =>
         inv.id === part.inventoryId
@@ -886,30 +1141,30 @@ export function useStore() {
 
   const deliverMaintenance = useCallback((id: string, collectedAmount: number, safeId: string) => {
     const maint = maintenance.find(m => m.id === id);
-    if (!maint) return;
+    const safe = safes.find(s => s.id === safeId);
+    if (!maint || !safe || maint.status !== 'completed' || !isFiniteNumber(collectedAmount) || collectedAmount < 0) return null;
 
-    const partsCost = maint.parts.reduce((sum, p) => sum + p.total, 0);
-    const profit = collectedAmount - partsCost - maint.additionalExpenses;
+    const partsCost = maint.parts.reduce((sum, p) => sum + (isFiniteNumber(p.total) && p.total >= 0 ? p.total : 0), 0);
+    const additionalExpenses = isFiniteNumber(maint.additionalExpenses) && maint.additionalExpenses >= 0 ? maint.additionalExpenses : 0;
+    const finalAmount = roundMoney(collectedAmount);
+    const profit = roundMoney(finalAmount - partsCost - additionalExpenses);
 
-    updateMaintenance(id, {
-      status: 'delivered',
-      collectedAmount,
-      finalCost: collectedAmount,
-      profit,
-      deliveredAt: new Date().toISOString(),
-      safeId
-    });
+    setMaintenance(prev => prev.map(m => m.id === id ? {
+      ...m,
+      status: 'delivered', collectedAmount: finalAmount, finalCost: finalAmount,
+      profit, deliveredAt: new Date().toISOString(), safeId
+    } : m));
 
     // Update safe balance
     setSafes(prev => prev.map(s => 
-      s.id === safeId ? { ...s, balance: s.balance + collectedAmount } : s
+      s.id === safeId ? { ...s, balance: roundMoney(s.balance + finalAmount) } : s
     ));
 
     // Add transaction
     const transaction: Transaction = {
       id: uuidv4(),
       type: 'maintenance',
-      amount: collectedAmount,
+      amount: finalAmount,
       description: `صيانة ${maint.ticketNumber}`,
       referenceId: id,
       safeId,
@@ -917,14 +1172,17 @@ export function useStore() {
       createdAt: new Date().toISOString()
     };
     setTransactions(prev => [...prev, transaction]);
-  }, [maintenance, currentUser, updateMaintenance, setSafes, setTransactions]);
+  }, [currentUser, maintenance, setMaintenance, safes, setSafes, setTransactions]);
 
   // Safe functions
   const addSafe = useCallback((safe: Omit<Safe, 'id'>) => {
-    const newSafe: Safe = { ...safe, id: uuidv4() };
-    setSafes(prev => [...prev, newSafe]);
+    const validTypes: NonNullable<Safe['type']>[] = ['cash', 'ewallet', 'bank'];
+    if (!validText(safe.name, 200) || !isFiniteNumber(safe.balance) || safe.balance < 0 || typeof safe.isDefault !== 'boolean' ||
+        (safe.type !== undefined && !validTypes.includes(safe.type)) || safes.some(s => s.name.trim() === safe.name.trim())) return null;
+    const newSafe: Safe = { ...safe, name: safe.name.trim(), balance: roundMoney(safe.balance), id: uuidv4() };
+    setSafes(prev => [...prev.map(s => newSafe.isDefault ? { ...s, isDefault: false } : s), newSafe]);
     return newSafe;
-  }, [setSafes]);
+  }, [safes, setSafes]);
 
   // Transaction functions (for manual income/expense)
   const deleteSafe = useCallback((id: string): { ok: boolean; error?: string } => {
@@ -955,7 +1213,8 @@ export function useStore() {
     description: string,
     safeId: string
   ) => {
-    const finalAmount = type === 'expense' ? -Math.abs(amount) : Math.abs(amount);
+    if (!safes.some(s => s.id === safeId) || !isFiniteNumber(amount) || amount <= 0 || !validText(description, MAX_TEXT_LENGTH)) return null;
+    const finalAmount = roundMoney(type === 'expense' ? -amount : amount);
     
     const transaction: Transaction = {
       id: uuidv4(),
@@ -975,7 +1234,7 @@ export function useStore() {
     ));
 
     return transaction;
-  }, [currentUser, setTransactions, setSafes]);
+  }, [currentUser, safes, setTransactions, setSafes]);
 
   const deleteTransaction = useCallback((id: string) => {
     const trans = transactions.find(t => t.id === id);
@@ -989,9 +1248,13 @@ export function useStore() {
   }, [transactions, setSafes, setTransactions]);
 
   const transferBetweenSafes = useCallback((fromId: string, toId: string, amount: number) => {
+    const from = safes.find(s => s.id === fromId);
+    const to = safes.find(s => s.id === toId);
+    if (!from || !to || fromId === toId || !isFiniteNumber(amount) || amount <= 0 || amount > from.balance) return null;
+    const transferAmount = roundMoney(amount);
     setSafes(prev => prev.map(s => {
-      if (s.id === fromId) return { ...s, balance: s.balance - amount };
-      if (s.id === toId) return { ...s, balance: s.balance + amount };
+      if (s.id === fromId) return { ...s, balance: roundMoney(s.balance - transferAmount) };
+      if (s.id === toId) return { ...s, balance: roundMoney(s.balance + transferAmount) };
       return s;
     }));
 
@@ -1002,7 +1265,7 @@ export function useStore() {
       {
         id: uuidv4(),
         type: 'transfer',
-        amount: -amount,
+        amount: -transferAmount,
         description: 'تحويل للخزنة أخرى',
         referenceId: '',
         safeId: fromId,
@@ -1012,7 +1275,7 @@ export function useStore() {
       {
         id: uuidv4(),
         type: 'transfer',
-        amount,
+        amount: transferAmount,
         description: 'تحويل من خزنة أخرى',
         referenceId: '',
         safeId: toId,
@@ -1020,7 +1283,7 @@ export function useStore() {
         createdAt: timestamp
       }
     ]);
-  }, [currentUser, setSafes, setTransactions]);
+  }, [currentUser, safes, setSafes, setTransactions]);
 
   // ── Notifications engine ────────────────────────────────────────────────
   // Alerts derived from the shop's real data (low stock, expiring warranties,
@@ -1219,6 +1482,8 @@ export function useStore() {
     // Auth
     login,
     logout,
+    updateUsers,
+    updateSuppliers,
     changePassword,
 
     // Customers

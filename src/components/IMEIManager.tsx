@@ -9,9 +9,9 @@ interface IMEIManagerProps {
   imeiUnits: IMEIUnit[];
   inventory: InventoryItem[];
   customers: Customer[];
-  onAddIMEI: (unit: Omit<IMEIUnit, 'id' | 'createdAt'>) => void;
+  onAddIMEI: (unit: Omit<IMEIUnit, 'id' | 'createdAt'>) => IMEIUnit | null;
   onUpdateIMEI: (id: string, updates: Partial<IMEIUnit>) => void;
-  onDeleteIMEI: (id: string) => void;
+  onDeleteIMEI: (id: string) => { ok: boolean; error?: string };
   getIMEIHistory: (imei: string) => { unit: IMEIUnit; sales: Sale[]; maintenance: Maintenance[] } | null;
 }
 
@@ -95,7 +95,7 @@ export default function IMEIManager({
       return;
     }
 
-    onAddIMEI({
+    const created = onAddIMEI({
       inventoryId: formData.inventoryId,
       imei1: formData.imei1,
       imei2: formData.imei2,
@@ -110,6 +110,10 @@ export default function IMEIManager({
       purchasePrice: formData.purchasePrice,
       notes: formData.notes
     });
+    if (!created) {
+      alert('تعذر إضافة وحدة IMEI: تحقّق من المنتج والسعر وعدم تكرار الأرقام');
+      return;
+    }
 
     setShowAddModal(false);
     resetForm();
@@ -437,7 +441,8 @@ export default function IMEIManager({
                           <button
                             onClick={() => {
                               if (confirm('هل أنت متأكد من حذف هذا الجهاز؟')) {
-                                onDeleteIMEI(unit.id);
+                                const result = onDeleteIMEI(unit.id);
+                                if (!result.ok) alert(result.error || 'تعذر حذف الجهاز');
                               }
                             }}
                             className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"

@@ -60,8 +60,25 @@ export async function parseAndVerifyKey(keyStr: string): Promise<VerifyResult> {
       return { valid: false, error: 'مفتاح تالف أو معدّل' };
     }
 
-    if (payload.v !== 2 || !payload.id || !payload.p) {
-      return { valid: false, error: 'إصدار مفتاح غير مدعوم' };
+    if (
+      payload.v !== 2 ||
+      typeof payload.id !== 'string' ||
+      !/^[A-Za-z0-9_-]{1,64}$/.test(payload.id) ||
+      !Object.prototype.hasOwnProperty.call(PLAN_FEATURES, payload.p) ||
+      typeof payload.s !== 'string' ||
+      typeof payload.u !== 'number' ||
+      !Number.isInteger(payload.u) ||
+      payload.u < 1 ||
+      payload.u > 100_000 ||
+      typeof payload.i !== 'string' ||
+      typeof payload.e !== 'string' ||
+      typeof payload.lt !== 'boolean' ||
+      typeof payload.to !== 'string' ||
+      typeof payload.n !== 'string' ||
+      (payload.lt && payload.e !== '') ||
+      (!payload.lt && Number.isNaN(new Date(payload.e).getTime()))
+    ) {
+      return { valid: false, error: 'مفتاح غير صالح أو بياناته غير مكتملة' };
     }
 
     const publicKey = await importPublicKey(LICENSE_PUBLIC_KEY);
@@ -278,12 +295,20 @@ export async function reverifyLicense(license: ActiveLicense): Promise<ReverifyS
   try {
     const last = Number(localStorage.getItem(STORAGE_KEYS.lastServerVerify) || '0');
     if (Date.now() - last < REVERIFY_INTERVAL_MS) return 'throttled';
-    localStorage.setItem(STORAGE_KEYS.lastServerVerify, String(Date.now()));
   } catch {
     /* ignore storage errors */
   }
 
   const result = await serverVerify(license);
+  try {
+    // Do not suppress retries for a network outage. Successful and explicit
+    // server decisions can be throttled for 24 hours.
+    if (result.reason !== 'server_unreachable') {
+      localStorage.setItem(STORAGE_KEYS.lastServerVerify, String(Date.now()));
+    }
+  } catch {
+    /* ignore storage errors */
+  }
 
   if (result.ok) {
     license.lastVerifiedAt = new Date().toISOString();
@@ -296,18 +321,18 @@ export async function reverifyLicense(license: ActiveLicense): Promise<ReverifyS
 
   // Clear the local license only on explicit, authoritative rejections. A
   // revoked key or a key that is demonstrably bound to a *different* device is
-  // safe to block. Other failures (unknown_key / bad_token / unknown) are most
-  // often caused by the activation server losing its JSON store (e.g. a free
-  // ephemeral host redeploy/restart) or by a stale v1 record. The local key is
-  // still ECDSA-signed, not expired, and matches this device — so do not throw
-  // the user back to the activation screen.
-  if (result.reason === 'revoked' || result.reason === 'used_on_other_device') {
+  // safe to block. Unknown-key responses can still be caused by the activation
+  // server losing its JSON store (for example after an ephemeral host
+  // redeploy), so the signed local key remains usable in that case. A bad
+  // machine token is an explicit ownership failure and is handled below.
+  if (result.reason === 'revoked' || result.reason === 'used_on_other_device' || result.reason === 'bad_token') {
     clearLicense();
-    return result.reason === 'revoked' ? 'revoked' : 'used_on_other_device';
+    return result.reason === 'revoked'
+      ? 'revoked'
+      : result.reason === 'used_on_other_device' ? 'used_on_other_device' : 'bad_token';
   }
 
   switch (result.reason) {
-    case 'bad_token': return 'bad_token';
     case 'unknown_key': return 'unknown_key';
     default: return 'unknown';
   }
@@ -320,6 +345,21 @@ export interface StartupCheck {
   license?: ActiveLicense;
 }
 
+function isStoredLicenseRecord(value: unknown): value is ActiveLicense {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Partial<ActiveLicense>;
+  return typeof record.key === 'string' && record.key.length > 0 && record.key.length <= 20_000 &&
+    typeof record.keyId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(record.keyId) &&
+    typeof record.plan === 'string' &&
+    typeof record.shopName === 'string' && record.shopName.length <= 1_000 &&
+    typeof record.activatedAt === 'string' &&
+    typeof record.expiresAt === 'string' &&
+    typeof record.lifetime === 'boolean' &&
+    typeof record.maxUsers === 'number' && Number.isInteger(record.maxUsers) && record.maxUsers >= 1 && record.maxUsers <= 100_000 &&
+    typeof record.deviceId === 'string' && record.deviceId.length > 0 &&
+    (record.machineToken === undefined || typeof record.machineToken === 'string');
+}
+
 /**
  * Verify the stored activation on app startup:
  * re-check the digital signature, expiration, and the device fingerprint.
@@ -330,11 +370,12 @@ export async function verifyStoredActivation(): Promise<StartupCheck> {
 
   let record: ActiveLicense;
   try {
-    record = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
+    if (!isStoredLicenseRecord(parsed)) return { status: 'invalid' };
+    record = parsed;
   } catch {
     return { status: 'invalid' };
   }
-  if (!record.key || !record.keyId) return { status: 'invalid' };
 
   // Re-verify the signature of the original key (protects against tampered fields)
   const verified = await parseAndVerifyKey(record.key);
@@ -345,8 +386,10 @@ export async function verifyStoredActivation(): Promise<StartupCheck> {
   if (
     p.id !== record.keyId ||
     p.p !== record.plan ||
+    p.lt !== record.lifetime ||
     (p.lt ? '' : p.e) !== record.expiresAt ||
-    p.u !== record.maxUsers
+    p.u !== record.maxUsers ||
+    p.s !== record.shopName
   ) {
     return { status: 'invalid' };
   }
@@ -376,9 +419,17 @@ export async function verifyStoredActivation(): Promise<StartupCheck> {
     storeLicense(record);
   }
 
-  // إعادة تحقق دورية مع سيرفر التفعيل (v2) — في الخلفية ولا تعطّل الإقلاع.
-  // لو رفض السيرفر الترخيص يُمسح محلياً، ويُفرَض ذلك عند أول تحميل قادم.
-  void reverifyLicense(record).catch(() => undefined);
+  // Reverify before granting the app screen. Network failures are explicitly
+  // treated as offline grace, but authoritative revocation/token/device
+  // failures must be observed before the user can continue working.
+  try {
+    const serverStatus = await reverifyLicense(record);
+    if (serverStatus === 'revoked' || serverStatus === 'used_on_other_device' || serverStatus === 'bad_token') {
+      return { status: 'invalid' };
+    }
+  } catch {
+    // Keep the signed, device-matched license usable if the server is down.
+  }
 
   return { status: 'ok', license: record };
 }
@@ -388,9 +439,10 @@ export function getStoredLicense(includeExpired = false): ActiveLicense | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.activeLicense);
     if (!raw) return null;
-    const license = JSON.parse(raw) as ActiveLicense;
-    if (!includeExpired && isLicenseExpired(license.expiresAt, license.lifetime)) return null;
-    return license;
+    const parsed: unknown = JSON.parse(raw);
+    if (!isStoredLicenseRecord(parsed)) return null;
+    if (!includeExpired && isLicenseExpired(parsed.expiresAt, parsed.lifetime)) return null;
+    return parsed;
   } catch {
     return null;
   }
@@ -410,26 +462,37 @@ export async function generateLicenseKey(
   maxUsers: number,
   notes: string = ''
 ): Promise<LicenseKey> {
-  const privateKey = await importPrivateKey(privateKeyJwk);
+  if (!Object.prototype.hasOwnProperty.call(PLAN_FEATURES, plan)) {
+    throw new Error('خطة ترخيص غير صالحة');
+  }
 
-  const id = Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
+  const privateKey = await importPrivateKey(privateKeyJwk);
+  const randomPart = Array.from(crypto.getRandomValues(new Uint8Array(12)))
+    .map(byte => byte.toString(16).padStart(2, '0'))
+    .join('');
+  const id = `${Date.now().toString(36)}${randomPart}`;
   const now = new Date();
   const lifetime = plan === 'lifetime';
+  const safeDurationDays = Number.isFinite(durationDays) ? Math.max(1, Math.floor(durationDays)) : 1;
   const expiresAt = lifetime
     ? ''
-    : new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000).toISOString();
+    : new Date(now.getTime() + safeDurationDays * 24 * 60 * 60 * 1000).toISOString();
+  const safeMaxUsers = Number.isFinite(maxUsers)
+    ? Math.min(PLAN_FEATURES[plan].maxUsers, Math.max(1, Math.floor(maxUsers)))
+    : PLAN_FEATURES[plan].maxUsers;
+  const safeShopName = shopName.trim();
 
   const payload: KeyPayloadV2 = {
     v: 2,
     id,
     p: plan,
-    s: shopName,
-    u: maxUsers,
+    s: safeShopName,
+    u: safeMaxUsers,
     i: now.toISOString(),
     e: expiresAt,
     lt: lifetime,
-    to: issuedTo,
-    n: notes,
+    to: issuedTo.trim(),
+    n: notes.trim(),
   };
 
   const payloadB64 = b64urlEncodeString(JSON.stringify(payload));
@@ -440,14 +503,14 @@ export async function generateLicenseKey(
     id,
     key: keyStr,
     plan,
-    shopName,
-    issuedTo,
+    shopName: safeShopName,
+    issuedTo: issuedTo.trim(),
     issuedAt: now.toISOString(),
     expiresAt,
     lifetime,
     isActive: true,
-    maxUsers,
-    notes,
+    maxUsers: safeMaxUsers,
+    notes: notes.trim(),
   };
 }
 

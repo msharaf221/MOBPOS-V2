@@ -55,6 +55,40 @@ export const DEFAULT_BACKUP_SETTINGS: BackupSettings = {
 };
 
 const SETTINGS_KEY = 'backup_settings';
+const MAX_RECORDS_PER_STORE = 100_000;
+const MAX_RECORD_ID_LENGTH = 256;
+
+const RESTORABLE_STORES = new Set(
+  Object.values(indexedDBUtils.STORES).filter(
+    store => store !== indexedDBUtils.STORES.backups && store !== indexedDBUtils.STORES.settings
+  )
+);
+
+/**
+ * Validate a restore before touching IndexedDB. A backup is user-controlled
+ * input (files and Drive downloads), so malformed rows must never trigger a
+ * partial clear or inject records without an IndexedDB key.
+ */
+function validateRestoreStores(data: Record<string, unknown[]>): void {
+  for (const [storeName, items] of Object.entries(data)) {
+    if (!RESTORABLE_STORES.has(storeName)) continue;
+    if (!Array.isArray(items) || items.length > MAX_RECORDS_PER_STORE) {
+      throw new Error('حجم النسخة الاحتياطية غير صالح');
+    }
+
+    const ids = new Set<string>();
+    for (const item of items) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        throw new Error(`سجل غير صالح في مخزن ${storeName}`);
+      }
+      const id = (item as { id?: unknown }).id;
+      if (typeof id !== 'string' || id.length === 0 || id.length > MAX_RECORD_ID_LENGTH || ids.has(id)) {
+        throw new Error(`معرّف سجل غير صالح في مخزن ${storeName}`);
+      }
+      ids.add(id);
+    }
+  }
+}
 
 // ===== Settings persistence =====
 
@@ -305,15 +339,16 @@ export async function restoreFromParsed(parsed: unknown): Promise<void> {
   // Apply legacy settings carried over from old-format files, then strip
   // the carrier key so it never reaches the object stores.
   const { [LEGACY_SETTINGS_KEY]: legacySettings, ...stores } = data;
-  if (Array.isArray(legacySettings) && legacySettings[0] && typeof legacySettings[0] === 'object') {
-    try {
-      await indexedDBUtils.setSetting('shopSettings', legacySettings[0]);
-    } catch {
-      // settings are non-critical — continue restoring the data stores
-    }
-  }
+  validateRestoreStores(stores);
 
+  // importAllData performs one transaction for all supplied stores. Validate
+  // everything first, then write settings only after the data transaction has
+  // succeeded so a bad file cannot leave a half-restored database.
   await indexedDBUtils.importAllData(stores);
+
+  if (Array.isArray(legacySettings) && legacySettings[0] && typeof legacySettings[0] === 'object') {
+    await indexedDBUtils.setSetting('shopSettings', legacySettings[0]);
+  }
 }
 
 // ===== Manual backup =====
