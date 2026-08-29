@@ -51,14 +51,22 @@ export function useLocalStorage<T>(key: string, initialValue: T): [T, (value: T 
   // Listen to storage events (for multi-tab sync)
   useEffect(() => {
     const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === key && e.newValue) {
-        setStoredValue(JSON.parse(e.newValue));
+      if (e.key !== key) return;
+      if (!e.newValue) {
+        setStoredValue(initialValue);
+        return;
+      }
+      try {
+        setStoredValue(JSON.parse(e.newValue) as T);
+      } catch {
+        // Ignore malformed values written by another tab instead of allowing
+        // an uncaught event-handler exception to break the page.
       }
     };
 
     window.addEventListener('storage', handleStorageChange);
     return () => window.removeEventListener('storage', handleStorageChange);
-  }, [key]);
+  }, [initialValue, key]);
 
   return [storedValue, setValue, resetValue];
 }

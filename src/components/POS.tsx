@@ -20,15 +20,15 @@ interface POSProps {
   receiptFooter: string;
   onCreateSale: (
     customerId: string,
-    items: Omit<SaleItem, 'id'>[],
+    items: Omit<SaleItem, 'id' | 'returnedQuantity'>[],
     discount: number,
     paidAmount: number,
     paymentMethod: 'cash' | 'card' | 'installment',
     safeId: string,
     notes: string
-  ) => { invoiceNumber: string };
-  onAddCustomer: (customer: Omit<Customer, 'id' | 'createdAt' | 'balance'>) => Customer;
-  onAddInventoryItem?: (item: Omit<InventoryItem, 'id' | 'createdAt'>) => InventoryItem;
+  ) => { invoiceNumber: string } | null;
+  onAddCustomer: (customer: Omit<Customer, 'id' | 'createdAt' | 'balance'>) => Customer | null;
+  onAddInventoryItem?: (item: Omit<InventoryItem, 'id' | 'createdAt'>) => InventoryItem | null;
 }
 
 export interface CartItem {
@@ -99,6 +99,7 @@ export default function POS({
   const [cashReceived, setCashReceived] = useState<number | ''>('');
   const [activeMultiplier, setActiveMultiplier] = useState<number>(1);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(posSound.isEnabled());
+  const completingSaleRef = useRef(false);
 
   // Highlighting & Visual cues
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
@@ -698,6 +699,8 @@ export default function POS({
     }
 
     const safeToUse = selectedSafe || safes[0]?.id || '';
+    if (completingSaleRef.current) return;
+    completingSaleRef.current = true;
 
     const saleResult = onCreateSale(
       selectedCustomer?.id || '',
@@ -708,6 +711,12 @@ export default function POS({
       safeToUse,
       notes
     );
+    if (!saleResult) {
+      completingSaleRef.current = false;
+      posSound.playError();
+      showToast('تعذر تسجيل البيع: تغيّر المخزون أو بيانات الخزنة. راجع السلة وحاول مرة أخرى', 'error');
+      return;
+    }
 
     // Play pleasant success chime!
     posSound.playSuccess();
@@ -755,6 +764,7 @@ export default function POS({
     setPaidAmount('');
     setCashReceived('');
     setActiveMultiplier(1);
+    completingSaleRef.current = false;
   };
 
   // Park / Hold current sale
@@ -810,6 +820,10 @@ export default function POS({
       phone: newCustomer.phone.trim(),
       address: newCustomer.address.trim()
     });
+    if (!created) {
+      showToast('تعذر إضافة العميل: رقم الهاتف موجود أو البيانات غير صالحة', 'error');
+      return;
+    }
     setSelectedCustomer(created);
     setShowCustomerModal(false);
     setNewCustomer({ name: '', phone: '', address: '' });
@@ -838,6 +852,10 @@ export default function POS({
       minQuantity: 3,
       hasIMEI: false
     });
+    if (!created) {
+      showToast('تعذر إضافة المنتج: تحقّق من التصنيف أو الكود أو السعر أو وجود منتج مكرر', 'error');
+      return;
+    }
 
     setShowQuickAddModal(false);
     // Add immediately to active cart!

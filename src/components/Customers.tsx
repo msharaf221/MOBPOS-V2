@@ -9,9 +9,9 @@ interface CustomersProps {
   inventory: InventoryItem[];
   maintenance: Maintenance[];
   safes: Safe[];
-  onAddCustomer: (customer: Omit<Customer, 'id' | 'createdAt' | 'balance'>) => Customer;
+  onAddCustomer: (customer: Omit<Customer, 'id' | 'createdAt' | 'balance'>) => Customer | null;
   onUpdateCustomer: (id: string, updates: Partial<Customer>) => void;
-  onDeleteCustomer: (id: string) => void;
+  onDeleteCustomer: (id: string) => { ok: boolean; error?: string };
   onRecordPayment: (customerId: string, amount: number, safeId: string, notes: string) => void;
 }
 
@@ -101,7 +101,11 @@ export default function Customers({
       return;
     }
 
-    onAddCustomer(formData);
+    const created = onAddCustomer(formData);
+    if (!created) {
+      alert('تعذر إضافة العميل: رقم الهاتف موجود أو البيانات غير صالحة');
+      return;
+    }
     setShowAddModal(false);
     setFormData({ name: '', phone: '', address: '' });
   };
@@ -238,7 +242,8 @@ export default function Customers({
                   <button
                     onClick={() => {
                       if (confirm('هل أنت متأكد من حذف هذا العميل؟')) {
-                        onDeleteCustomer(customer.id);
+                        const result = onDeleteCustomer(customer.id);
+                        if (!result.ok) alert(result.error || 'تعذر حذف العميل');
                       }
                     }}
                     className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"

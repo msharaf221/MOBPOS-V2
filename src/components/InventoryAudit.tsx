@@ -30,7 +30,7 @@ interface InventoryAuditProps {
     rows: Array<{ inventoryId: string; countedQuantity: number; notes: string }>,
     notes: string,
     applyNow: boolean
-  ) => InventoryAuditType;
+  ) => InventoryAuditType | null;
   onApplyAudit: (auditId: string) => InventoryAuditType | null;
   onDeleteAudit: (auditId: string) => void;
 }
@@ -326,6 +326,10 @@ export default function InventoryAudit({
     }
     if (applyNow && !confirm('سيتم اعتماد الجرد وتحديث كميات المنتجات العادية. منتجات IMEI تظهر فروقاتها فقط وتحتاج ضبط من إدارة IMEI. هل تريد المتابعة؟')) return;
     const audit = onCreateAudit(title, allRows, notes, applyNow);
+    if (!audit) {
+      alert('تعذر حفظ الجرد: تحقق من الكميات والبيانات المدخلة.');
+      return;
+    }
     resetNewAudit(`✅ تم حفظ الجرد رقم ${audit.auditNumber}${applyNow ? ' واعتماده' : ''}`);
   };
 

@@ -6,7 +6,7 @@
 
 | الميزة | الوصف |
 |---|---|
-| **فصل الصلاحيات** | `ADMIN_TOKEN` إلزامي لحماية العمليات الإدارية (`/revoke` و `/release` و `/key/:id`)، و`ACTIVATION_TOKEN` للعميل |
+| **فصل الصلاحيات** | `ADMIN_TOKEN` و`ACTIVATION_TOKEN` إلزاميان؛ الأول للإدارة (`/revoke` و `/release` و `/key/:id`) والثاني للعميل |
 | **Rate Limiting مدمج** | حماية تلقائية من الإغراق والتخمين على `/activate` و `/verify` (30 طلب/دقيقة لكل IP) |
 | **Fail-Closed Startup** | يرفض السيرفر البدء تماماً إذا لم يتم ضبط `ADMIN_TOKEN` لحماية السيرفر من العمل بدون أمان |
 | **Machine Token** | عند أول تفعيل يُصدر السيرفر سراً عشوائياً مرتبطاً بالمفتاح + الجهاز، يحتفظ به العميل محلياً ويقدّمه عند كل إعادة تحقق |
@@ -41,9 +41,10 @@ ADMIN_TOKEN=your-strong-admin-secret npm start   # يشتغل على المنف�
 | المتغير | الوظيفة | الحالة | الافتراضي |
 |---|---|---|---|
 | `ADMIN_TOKEN` | توكن الإدارة السري لحماية `/revoke` و `/release` و `/key/:id` | **إلزامي** (السيرفر لن يبدأ بدونه) | لا يوجد |
-| `ACTIVATION_TOKEN` | توكن حماية اختياري لنقاط العميل (`/activate` و `/verify`) | اختياري | فارغ |
+| `ACTIVATION_TOKEN` | توكن حماية نقاط العميل (`/activate` و `/verify`) | **إلزامي** (السيرفر لن يبدأ بدونه) | لا يوجد |
 | `PORT` | منفذ السيرفر | اختياري | `8787` |
 | `DATA_FILE` | مسار ملف التخزين | اختياري | `data/activations.json` |
+| `TRUST_PROXY` | اضبطه على `1` فقط عند التشغيل خلف reverse proxy موثوق لتصحيح عنوان IP للـ rate limit | اختياري | `0` |
 
 ⚠️ **تنبيه:** إذا لم يتم تعيين `ADMIN_TOKEN` في متغيرات البيئة، سيرفض السيرفر العمل ويغلق فوراً (`Fail-Closed`).
 
@@ -64,8 +65,8 @@ export const ACTIVATION_SERVER_TOKEN: string = 'نفس-قيمة-ACTIVATION_TOKEN
 
 | Method | Path | الحماية | الوظيفة |
 |---|---|---|---|
-| `POST` | `/activate` | Rate Limit + `ACTIVATION_TOKEN` (اختياري) | تفعيل مفتاح: `{ keyId, deviceId }` → يعيد `machineToken` |
-| `POST` | `/verify` | Rate Limit + `ACTIVATION_TOKEN` (اختياري) | إعادة تحقق دوري: `{ keyId, deviceId, machineToken }` |
+| `POST` | `/activate` | Rate Limit + **`ACTIVATION_TOKEN` (إلزامي)** | تفعيل مفتاح: `{ keyId, deviceId }` → يعيد `machineToken` |
+| `POST` | `/verify` | Rate Limit + **`ACTIVATION_TOKEN` (إلزامي)** | إعادة تحقق دوري: `{ keyId, deviceId, machineToken }` |
 | `POST` | `/revoke` | **`ADMIN_TOKEN` (إلزامي)** | إلغاء مفتاح نهائياً (إدارة): `{ keyId }` |
 | `POST` | `/release` | **`ADMIN_TOKEN` (إلزامي)** | فك ارتباط مفتاح بجهازه (دعم فني): `{ keyId }` |
 | `GET` | `/key/:id` | **`ADMIN_TOKEN` (إلزامي)** | استعلام حالة مفتاح (مفعّل / غير مفعّل / ملغى) |

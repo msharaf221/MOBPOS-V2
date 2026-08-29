@@ -75,6 +75,7 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
   // ===== Sync state =====
   const [syncUrl, setSyncUrl] = useState(() => getSyncConfig().url);
   const [syncKey, setSyncKey] = useState(() => getSyncConfig().anonKey);
+  const [syncAccessToken, setSyncAccessToken] = useState(() => getSyncConfig().accessToken);
   const [syncTenant, setSyncTenant] = useState(() => getSyncConfig().tenantId || '');
   const [syncBusy, setSyncBusy] = useState(false);
   const [syncMsg, setSyncMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
@@ -1317,7 +1318,7 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
                   <div>
                     <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">رابط Supabase URL</label>
                     <input
@@ -1337,6 +1338,17 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                       value={syncKey}
                       onChange={e => setSyncKey(e.target.value)}
                       placeholder="anon public key"
+                      className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-800 dark:text-white font-mono text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Supabase Auth Access Token</label>
+                    <input
+                      type="password"
+                      dir="ltr"
+                      value={syncAccessToken}
+                      onChange={e => setSyncAccessToken(e.target.value)}
+                      placeholder="eyJ... (من Supabase Auth)"
                       className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-800 dark:text-white font-mono text-sm"
                     />
                   </div>
@@ -1362,7 +1374,7 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                 <div className="flex flex-wrap gap-3">
                   <button
                     onClick={async () => {
-                      saveSyncConfig({ url: syncUrl, anonKey: syncKey, tenantId: syncTenant });
+                      saveSyncConfig({ url: syncUrl, anonKey: syncKey, accessToken: syncAccessToken, tenantId: syncTenant });
                       setSyncMsg({ kind: 'ok', text: 'تم حفظ إعدادات المزامنة ✅' });
                     }}
                     className="px-5 py-2.5 bg-gray-600 hover:bg-gray-700 text-white font-bold rounded-xl transition"
@@ -1450,11 +1462,15 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                     const file = e.target.files?.[0];
                     if (!file) return;
                     try {
+                      const MAX_BACKUP_FILE_BYTES = 50 * 1024 * 1024;
+                      if (file.size > MAX_BACKUP_FILE_BYTES) {
+                        throw new Error('backup-too-large');
+                      }
                       const text = await file.text();
                       const parsed = JSON.parse(text);
                       await handleRestorePayload(parsed);
                     } catch {
-                      alert('حدث خطأ في قراءة الملف — تأكد أنه ملف نسخة احتياطية صالح');
+                      alert('حدث خطأ في قراءة الملف — تأكد أنه ملف نسخة احتياطية صالح وأصغر من 50 ميجابايت');
                     }
                     e.target.value = '';
                   }}

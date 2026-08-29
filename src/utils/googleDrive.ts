@@ -36,12 +36,13 @@ let cachedToken: { token: string; expiresAt: number } | null = null;
 // ===== Google Identity Services loader =====
 
 let gisPromise: Promise<void> | null = null;
+let tokenPromise: Promise<string | null> | null = null;
 
 export function loadGis(): Promise<void> {
   if (window.google?.accounts?.oauth2) return Promise.resolve();
   if (gisPromise) return gisPromise;
 
-  gisPromise = new Promise<void>((resolve, reject) => {
+  const promise = new Promise<void>((resolve, reject) => {
     const existing = document.querySelector(`script[src="${GIS_SRC}"]`);
     const onReady = () => {
       if (window.google?.accounts?.oauth2) resolve();
@@ -61,6 +62,12 @@ export function loadGis(): Promise<void> {
     document.head.appendChild(script);
   });
 
+  // A transient CDN/network failure must not poison all future connection
+  // attempts for the lifetime of the renderer.
+  gisPromise = promise.catch(error => {
+    gisPromise = null;
+    throw error;
+  });
   return gisPromise;
 }
 
@@ -78,57 +85,66 @@ export async function getAccessToken(clientId: string, silent: boolean): Promise
   if (cachedToken && cachedToken.expiresAt > Date.now() + 60_000) {
     return cachedToken.token;
   }
+  // Several backup/list actions can start together. Share one OAuth request so
+  // they do not open competing popups or overwrite the token cache.
+  if (tokenPromise) return tokenPromise;
 
-  try {
-    await loadGis();
-  } catch {
-    return null;
-  }
-
-  const oauth2 = window.google?.accounts?.oauth2;
-  if (!oauth2) return null;
-
-  return new Promise<string | null>((resolve) => {
-    let settled = false;
-    const finish = (value: string | null) => {
-      if (!settled) {
-        settled = true;
-        resolve(value);
-      }
-    };
-
-    // Safety timeout so the app never hangs waiting for a blocked popup
-    const timeoutMs = silent ? 8_000 : 120_000;
-    const timer = setTimeout(() => finish(null), timeoutMs);
-
+  tokenPromise = (async () => {
     try {
-      const client = oauth2.initTokenClient({
-        client_id: clientId,
-        scope: DRIVE_SCOPE,
-        callback: (response) => {
-          clearTimeout(timer);
-          if (response.access_token) {
-            cachedToken = {
-              token: response.access_token,
-              expiresAt: Date.now() + 55 * 60 * 1000,
-            };
-            finish(response.access_token);
-          } else {
-            finish(null);
-          }
-        },
-        error_callback: () => {
-          clearTimeout(timer);
-          finish(null);
-        },
-      });
-
-      client.requestAccessToken({ prompt: silent ? 'none' : '' });
+      await loadGis();
     } catch {
-      clearTimeout(timer);
-      finish(null);
+      return null;
     }
+
+    const oauth2 = window.google?.accounts?.oauth2;
+    if (!oauth2) return null;
+
+    return new Promise<string | null>((resolve) => {
+      let settled = false;
+      const finish = (value: string | null) => {
+        if (!settled) {
+          settled = true;
+          resolve(value);
+        }
+      };
+
+      // Safety timeout so the app never hangs waiting for a blocked popup
+      const timeoutMs = silent ? 8_000 : 120_000;
+      const timer = setTimeout(() => finish(null), timeoutMs);
+
+      try {
+        const client = oauth2.initTokenClient({
+          client_id: clientId,
+          scope: DRIVE_SCOPE,
+          callback: (response) => {
+            clearTimeout(timer);
+            if (response.access_token) {
+              cachedToken = {
+                token: response.access_token,
+                expiresAt: Date.now() + 55 * 60 * 1000,
+              };
+              finish(response.access_token);
+            } else {
+              finish(null);
+            }
+          },
+          error_callback: () => {
+            clearTimeout(timer);
+            finish(null);
+          },
+        });
+
+        client.requestAccessToken({ prompt: silent ? 'none' : '' });
+      } catch {
+        clearTimeout(timer);
+        finish(null);
+      }
+    });
+  })().finally(() => {
+    tokenPromise = null;
   });
+
+  return tokenPromise;
 }
 
 export function clearTokenCache(): void {
@@ -138,21 +154,33 @@ export function clearTokenCache(): void {
 // ===== Drive REST helpers =====
 
 async function driveFetch(url: string, token: string, init?: RequestInit): Promise<Response> {
-  const res = await fetch(url, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      ...(init?.headers || {}),
-    },
-  });
-  if (res.status === 401) {
-    clearTokenCache();
-    throw new Error('انتهت صلاحية جلسة Google — أعد الاتصال');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30_000);
+  try {
+    const res = await fetch(url, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(init?.headers || {}),
+      },
+    });
+    if (res.status === 401) {
+      clearTokenCache();
+      throw new Error('انتهت صلاحية جلسة Google — أعد الاتصال');
+    }
+    if (!res.ok) {
+      throw new Error(`خطأ من Google Drive (${res.status})`);
+    }
+    return res;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error('انتهت مهلة الاتصال بـ Google Drive');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
   }
-  if (!res.ok) {
-    throw new Error(`خطأ من Google Drive (${res.status})`);
-  }
-  return res;
 }
 
 export interface DriveBackupFile {
@@ -198,7 +226,11 @@ export async function uploadBackupToDrive(token: string, payload: BackupPayload)
   const json = JSON.stringify(payload, null, 2);
 
   // Same-day file already there? Update it.
-  const nameQuery = encodeURIComponent(`name='${fileName}' and trashed=false`);
+  // Scope the lookup to MOBPOS-owned files. Searching by name alone could
+  // overwrite an unrelated user file with the same date-based name.
+  const nameQuery = encodeURIComponent(
+    `name='${fileName}' and appProperties has { key='${APP_PROPERTY_KEY}' and value='${APP_PROPERTY_VALUE}' } and trashed=false`
+  );
   const searchRes = await driveFetch(
     `https://www.googleapis.com/drive/v3/files?q=${nameQuery}&fields=files(id)&pageSize=1`,
     token

@@ -439,7 +439,7 @@ export default function App() {
         return (
           <Suppliers
             suppliers={store.suppliers}
-            onUpdate={store.setSuppliers}
+            onUpdate={store.updateSuppliers}
           />
         );
       case 'users':
@@ -450,7 +450,7 @@ export default function App() {
           <Users
             users={store.users}
             currentUser={store.currentUser!}
-            onUpdate={store.setUsers}
+            onUpdate={store.updateUsers}
           />
         );
       case 'settings':
@@ -461,7 +461,7 @@ export default function App() {
           <Settings
             currentUser={store.currentUser!}
             isDarkMode={store.isDarkMode}
-            onToggleDarkMode={() => store.setIsDarkMode(!store.isDarkMode)}
+            onToggleDarkMode={() => store.setIsDarkMode(prev => !prev)}
             onResetData={store.resetAllData}
             settings={store.appSettings}
             onSaveSettings={store.setAppSettings}
