@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 
 const DB_NAME = 'MobileShopDB';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 // Store names
 const STORES = {
@@ -55,6 +55,7 @@ function openDB(): Promise<IDBDatabase> {
 
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
+      const transaction = (event.target as IDBOpenDBRequest).transaction;
 
       Object.values(STORES).forEach((storeName) => {
         if (!db.objectStoreNames.contains(storeName)) {
@@ -65,6 +66,55 @@ function openDB(): Promise<IDBDatabase> {
       // Settings use arbitrary string keys rather than an `id` field.
       if (!db.objectStoreNames.contains('appSettings')) {
         db.createObjectStore('appSettings');
+      }
+
+      // Additive schema indexing for v5 (never clears or overwrites existing data)
+      if (transaction) {
+        if (db.objectStoreNames.contains('inventory')) {
+          const invStore = transaction.objectStore('inventory');
+          if (!invStore.indexNames.contains('code')) {
+            invStore.createIndex('code', 'code', { unique: false });
+          }
+          if (!invStore.indexNames.contains('barcode')) {
+            invStore.createIndex('barcode', 'barcode', { unique: false });
+          }
+          if (!invStore.indexNames.contains('categoryId')) {
+            invStore.createIndex('categoryId', 'categoryId', { unique: false });
+          }
+        }
+
+        if (db.objectStoreNames.contains('imeiUnits')) {
+          const imeiStore = transaction.objectStore('imeiUnits');
+          if (!imeiStore.indexNames.contains('imei1')) {
+            imeiStore.createIndex('imei1', 'imei1', { unique: false });
+          }
+          if (!imeiStore.indexNames.contains('inventoryId')) {
+            imeiStore.createIndex('inventoryId', 'inventoryId', { unique: false });
+          }
+          if (!imeiStore.indexNames.contains('status')) {
+            imeiStore.createIndex('status', 'status', { unique: false });
+          }
+        }
+
+        if (db.objectStoreNames.contains('sales')) {
+          const salesStore = transaction.objectStore('sales');
+          if (!salesStore.indexNames.contains('customerId')) {
+            salesStore.createIndex('customerId', 'customerId', { unique: false });
+          }
+          if (!salesStore.indexNames.contains('invoiceNumber')) {
+            salesStore.createIndex('invoiceNumber', 'invoiceNumber', { unique: false });
+          }
+        }
+
+        if (db.objectStoreNames.contains('transactions')) {
+          const txStore = transaction.objectStore('transactions');
+          if (!txStore.indexNames.contains('safeId')) {
+            txStore.createIndex('safeId', 'safeId', { unique: false });
+          }
+          if (!txStore.indexNames.contains('referenceId')) {
+            txStore.createIndex('referenceId', 'referenceId', { unique: false });
+          }
+        }
       }
     };
   });
