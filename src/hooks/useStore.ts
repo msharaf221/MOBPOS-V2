@@ -16,6 +16,7 @@ import {
 } from '../data/initialData';
 import { buildAutoNotifications, mergeAutoNotifications } from '../utils/alerts';
 import { buildImeiStockIndex } from '../utils/stockCounts';
+import { formatDate } from '../utils/format';
 
 const MAX_TEXT_LENGTH = 2_000;
 /** نافذة تنبيه الضمان — نفس قيمة محرك التنبيهات (alerts.ts). */
@@ -247,13 +248,13 @@ export function useStore() {
     ));
     // Increase safe balance
     setSafes(prev => prev.map(s => 
-      s.id === safeId ? { ...s, balance: s.balance + amount } : s
+      s.id === safeId ? { ...s, balance: roundMoney(s.balance + amount) } : s
     ));
     // Record transaction
     const transaction: Transaction = {
       id: uuidv4(),
       type: 'customer_payment',
-      amount,
+      amount: roundMoney(amount),
       description: `دفعة من حساب العميل${safeNotes ? ` - ${safeNotes}` : ''}`,
       referenceId: customerId,
       safeId,
@@ -292,6 +293,7 @@ export function useStore() {
       if (s.id === cashSafeId) {
         newBalance += type === 'deposit' ? (amount + fee) : -(amount - fee);
       }
+      newBalance = roundMoney(newBalance);
       return s.balance !== newBalance ? { ...s, balance: newBalance } : s;
     }));
 
@@ -588,13 +590,23 @@ export function useStore() {
     // updates below preserve each individual write. UI double-submit is
     // guarded separately, while this layer prevents negative stock and stale
     // IMEI units from being recorded in the first place.
+    const soldImeiMap = new Map<string, { status: IMEIUnit['status']; saleId: string; customerId: string }>();
     saleItems.forEach(item => {
       if (item.imeiUnitId) {
-        updateIMEIUnit(item.imeiUnitId, {
-          status: 'sold', saleId: newSale.id, customerId
+        soldImeiMap.set(item.imeiUnitId, {
+          status: 'sold',
+          saleId: newSale.id,
+          customerId
         });
       }
     });
+    if (soldImeiMap.size > 0) {
+      setImeiUnits(prev => prev.map(u => {
+        const update = soldImeiMap.get(u.id);
+        return update ? { ...u, ...update } : u;
+      }));
+    }
+
     setInventory(prev => prev.map(inv => {
       const deduct = quantitiesToDeduct[inv.id];
       return deduct ? { ...inv, quantity: inv.quantity - deduct } : inv;
@@ -616,7 +628,7 @@ export function useStore() {
     }
     setSales(prev => [...prev, newSale]);
     return newSale;
-  }, [currentUser, customers, generateInvoiceNumber, imeiUnits, inventory, safes, setCustomers, setInventory, setImeiUnits, setSafes, setSales, setTransactions, updateIMEIUnit]);
+  }, [currentUser, customers, generateInvoiceNumber, imeiUnits, inventory, safes, setCustomers, setInventory, setImeiUnits, setSafes, setSales, setTransactions]);
 
   const processSaleReturn = useCallback((
     saleId: string,
@@ -671,7 +683,8 @@ export function useStore() {
     }));
 
     if (saleItem.imeiUnitId) {
-      updateIMEIUnit(saleItem.imeiUnitId, { status: 'available', saleId: '', customerId: '' });
+      setImeiUnits(prev => prev.map(u => u.id === saleItem.imeiUnitId
+        ? { ...u, status: 'available', saleId: '', customerId: '' } : u));
     } else {
       setInventory(prev => prev.map(inv => inv.id === saleItem.inventoryId
         ? { ...inv, quantity: inv.quantity + quantity } : inv));
@@ -691,7 +704,7 @@ export function useStore() {
         ? { ...c, balance: roundMoney(Math.max(0, c.balance - debtForgiven)) } : c));
     }
     return returnRecord;
-  }, [currentUser, safes, sales, setCustomers, setInventory, setSaleReturns, setSales, setSafes, setTransactions, updateIMEIUnit]);
+  }, [currentUser, safes, sales, setCustomers, setInventory, setImeiUnits, setSaleReturns, setSales, setSafes, setTransactions]);
 
   const recordStockWaste = useCallback((
     inventoryId: string,
@@ -713,14 +726,19 @@ export function useStore() {
 
       if (availableUnits.length !== quantity) return null;
 
+      const wastedMap = new Map<string, { status: IMEIUnit['status']; saleId: string; customerId: string; notes: string }>();
       availableUnits.forEach(unit => {
-        updateIMEIUnit(unit.id, {
+        wastedMap.set(unit.id, {
           status: 'wasted',
           saleId: '',
           customerId: '',
-          notes: notes || unit.notes
+          notes: notes || unit.notes,
         });
       });
+      setImeiUnits(prev => prev.map(u => {
+        const update = wastedMap.get(u.id);
+        return update ? { ...u, ...update } : u;
+      }));
     } else {
       if (item.quantity < quantity) return null;
 
@@ -765,7 +783,7 @@ export function useStore() {
     }
 
     return wasteRecord;
-  }, [currentUser, imeiUnits, inventory, setInventory, setStockWastes, setTransactions, suppliers, updateIMEIUnit]);
+  }, [currentUser, imeiUnits, inventory, setImeiUnits, setInventory, setStockWastes, setTransactions, suppliers]);
 
   // Inventory audit functions
   const getInventoryAuditQuantity = useCallback((item: InventoryItem) => {
@@ -822,7 +840,7 @@ export function useStore() {
     const newAudit: InventoryAudit = {
       id: uuidv4(),
       auditNumber: generateAuditNumber(),
-      title: title || `جرد ${new Date().toLocaleDateString('ar-EG')}`,
+      title: title || `جرد ${formatDate(new Date())}`,
       status: applyNow ? 'applied' : 'draft',
       items: auditItems,
       totalShortage: auditItems.filter(i => i.difference < 0).reduce((sum, i) => sum + Math.abs(i.difference), 0),
@@ -935,7 +953,7 @@ export function useStore() {
       }
 
       if (safeId) {
-        setSafes(prev => prev.map(s => s.id === safeId ? { ...s, balance: s.balance + safeDelta } : s));
+        setSafes(prev => prev.map(s => s.id === safeId ? { ...s, balance: roundMoney(s.balance + safeDelta) } : s));
       }
 
       transactionId = uuidv4();
@@ -1006,7 +1024,7 @@ export function useStore() {
         {
           // Collecting a receivable = cash in; paying off a payable = cash out.
           const safeDelta = entry.type === 'receivable' ? delta : -delta;
-          setSafes(prev => prev.map(s => s.id === targetSafeId ? { ...s, balance: s.balance + safeDelta } : s));
+          setSafes(prev => prev.map(s => s.id === targetSafeId ? { ...s, balance: roundMoney(s.balance + safeDelta) } : s));
 
           const transaction: Transaction = {
             id: uuidv4(),

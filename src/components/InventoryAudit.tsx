@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { Category, IMEIUnit, InventoryAudit as InventoryAuditType, InventoryItem, User } from '../types';
 import { buildImeiStockIndex } from '../utils/stockCounts';
-import { formatCurrency } from '../utils/format';
+import { formatCurrency, formatDate, formatDateTime } from '../utils/format';
 import { downloadExcel } from '../utils/reports';
 
 interface InventoryAuditProps {
@@ -63,7 +63,7 @@ export default function InventoryAudit({
   const [activeTab, setActiveTab] = useState<'new' | 'history'>('new');
   const [step, setStep] = useState<AuditStep>('setup');
   const [searchTerm, setSearchTerm] = useState('');
-  const [title, setTitle] = useState(`جرد ${new Date().toLocaleDateString('ar-EG')}`);
+  const [title, setTitle] = useState(`جرد ${formatDate(new Date())}`);
   const [notes, setNotes] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
@@ -125,7 +125,7 @@ export default function InventoryAudit({
     setCounts({});
     setIncludedIds(new Set());
     setNotes('');
-    setTitle(`جرد ${new Date().toLocaleDateString('ar-EG')}`);
+    setTitle(`جرد ${formatDate(new Date())}`);
     setSearchTerm('');
     setCategoryFilter('all');
     setTypeFilter('all');
@@ -140,7 +140,7 @@ export default function InventoryAudit({
   useEffect(() => {
     const draft = loadDraft();
     if (draft) {
-      setTitle(draft.title || `جرد ${new Date().toLocaleDateString('ar-EG')}`);
+      setTitle(draft.title || `جرد ${formatDate(new Date())}`);
       setNotes(draft.notes || '');
       setStep(draft.step === 'count' || draft.step === 'review' ? draft.step : 'setup');
       setCategoryFilter(draft.categoryFilter || 'all');
@@ -632,7 +632,7 @@ export default function InventoryAudit({
           <div className="p-4 flex justify-between items-center border-b border-gray-200 dark:border-gray-700">
             <h3 className="font-bold text-gray-800 dark:text-white">سجل الجردات السابقة</h3>
             <button
-              onClick={() => downloadExcel(`inventory-audits-${new Date().toISOString().slice(0, 10)}`, ['رقم الجرد', 'الاسم', 'الحالة', 'تاريخ الإنشاء', 'العجز', 'الزيادة', 'قيمة الفرق'], audits.map(a => [a.auditNumber, a.title, a.status === 'applied' ? 'معتمد' : 'مسودة', new Date(a.createdAt).toLocaleString('ar-EG'), a.totalShortage, a.totalSurplus, a.netDifferenceCost]))}
+              onClick={() => downloadExcel(`inventory-audits-${new Date().toISOString().slice(0, 10)}`, ['رقم الجرد', 'الاسم', 'الحالة', 'تاريخ الإنشاء', 'العجز', 'الزيادة', 'قيمة الفرق'], audits.map(a => [a.auditNumber, a.title, a.status === 'applied' ? 'معتمد' : 'مسودة', formatDateTime(a.createdAt), a.totalShortage, a.totalSurplus, a.netDifferenceCost]))}
               className="flex items-center gap-2 px-3 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700"
             ><FileSpreadsheet size={18} />تصدير</button>
           </div>
@@ -642,7 +642,7 @@ export default function InventoryAudit({
                 <summary className="cursor-pointer flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                   <div>
                     <div className="font-bold text-gray-800 dark:text-white">{audit.auditNumber} - {audit.title}</div>
-                    <div className="text-sm text-gray-500">{new Date(audit.createdAt).toLocaleString('ar-EG')} • {users.find(u => u.id === audit.userId)?.name || 'مستخدم'}</div>
+                    <div className="text-sm text-gray-500">{formatDateTime(audit.createdAt)} • {users.find(u => u.id === audit.userId)?.name || 'مستخدم'}</div>
                   </div>
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className={`badge ${audit.status === 'applied' ? 'badge-success' : 'badge-warning'}`}>{audit.status === 'applied' ? 'معتمد' : 'مسودة'}</span>

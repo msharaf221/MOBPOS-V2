@@ -1,8 +1,10 @@
 // ============================================================
 //  حالة الترخيص — دوال نقية (قابلة للاختبار)
 //
-//  لا تعتمد على React أو localStorage حتى تظل قابلة للوحدة.
+//  لا تعتمد على React حتى تظل قابلة للوحدة.
 // ============================================================
+
+import { formatDate } from '../utils/format.ts';
 
 export type LicenseStatusValue = 'active' | 'expiring' | 'expired';
 
@@ -48,7 +50,7 @@ export function formatLicenseExpiry(expiresAt: string, lifetime = false): string
   if (lifetime || !expiresAt) return 'مدى الحياة';
   const date = new Date(expiresAt);
   if (Number.isNaN(date.getTime())) return expiresAt;
-  return date.toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' });
+  return formatDate(date, { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
 /** نص حالة واضح للتطبيق. */

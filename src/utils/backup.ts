@@ -7,6 +7,7 @@
 
 import { indexedDBUtils } from '../hooks/useIndexedDB';
 import { getAccessToken, uploadBackupToDrive, pruneDriveBackups } from './googleDrive';
+import { formatDateTime } from './format.ts';
 
 // ===== Types =====
 
@@ -490,10 +491,7 @@ export async function requestPersistentStorage(): Promise<boolean> {
 export function formatBackupTime(iso: string | null): string {
   if (!iso) return '—';
   try {
-    return new Date(iso).toLocaleString('ar-EG', {
-      dateStyle: 'medium',
-      timeStyle: 'short',
-    });
+    return formatDateTime(iso);
   } catch {
     return iso;
   }

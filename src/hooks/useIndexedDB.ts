@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 
 const DB_NAME = 'MobileShopDB';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 // Store names
 const STORES = {
@@ -55,6 +55,7 @@ function openDB(): Promise<IDBDatabase> {
 
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
+      const transaction = (event.target as IDBOpenDBRequest).transaction;
 
       Object.values(STORES).forEach((storeName) => {
         if (!db.objectStoreNames.contains(storeName)) {
@@ -65,6 +66,55 @@ function openDB(): Promise<IDBDatabase> {
       // Settings use arbitrary string keys rather than an `id` field.
       if (!db.objectStoreNames.contains('appSettings')) {
         db.createObjectStore('appSettings');
+      }
+
+      // Additive schema indexing for v5 (never clears or overwrites existing data)
+      if (transaction) {
+        if (db.objectStoreNames.contains('inventory')) {
+          const invStore = transaction.objectStore('inventory');
+          if (!invStore.indexNames.contains('code')) {
+            invStore.createIndex('code', 'code', { unique: false });
+          }
+          if (!invStore.indexNames.contains('barcode')) {
+            invStore.createIndex('barcode', 'barcode', { unique: false });
+          }
+          if (!invStore.indexNames.contains('categoryId')) {
+            invStore.createIndex('categoryId', 'categoryId', { unique: false });
+          }
+        }
+
+        if (db.objectStoreNames.contains('imeiUnits')) {
+          const imeiStore = transaction.objectStore('imeiUnits');
+          if (!imeiStore.indexNames.contains('imei1')) {
+            imeiStore.createIndex('imei1', 'imei1', { unique: false });
+          }
+          if (!imeiStore.indexNames.contains('inventoryId')) {
+            imeiStore.createIndex('inventoryId', 'inventoryId', { unique: false });
+          }
+          if (!imeiStore.indexNames.contains('status')) {
+            imeiStore.createIndex('status', 'status', { unique: false });
+          }
+        }
+
+        if (db.objectStoreNames.contains('sales')) {
+          const salesStore = transaction.objectStore('sales');
+          if (!salesStore.indexNames.contains('customerId')) {
+            salesStore.createIndex('customerId', 'customerId', { unique: false });
+          }
+          if (!salesStore.indexNames.contains('invoiceNumber')) {
+            salesStore.createIndex('invoiceNumber', 'invoiceNumber', { unique: false });
+          }
+        }
+
+        if (db.objectStoreNames.contains('transactions')) {
+          const txStore = transaction.objectStore('transactions');
+          if (!txStore.indexNames.contains('safeId')) {
+            txStore.createIndex('safeId', 'safeId', { unique: false });
+          }
+          if (!txStore.indexNames.contains('referenceId')) {
+            txStore.createIndex('referenceId', 'referenceId', { unique: false });
+          }
+        }
       }
     };
   });
@@ -302,7 +352,7 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
 }
 
 /** يحسب الفروقات بين لقطتين لنفس المخزن. */
-function diffStore<T extends StoreRecord>(previous: T[], next: T[]): { addedOrChanged: T[]; removedIds: string[] } {
+export function diffStore<T extends StoreRecord>(previous: T[], next: T[]): { addedOrChanged: T[]; removedIds: string[] } {
   const previousById = new Map<string, T>(previous.map(item => [item.id, item]));
   const nextById = new Map<string, T>(next.map(item => [item.id, item]));
 
@@ -568,6 +618,68 @@ export function useIndexedDBSetting<T>(
   return [value, updateValue, isLoading];
 }
 
+export interface MultiStoreDelta<T extends StoreRecord = StoreRecord> {
+  storeName: string;
+  previous: T[];
+  next: T[];
+  known?: boolean;
+}
+
+/**
+ * يكتب فروقات عدة مخازن في معاملة IndexedDB ذرّية واحدة.
+ * إذا فشلت الكتابة في أي مخزن، تتراجع المعاملة بالكامل عن كل المخازن.
+ */
+export async function persistMultiStoreDeltas(
+  deltas: MultiStoreDelta[]
+): Promise<void> {
+  if (deltas.length === 0) return;
+  const storeNames = Array.from(new Set(deltas.map(d => d.storeName)));
+
+  await runTransaction(storeNames, 'readwrite', transaction => {
+    for (const delta of deltas) {
+      const store = transaction.objectStore(delta.storeName);
+      if (delta.known === false) {
+        store.clear();
+        delta.next.forEach(item => store.put(item));
+        continue;
+      }
+
+      const { addedOrChanged, removedIds } = diffStore(delta.previous, delta.next);
+      if (addedOrChanged.length === 0 && removedIds.length === 0) {
+        continue;
+      }
+
+      const fullRewriteCost = delta.next.length + 1;
+      const deltaCost = addedOrChanged.length + removedIds.length;
+
+      if (deltaCost >= fullRewriteCost) {
+        store.clear();
+        delta.next.forEach(item => store.put(item));
+      } else {
+        removedIds.forEach(id => store.delete(id));
+        addedOrChanged.forEach(item => store.put(item));
+      }
+    }
+  });
+}
+
+/**
+ * ينفذ عملية ذرية على عدة مخازن مع ضمان التراجع الكامل في حالة حدوث أي خطأ.
+ */
+export async function runAtomicTransaction(
+  storeNames: string[],
+  operation: (stores: Record<string, IDBObjectStore>, transaction: IDBTransaction) => void
+): Promise<void> {
+  if (storeNames.length === 0) return;
+  await runTransaction(storeNames, 'readwrite', transaction => {
+    const stores: Record<string, IDBObjectStore> = {};
+    for (const name of storeNames) {
+      stores[name] = transaction.objectStore(name);
+    }
+    operation(stores, transaction);
+  });
+}
+
 export const indexedDBUtils = {
   openDB,
   getAll,
@@ -585,5 +697,8 @@ export const indexedDBUtils = {
   replaceStoresData,
   resetAllStores,
   flushPendingWrites,
+  persistMultiStoreDeltas,
+  runAtomicTransaction,
+  runTransaction,
   STORES,
 };

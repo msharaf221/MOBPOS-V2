@@ -6,6 +6,34 @@
 > workflow النشر (`.github/workflows/release.yml`) بياخد القسم الخاص بالإصدار
 > من الملف ده ويحطه كـ Release Notes على GitHub.
 
+## [1.0.6]
+
+### سلامة البيانات والمعاملات الذرية
+
+- **سلامة فروقات الحالة (`Diff Integrity & Copy-On-Write`):**
+  - استبدال التعديلات العينية المباشرة (`in-place mutations`) بتحديثات دفعية غير قابلة للتغيير (`Copy-On-Write`) في جميع عمليات الحالة المالية والمخزنية (`createSale`، `processSaleReturn`، `recordStockWaste`، `addSideAccountEntry`، `updateSideAccountEntry`).
+  - ضمان اكتشاف محرك `diffStore` لكافة السجلات المعدلة داخل `IndexedDB` دون إغفال أي تعديل في المخزون أو رصيد الخزائن.
+- **معاملات ذرية متعددة المخازن (`Multi-Store Atomic Transactions`):**
+  - إضافة دالة `persistMultiStoreDeltas` لتنفيذ كتابات الفروقات عبر عدة مخازن داخل معاملة `readwrite` ذرية واحدة في IndexedDB.
+  - إضافة مساعد المعاملات مع مسار التراجع (`runAtomicTransaction`) لضمان عدم حدوث تباين جزئي بين المخازن عند حدوث أي خطأ أثاء الحفظ.
+- **ترقية مخطط IndexedDB إلى v5 وفهارس الاستعلام السريع:**
+  - ترقية آمنة وغير مدمرة مع الحفاظ الكامل على بيانات المستخدمين.
+  - إضافة فهارس ثانوية متقدمة (`code`, `barcode`, `categoryId`, `imei1`, `inventoryId`, `status`, `customerId`, `invoiceNumber`, `safeId`, `referenceId`) لتسريع البحث وعمليات الربط.
+  - توثيق المعمارية المستقبلية لنقل لقطات النسخ الاحتياطي إلى ملفات القرص الصلب (`userData`) في `TODO_LATER.md` و`README.md`.
+
+### توحيد التنسيقات والأمان
+
+- **توحيد محرك التنسيق (`Intl Formatters`):**
+  - إزالة كافة القيم الثابتة المكتوبة يدويًا (`ar-EG` و`EGP`) واستبدالها بنظام التنسيق الموحد `src/utils/format.ts` عبر جميع شاشات التطبيق ومطبوعاته (`POS`, `Sales`, `Finance`, `Dashboard`, `Layout`, `LicenseExpired`, `MasterAdmin`, `InventoryAudit`, `SideAccounts`, `alerts`, `reports`, `barcode`, `backup`, `updateCheck`).
+  - دعم الأرقام اللاتينية الموحدة مع الواجهة العربية RTL.
+- **حماية تصدير الملفات:**
+  - إضافة حماية متقدمة من حقن الصيغ والمعادلات الخبيثة (`Formula Injection Protection`) في تصدير CSV.
+
+### اختبارات وضمان الجودة
+
+- إضافة اختبارات وحدوية شاملة لسلامة الفروقات (`storeDiff.test.ts`)، المعاملات الذرية (`atomicTransaction.test.ts`)، ومنسقات النظام (`format.test.ts`).
+- جميع الاختبارات (44 اختباراً) تمر بنجاح 100% مع فحص TypeScript نظيف تماماً.
+
 ## [1.0.5]
 
 ### أداء — النظام بقى يتحمّل كتالوج كبير من غير لاج
