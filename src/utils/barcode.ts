@@ -15,22 +15,42 @@ export function calculateEAN13Checksum(code12: string): string {
 }
 
 /**
- * Generates a unique 13-digit barcode (Egypt prefix 622 or random standard)
+ * Generates a unique 13-digit barcode with the Egypt (622) prefix.
+ *
+ *  ملاحظتين على النسخة القديمة:
+ *  1) كانت بتستخدم `existingBarcodes.includes()` جوه اللوب — يعني
+ *     O(محاولات × عدد_المنتجات) مقارنة نصوص متزامنة داخل ضغطة الزرار.
+ *     بقى Set فالكل صار O(1) لكل مقارنة.
+ *  2) الـ fallback القديم كان بيرجّع '622' + Date.now().slice(-10) من غير
+ *     check digit صحيح (باركود EAN-13 مرفوض من أي فاليديتور/قارئ) وممكن
+ *     يتكرر لو ضفت منتجين في نفس المللي ثانية. أي باركود مولّد دلوقتي
+ *     لازم يكون EAN-13 سليمًا دائمًا.
  */
-export function generateBarcode(existingBarcodes: string[] = []): string {
-  let attempts = 0;
-  while (attempts < 100) {
-    attempts++;
-    // Use 622 prefix (Egypt) + 9 random digits + 1 checksum digit
-    const randomDigits = Math.floor(Math.random() * 900000000 + 100000000).toString();
-    const base12 = '622' + randomDigits;
-    const checksum = calculateEAN13Checksum(base12);
-    const barcode = base12 + checksum;
-    if (!existingBarcodes.includes(barcode)) {
-      return barcode;
-    }
+export function generateBarcode(existingBarcodes: Iterable<string | null | undefined> = []): string {
+  const taken = new Set<string>();
+  for (const value of existingBarcodes) {
+    if (typeof value === 'string' && value.trim()) taken.add(value.trim());
   }
-  return '622' + Date.now().toString().slice(-10);
+
+  // 9 عشوائي الأرقام = 900 مليون احتمال: عمليًا أول محاولة بتنجح.
+  for (let attempt = 0; attempt < 500; attempt++) {
+    const randomDigits = String(Math.floor(Math.random() * 900000000) + 100000000);
+    const base12 = '622' + randomDigits;
+    const candidate = base12 + calculateEAN13Checksum(base12);
+    if (!taken.has(candidate)) return candidate;
+  }
+
+  // آخر محاولة: تسلسل مشتق من الوقت مع إعادة حساب الـ checksum، فالناتج
+  // يفضل باركود EAN-13 صحيح حتى في أسوأ سيناريو.
+  const timeBase = Date.now();
+  for (let offset = 0; offset < 10000; offset++) {
+    const base12 = '622' + String((timeBase + offset) % 1000000000).padStart(9, '0');
+    const candidate = base12 + calculateEAN13Checksum(base12);
+    if (!taken.has(candidate)) return candidate;
+  }
+
+  const base12 = '622999999999';
+  return base12 + calculateEAN13Checksum(base12);
 }
 
 /**

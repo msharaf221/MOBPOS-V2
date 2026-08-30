@@ -1,17 +1,21 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Search, Plus, Edit2, Trash2, X, Package, AlertTriangle, AlertCircle, FileSpreadsheet, Barcode as BarcodeIcon, Printer, Wand2 } from 'lucide-react';
 import { InventoryItem, Category, IMEIUnit, Supplier, StockWaste } from '../types';
 import { downloadExcel } from '../utils/reports';
 import { generateBarcode, printBarcodeSticker } from '../utils/barcode';
+import { buildImeiStockIndex } from '../utils/stockCounts';
+import { formatCurrency } from '../utils/format';
+import { usePagination } from '../hooks/usePagination';
+import PaginationBar from './PaginationBar';
 
 interface InventoryProps {
   inventory: InventoryItem[];
   categories: Category[];
   imeiUnits: IMEIUnit[];
   suppliers: Supplier[];
-  onAddItem: (item: Omit<InventoryItem, 'id' | 'createdAt'>) => void;
-  onUpdateItem: (id: string, updates: Partial<InventoryItem>) => void;
-  onDeleteItem: (id: string) => void;
+  onAddItem: (item: Omit<InventoryItem, 'id' | 'createdAt'>) => InventoryItem | null;
+  onUpdateItem: (id: string, updates: Partial<InventoryItem>) => { ok: boolean; error?: string } | void;
+  onDeleteItem: (id: string) => { ok: boolean; error?: string };
   onAddCategory: (category: Omit<Category, 'id'>) => void;
   onRecordWaste: (inventoryId: string, quantity: number, supplierId: string, reason: string, notes: string) => StockWaste | null;
 }
@@ -53,10 +57,15 @@ export default function Inventory({
   const [newCategory, setNewCategory] = useState({ name: '', type: 'accessory' as 'device' | 'accessory' | 'spare_part' });
   const [wasteForm, setWasteForm] = useState({ quantity: 1, supplierId: '', reason: 'تالف', notes: '' });
 
+  // كمية IMEI المتاحة: فهرس واحد لكل ريندر بدل مسح قائمة الـ IMEI لكل صف
+  // (كان الجدول بيعمل مسحين لكل منتج: واحد للكمية وواحد لتانية داخل isLowStock).
+  const imeiStock = useMemo(() => buildImeiStockIndex(imeiUnits), [imeiUnits]);
+  // خريطة الفئات بدل categories.find داخل كل صف
+  const categoryById = useMemo(() => new Map(categories.map(c => [c.id, c])), [categories]);
+
   // Barcode generator helper
   const handleGenerateBarcode = () => {
-    const existing = inventory.map(i => i.barcode).filter(Boolean);
-    const code = generateBarcode(existing);
+    const code = generateBarcode(inventory.map(i => i.barcode));
     setFormData(prev => ({ ...prev, barcode: code }));
   };
 
@@ -66,36 +75,54 @@ export default function Inventory({
     return inventory.some(i => i.barcode && i.barcode.trim() === formData.barcode.trim() && (!selectedItem || i.id !== selectedItem.id));
   }, [formData.barcode, inventory, selectedItem]);
 
-  // Filter inventory
+  // فحص تكرار الكود في الواجهة — المتجر بيرفض الكود المكرر بصمت، وده بيخلي
+  // المستخدم يفتكر إن الزرار مااتضغطش.
+  const isDuplicateCode = useMemo(() => {
+    const code = formData.code.trim().toLowerCase();
+    if (!code) return false;
+    return inventory.some(i => i.code && i.code.trim().toLowerCase() === code && (!selectedItem || i.id !== selectedItem.id));
+  }, [formData.code, inventory, selectedItem]);
+
+  // Filter inventory — الحقول النصية بتتقرأ بعد `|| ''` لأن صفوف قديمة أو
+  // مستوردة من ملف Backup ممكن تبقى من غير barcode/code خالص، و
+  // undefined.includes() كانت ترمي error وتقفّل الجدول.
   const filteredInventory = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
     return inventory.filter(item => {
-      const matchesSearch = 
-        item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.barcode.includes(searchTerm);
-      
+      const matchesSearch = term === '' ||
+        item.name.toLowerCase().includes(term) ||
+        (item.code || '').toLowerCase().includes(term) ||
+        (item.barcode || '').includes(term);
+
       const matchesCategory = categoryFilter === 'all' || item.categoryId === categoryFilter;
 
       return matchesSearch && matchesCategory;
     });
   }, [inventory, searchTerm, categoryFilter]);
 
-  // Get actual quantity for IMEI items
-  const getActualQuantity = (item: InventoryItem) => {
-    if (item.hasIMEI) {
-      return imeiUnits.filter(u => u.inventoryId === item.id && u.status === 'available').length;
-    }
-    return item.quantity;
-  };
+  // ===== تقسيم الصفحة =====
+  // الجدول كان بيرسم المنتجات كلها في الـ DOM: كل صف = بحث في الفئات +
+  // حساب كمية IMEI + تنسيق عملتين، وكل ده كان بيتعاد مع كل حرف في البحث.
+  const productPagination = usePagination(filteredInventory, {
+    defaultPageSize: 50,
+    storageKey: 'mobpos_page_size_inventory'
+  });
+  const goToLastProductPage = () => productPagination.setPage(productPagination.totalPages);
+
+  // أي تغيير في الفلاتر يرجّعك لأول نتيجة، مش لصفحة فاضية
+  const resetProductPage = productPagination.resetPage;
+  useEffect(() => {
+    resetProductPage();
+  }, [searchTerm, categoryFilter, resetProductPage]);
+
+  // Get actual quantity for IMEI items — O(1) lookup في الفهرس
+  const getActualQuantity = (item: InventoryItem) => imeiStock.availableStockOf(item);
 
   // Check if item is low stock
-  const isLowStock = (item: InventoryItem) => {
-    const qty = getActualQuantity(item);
-    return qty <= item.minQuantity;
-  };
+  const isLowStock = (item: InventoryItem) => getActualQuantity(item) <= item.minQuantity;
 
   const handleAdd = () => {
-    if (!formData.name || !formData.categoryId) {
+    if (!formData.name.trim() || !formData.categoryId) {
       alert('الاسم والفئة مطلوبان');
       return;
     }
@@ -105,15 +132,21 @@ export default function Inventory({
       return;
     }
 
+    if (isDuplicateCode) {
+      alert('الكود مستخدم بالفعل في منتج آخر — غيّره أو سيبه فاضي يتولّد تلقائيًا');
+      return;
+    }
+
     if (formData.costPrice < 0 || formData.sellPrice < 0 || formData.quantity < 0 || formData.minQuantity < 0) {
       alert('لا يمكن أن تكون الأسعار أو الكميات بقيم سالبة');
       return;
     }
 
-    onAddItem({
-      name: formData.name,
-      code: formData.code,
-      barcode: formData.barcode,
+    const created = onAddItem({
+      name: formData.name.trim(),
+      // الكود فاضي كان بيخلّي المتجر يرفض المنتج بصمت — بقى يتولّد تلقائيًا
+      code: formData.code.trim(),
+      barcode: formData.barcode.trim(),
       categoryId: formData.categoryId,
       costPrice: formData.costPrice,
       sellPrice: formData.sellPrice,
@@ -122,8 +155,17 @@ export default function Inventory({
       hasIMEI: formData.hasIMEI
     });
 
+    // لو الرفض حصل في المتجر (مش في الواجهة) المستخدم لازم يعرف السبب،
+    // والفورم يفضل مفتوح عشان التعديل ما يضيعش.
+    if (!created) {
+      alert('تعذّرت إضافة المنتج: اتأكد من الكود (غير مستخدم لمنتج تاني) ومن صحة الأسعار والكميات.');
+      return;
+    }
+
     setShowAddModal(false);
     resetForm();
+    // نزود عدد الصفحات لحد ما المنتج الجديد يبان
+    goToLastProductPage();
   };
 
   const handleEdit = () => {
@@ -134,21 +176,32 @@ export default function Inventory({
       return;
     }
 
+    if (isDuplicateCode) {
+      alert('الكود مستخدم بالفعل في منتج آخر');
+      return;
+    }
+
     if (formData.costPrice < 0 || formData.sellPrice < 0 || formData.quantity < 0 || formData.minQuantity < 0) {
       alert('لا يمكن أن تكون الأسعار أو الكميات بقيم سالبة');
       return;
     }
 
-    onUpdateItem(selectedItem.id, {
-      name: formData.name,
-      code: formData.code,
-      barcode: formData.barcode,
+    const result = onUpdateItem(selectedItem.id, {
+      name: formData.name.trim(),
+      code: formData.code.trim(),
+      barcode: formData.barcode.trim(),
       categoryId: formData.categoryId,
       costPrice: formData.costPrice,
       sellPrice: formData.sellPrice,
       quantity: formData.hasIMEI ? selectedItem.quantity : formData.quantity,
       minQuantity: formData.minQuantity
     });
+
+    // تحديث المنتج كان بيرفض بصمت لو الكود/الباركود مكرر — دلوقتي السبب بيظهر
+    if (result && result.ok === false) {
+      alert(result.error || 'تعذّر حفظ التعديلات');
+      return;
+    }
 
     setShowEditModal(false);
     setSelectedItem(null);
@@ -233,14 +286,6 @@ export default function Inventory({
     });
   };
 
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat(localStorage.getItem('app_locale') || 'ar-EG', {
-      style: 'currency',
-      currency: localStorage.getItem('app_currency') || 'EGP',
-      maximumFractionDigits: 0
-    }).format(value);
-  };
-
   // Group by category type
   const categoryTypes = [
     { type: 'device', label: 'أجهزة' },
@@ -266,7 +311,7 @@ export default function Inventory({
                   const actualQty = getActualQuantity(i);
                   return [
                     i.name, i.code, i.barcode,
-                    categories.find(c => c.id === i.categoryId)?.name || '',
+                    categoryById.get(i.categoryId)?.name || '',
                     i.costPrice, i.sellPrice, actualQty, i.minQuantity,
                     i.costPrice * actualQty,
                   ];
@@ -391,8 +436,8 @@ export default function Inventory({
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-              {filteredInventory.map(item => {
-                const category = categories.find(c => c.id === item.categoryId);
+              {productPagination.pageRows.map(item => {
+                const category = categoryById.get(item.categoryId);
                 const actualQty = getActualQuantity(item);
                 const lowStock = isLowStock(item);
 
@@ -481,8 +526,10 @@ export default function Inventory({
                         </button>
                         <button
                           onClick={() => {
-                            if (confirm('هل أنت متأكد من حذف هذا المنتج؟')) {
-                              onDeleteItem(item.id);
+                            if (!confirm('هل أنت متأكد من حذف هذا المنتج؟')) return;
+                            const result = onDeleteItem(item.id);
+                            if (result && result.ok === false) {
+                              alert(result.error || 'تعذّر حذف المنتج');
                             }
                           }}
                           className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"
@@ -504,6 +551,20 @@ export default function Inventory({
             لا توجد منتجات مطابقة للبحث
           </div>
         )}
+
+        <PaginationBar
+          total={productPagination.total}
+          page={productPagination.page}
+          pageSize={productPagination.pageSize}
+          totalPages={productPagination.totalPages}
+          from={productPagination.from}
+          to={productPagination.to}
+          canPrev={productPagination.canPrev}
+          canNext={productPagination.canNext}
+          onPageChange={productPagination.setPage}
+          onPageSizeChange={productPagination.setPageSize}
+          itemLabel="منتج"
+        />
       </div>
 
       {/* Add/Edit Modal */}
@@ -542,13 +603,19 @@ export default function Inventory({
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     الكود
+                    <span className="text-xs text-gray-400 font-normal"> — لو فاضي بيتولّد تلقائيًا</span>
                   </label>
                   <input
                     type="text"
                     value={formData.code}
                     onChange={e => setFormData(prev => ({ ...prev, code: e.target.value }))}
-                    className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white"
+                    className={`w-full p-3 border rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white ${
+                      isDuplicateCode ? 'border-red-500 ring-1 ring-red-500' : 'border-gray-300 dark:border-gray-600'
+                    }`}
                   />
+                  {isDuplicateCode && (
+                    <p className="text-red-500 text-xs mt-1 font-bold">⚠️ هذا الكود مستخدم بالفعل لمنتج آخر</p>
+                  )}
                 </div>
                 <div>
                   <div className="flex items-center justify-between mb-1">

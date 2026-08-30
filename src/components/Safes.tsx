@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Plus, ArrowRightLeft, Wallet, TrendingUp, TrendingDown, X, Trash2 } from 'lucide-react';
 import { Safe, Transaction, User } from '../types';
+import { formatCurrency, formatDate as formatIntlDate } from '../utils/format';
 
 interface SafesProps {
   safes: Safe[];
@@ -54,22 +55,12 @@ export default function Safes({ safes, transactions, currentUser, onAddSafe, onD
     }
   };
 
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat(localStorage.getItem('app_locale') || 'ar-EG', {
-      style: 'currency',
-      currency: localStorage.getItem('app_currency') || 'EGP',
-      maximumFractionDigits: 0
-    }).format(value);
-  };
-
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString(localStorage.getItem('app_locale') || 'ar-EG', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
+  const formatDate = (dateStr: string) => formatIntlDate(dateStr, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
 
   const totalBalance = safes.reduce((sum, s) => sum + s.balance, 0);
 

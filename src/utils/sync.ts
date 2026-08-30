@@ -132,6 +132,9 @@ export async function pushAll(): Promise<number> {
   const cfg = getSyncConfig();
   validateConfig(cfg);
 
+  // نخلّص أي كتابة معلّقة الأول عشان مابرّعش نسخة قديمة من المخزن
+  await indexedDBUtils.flushPendingWrites();
+
   const tenantId = cfg.tenantId || getTenantId();
   let count = 0;
   for (const store of SYNCABLE_STORES()) {
@@ -187,6 +190,10 @@ export async function pullAll(): Promise<number> {
     stores[row.store] = records as { id: string }[];
   }
 
+  // نفس سبب الاستعادة من ملف: الكتابة المعلّقة لازم تخلص قبل ما نستبدل المخازن،
+  // وبعدها cشان مافيش تعديل قديم ينزل فوق البيانات الجديدة.
+  await indexedDBUtils.flushPendingWrites();
   await indexedDBUtils.replaceStoresData(stores);
+  await indexedDBUtils.flushPendingWrites();
   return Object.keys(stores).length;
 }

@@ -217,9 +217,16 @@ async function resetAllStores(dataMap: Record<string, StoreRecord[]>): Promise<v
   });
 }
 
-async function exportAllData(): Promise<Record<string, unknown[]>> {
+/**
+ * يصدّر كل المخازن. `excludeStores` ضروري هنا: مخزن `backups` نفسه فيه
+ * نسخة كاملة من الداتا كلها (لعدد 7 لقطة)، وقراءته ثم حذفه من الـ payload
+ * يعني كل نسخة احتياطية تقرأ الداتا ~8 مرات من غير أي فايدة.
+ */
+async function exportAllData(excludeStores: readonly string[] = []): Promise<Record<string, unknown[]>> {
+  const skipped = new Set(excludeStores);
   const data: Record<string, unknown[]> = {};
   for (const storeName of Object.values(STORES)) {
+    if (skipped.has(storeName)) continue;
     try {
       data[storeName] = await getAll(storeName);
     } catch {
@@ -243,6 +250,78 @@ async function importAllData(data: Record<string, unknown[]>): Promise<void> {
   await replaceStoresData(records);
 }
 
+// ============================================================
+//  طبقة الحفظ: كتابة الفروقات (delta) بدل إعادة كتابة المخزن
+// ------------------------------------------------------------
+//  الطريقة القديمة كانت في كل تعديل — حتى إضافة منتج واحد —
+//  تعمل clear() على المخزن ثم put() لكل السجلات. يعني إضافة
+//  256 منتج واحد ورا التاني = 32,896 عملية كتابة و256 معاملة
+//  (كل معاملة = flush على الديسك)، وحجم الكتابة كله ~7 ميجابايت
+//  لداتا حجمها الحقيقي 54 كيلوبايت. ده كان سبب التجمّد حول
+//  عدد معين من المنتجات وسبب تضخّم ملف الداتا.
+//
+//  دلوقتي بنقارن الحالة الجديدة باللي مكتوب فعلًا على الديسك
+//  ونبعت الفرق بس: put للمتغيّرين/الجُدد وdelete للممسوحين.
+//  السجلات اللي مرجعها نفسه (لم يتغيّر) ما بتترسمش من جديد.
+//  ولو أغلب المخزن اتغيّر (مثل الاستيراد أو الجرد) نرجع
+//  لكتابة المخزن كاملة لأنها أرخص في الحالة دي.
+//
+//  كمان الكتابات المتتابعة السريعة بتتدمج في معاملة واحدة
+//  (coalescing) عشان الضغط المتكرر على زرار "إضافة" مايبنيش
+//  طابور انتظار. ولأن آخر حالة هي اللي بتكتب، مفيش فقدان بيانات.
+// ============================================================
+
+/** نافذة دمج الكتابات المتتابعة. صغيرة كفاية إنها ماتحسّش، وكبيرة كفاية إنها تلم الضغطات المتلاحقة. */
+const WRITE_COALESCE_MS = 40;
+
+type PendingWriteJob = () => Promise<void> | null;
+
+/** كل مثيلات الـ hooks بتسجّل هنا عشان نعرف نستنى كتاباتهم لحد الآخر. */
+const pendingWriteJobs = new Set<PendingWriteJob>();
+
+/**
+ * يستنى لحد ما كل الكتابات المعلّقة تخلص. مهم قبل قراءة الداتا
+ * مباشرة من IndexedDB (نسخة احتياطية/مزامنة/تصدير) عشان مايقراش
+ * نسخة قديمة بينما في تعديل في الطريق للديسك.
+ */
+export async function flushPendingWrites(): Promise<void> {
+  for (let pass = 0; pass < 10; pass++) {
+    const jobs = Array.from(pendingWriteJobs)
+      .map(job => job())
+      .filter((job): job is Promise<void> => job !== null);
+    if (jobs.length === 0) return;
+    await Promise.all(jobs);
+  }
+}
+
+// أفضل محاولة للفلش قبل ما تقفل الصفحة (HMR/ريفرش/إغلاق التطبيق).
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('pagehide', () => {
+    void flushPendingWrites();
+  });
+}
+
+/** يحسب الفروقات بين لقطتين لنفس المخزن. */
+function diffStore<T extends StoreRecord>(previous: T[], next: T[]): { addedOrChanged: T[]; removedIds: string[] } {
+  const previousById = new Map<string, T>(previous.map(item => [item.id, item]));
+  const nextById = new Map<string, T>(next.map(item => [item.id, item]));
+
+  const addedOrChanged = next.filter(item => previousById.get(item.id) !== item);
+  const removedIds = previous.filter(item => !nextById.has(item.id)).map(item => item.id);
+
+  return { addedOrChanged, removedIds };
+}
+
+/** يسجّل دالة الانتظار الخاصة بمثيل hook واحد. */
+function usePendingWriteRegistry(getJob: () => Promise<void> | null): void {
+  useEffect(() => {
+    pendingWriteJobs.add(getJob);
+    return () => {
+      pendingWriteJobs.delete(getJob);
+    };
+  }, [getJob]);
+}
+
 // Hook for using an IndexedDB store
 export function useIndexedDB<T extends StoreRecord>(
   storeName: string,
@@ -253,7 +332,13 @@ export function useIndexedDB<T extends StoreRecord>(
   const dataRef = useRef<T[]>([]);
   const loadedRef = useRef(false);
   const pendingUpdatesRef = useRef<Array<T[] | ((prev: T[]) => T[])>>([]);
-  const writeQueueRef = useRef(Promise.resolve());
+  /** آخر حالة مكتوبة فعلًا على الديسك — أساس مقارنة الفروقات. */
+  const persistedRef = useRef<{ snapshot: T[]; known: boolean }>({ snapshot: [], known: false });
+  const queuedWriteRef = useRef<T[] | null>(null);
+  const drainPromiseRef = useRef<Promise<void> | null>(null);
+
+  const getDrainJob = useCallback(() => drainPromiseRef.current, []);
+  usePendingWriteRegistry(getDrainJob);
 
   useEffect(() => {
     let cancelled = false;
@@ -275,6 +360,8 @@ export function useIndexedDB<T extends StoreRecord>(
           await replaceStoreData(storeName, resolvedData);
         }
         dataRef.current = resolvedData;
+        // اللي على الديسك دلوقتي = resolvedData، فنقدر نبني عليه الفروقات
+        persistedRef.current = { snapshot: resolvedData, known: true };
         loadedRef.current = true;
         setData(resolvedData);
       } catch (error) {
@@ -286,6 +373,8 @@ export function useIndexedDB<T extends StoreRecord>(
           );
           pendingUpdatesRef.current = [];
           dataRef.current = resolvedData;
+          // فشل القراءة = ماعرفناش حالة الديسك، فلازم الكتابة الجاية كاملة
+          persistedRef.current = { snapshot: resolvedData, known: false };
           loadedRef.current = true;
           setData(resolvedData);
         }
@@ -297,6 +386,71 @@ export function useIndexedDB<T extends StoreRecord>(
     loadData();
     return () => { cancelled = true; };
   }, [storeName, initialData]);
+
+  /** يكتب لقطة المخزن على الديسك — فروقات لو ممكن، وإلا إعادة كتابة كاملة. */
+  const persistSnapshot = useCallback(async (next: T[]) => {
+    const { snapshot, known } = persistedRef.current;
+
+    if (!known) {
+      await replaceStoreData(storeName, next);
+      persistedRef.current = { snapshot: next, known: true };
+      return;
+    }
+
+    const { addedOrChanged, removedIds } = diffStore(snapshot, next);
+    if (addedOrChanged.length === 0 && removedIds.length === 0) {
+      persistedRef.current = { snapshot: next, known: true };
+      return;
+    }
+
+    // إعادة الكتابة الكاملة بتبقى أرخص لما التغيير يلمس كل السجلات تقريبًا
+    const fullRewriteCost = next.length + 1;
+    const deltaCost = addedOrChanged.length + removedIds.length;
+
+    if (deltaCost >= fullRewriteCost) {
+      await replaceStoreData(storeName, next);
+    } else {
+      await runTransaction(storeName, 'readwrite', transaction => {
+        const store = transaction.objectStore(storeName);
+        removedIds.forEach(id => store.delete(id));
+        addedOrChanged.forEach(item => store.put(item));
+      });
+    }
+    persistedRef.current = { snapshot: next, known: true };
+  }, [storeName]);
+
+  /**
+   * يجدول الكتابة على الديسك ويدمج اللقطات المتتابعة في معاملة واحدة.
+   * آخر لقطة هي اللي بتكتب، فالتجميع مابيضّعش أي تعديل.
+   */
+  const schedulePersist = useCallback((next: T[]) => {
+    queuedWriteRef.current = next;
+    if (drainPromiseRef.current) return drainPromiseRef.current;
+
+    const drain = (async () => {
+      if (WRITE_COALESCE_MS > 0) {
+        await new Promise<void>(resolve => setTimeout(resolve, WRITE_COALESCE_MS));
+      }
+      try {
+        while (queuedWriteRef.current !== null) {
+          const snapshotToWrite = queuedWriteRef.current;
+          queuedWriteRef.current = null;
+          try {
+            await persistSnapshot(snapshotToWrite);
+          } catch (error) {
+            console.error(`Error saving ${storeName}:`, error);
+            // فشل الكتابة = ماعرفناش حالة الديسك؛ المحاولة الجاية تكتب المخزن كامل
+            persistedRef.current = { snapshot: snapshotToWrite, known: false };
+          }
+        }
+      } finally {
+        drainPromiseRef.current = null;
+      }
+    })();
+
+    drainPromiseRef.current = drain;
+    return drain;
+  }, [persistSnapshot, storeName]);
 
   const updateData = useCallback(
     (newDataOrFn: T[] | ((prev: T[]) => T[])) => {
@@ -312,15 +466,9 @@ export function useIndexedDB<T extends StoreRecord>(
         return;
       }
 
-      writeQueueRef.current = writeQueueRef.current.then(async () => {
-        try {
-          await replaceStoreData(storeName, newData);
-        } catch (error) {
-          console.error(`Error saving ${storeName}:`, error);
-        }
-      });
+      void schedulePersist(newData);
     },
-    [storeName]
+    [schedulePersist]
   );
 
   return [data, updateData, isLoading];
@@ -336,7 +484,15 @@ export function useIndexedDBSetting<T>(
   const valueRef = useRef(initialValue);
   const loadedRef = useRef(false);
   const pendingUpdatesRef = useRef<Array<T | ((prev: T) => T)>>([]);
-  const writeQueueRef = useRef(Promise.resolve());
+  /**
+   * نفس فكرة مخازن القوائم: كتابات الإعدادات المتتابعة (مثل الكتابة في خانة
+   * اسم المحل حرف بحرف) بتتدمج في عملية حفظ واحدة لآخر قيمة بدل transaction
+   * لكل حرف.
+   */
+  const queuedSettingRef = useRef<T | null>(null);
+  const drainPromiseRef = useRef<Promise<void> | null>(null);
+  const getDrainJob = useCallback(() => drainPromiseRef.current, []);
+  usePendingWriteRegistry(getDrainJob);
 
   useEffect(() => {
     let cancelled = false;
@@ -382,13 +538,29 @@ export function useIndexedDBSetting<T>(
         return;
       }
 
-      writeQueueRef.current = writeQueueRef.current.then(async () => {
-        try {
-          await setSetting(key, newValue);
-        } catch (error) {
-          console.error(`Error saving setting ${key}:`, error);
+      queuedSettingRef.current = newValue;
+      if (drainPromiseRef.current) return;
+
+      const drain = (async () => {
+        if (WRITE_COALESCE_MS > 0) {
+          await new Promise<void>(resolve => setTimeout(resolve, WRITE_COALESCE_MS));
         }
-      });
+        try {
+          while (queuedSettingRef.current !== null) {
+            const valueToWrite = queuedSettingRef.current;
+            queuedSettingRef.current = null;
+            try {
+              await setSetting(key, valueToWrite);
+            } catch (error) {
+              console.error(`Error saving setting ${key}:`, error);
+            }
+          }
+        } finally {
+          drainPromiseRef.current = null;
+        }
+      })();
+
+      drainPromiseRef.current = drain;
     },
     [key]
   );
@@ -412,5 +584,6 @@ export const indexedDBUtils = {
   replaceStoreData,
   replaceStoresData,
   resetAllStores,
+  flushPendingWrites,
   STORES,
 };

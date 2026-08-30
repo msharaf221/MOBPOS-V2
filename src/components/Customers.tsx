@@ -1,4 +1,8 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { formatCurrency, formatDate as formatIntlDate } from '../utils/format';
+import { usePagination } from '../hooks/usePagination';
+import PaginationBar from './PaginationBar';
+
 import { Search, Plus, Edit2, Trash2, Eye, X, Phone, MapPin, Calendar } from 'lucide-react';
 import { Customer, Sale, IMEIUnit, InventoryItem, Maintenance, Safe } from '../types';
 
@@ -65,18 +69,40 @@ export default function Customers({
     );
   }, [customers, searchTerm]);
 
-  // Get customer stats
-  const getCustomerStats = (customerId: string) => {
-    const customerSales = sales.filter(s => s.customerId === customerId);
-    const customerDevices = imeiUnits.filter(u => u.customerId === customerId);
-    const totalSpent = customerSales.reduce((sum, s) => sum + s.total, 0);
-    
-    return {
-      salesCount: customerSales.length,
-      devicesCount: customerDevices.length,
-      totalSpent
+  const customersPage = usePagination(filteredCustomers, { defaultPageSize: 20, storageKey: 'mobpos_page_size_customers' });
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    customersPage.resetPage();
+  }, [searchTerm]);
+
+  // Get customer stats — كانت كل كارت بيعمل مسح كامل لقائمتي المبيعات
+  // والـ IMEI (Oالعملاء × المبيعات). بقى فهرس واحد يتبني مرة لكل تغيير بيانات.
+  const getCustomerStats = useMemo(() => {
+    const salesByCustomer = new Map<string, { count: number; total: number }>();
+    for (const sale of sales) {
+      if (!sale.customerId) continue;
+      const current = salesByCustomer.get(sale.customerId) || { count: 0, total: 0 };
+      current.count += 1;
+      current.total += sale.total || 0;
+      salesByCustomer.set(sale.customerId, current);
+    }
+
+    const devicesByCustomer = new Map<string, number>();
+    for (const unit of imeiUnits) {
+      if (!unit.customerId) continue;
+      devicesByCustomer.set(unit.customerId, (devicesByCustomer.get(unit.customerId) || 0) + 1);
+    }
+
+    return (customerId: string) => {
+      const saleInfo = salesByCustomer.get(customerId);
+      return {
+        salesCount: saleInfo?.count || 0,
+        devicesCount: devicesByCustomer.get(customerId) || 0,
+        totalSpent: saleInfo?.total || 0
+      };
     };
-  };
+  }, [sales, imeiUnits]);
 
   // Get customer details
   const getCustomerDetails = (customerId: string) => {
@@ -137,17 +163,7 @@ export default function Customers({
     setShowDetailModal(true);
   };
 
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat(localStorage.getItem('app_locale') || 'ar-EG', {
-      style: 'currency',
-      currency: localStorage.getItem('app_currency') || 'EGP',
-      maximumFractionDigits: 0
-    }).format(value);
-  };
-
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString(localStorage.getItem('app_locale') || 'ar-EG');
-  };
+  const formatDate = (dateStr: string) => formatIntlDate(dateStr);
 
   return (
     <div className="space-y-6 animate-fadeIn">
@@ -202,7 +218,7 @@ export default function Customers({
 
       {/* Customers Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filteredCustomers.map(customer => {
+        {customersPage.pageRows.map(customer => {
           const stats = getCustomerStats(customer.id);
           
           return (
@@ -278,6 +294,20 @@ export default function Customers({
           لا يوجد عملاء مطابقين للبحث
         </div>
       )}
+
+              <PaginationBar
+                total={customersPage.total}
+                page={customersPage.page}
+                pageSize={customersPage.pageSize}
+                totalPages={customersPage.totalPages}
+                from={customersPage.from}
+                to={customersPage.to}
+                canPrev={customersPage.canPrev}
+                canNext={customersPage.canNext}
+                onPageChange={customersPage.setPage}
+                onPageSizeChange={customersPage.setPageSize}
+                itemLabel="عميل"
+              />
 
       {/* Add Modal */}
       {showAddModal && (

@@ -1,4 +1,8 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { formatCurrency, formatDate as formatIntlDate } from '../utils/format';
+import { usePagination } from '../hooks/usePagination';
+import PaginationBar from './PaginationBar';
+
 import {
   TrendingUp, TrendingDown, Wallet, Plus, X, ArrowUpCircle,
   ArrowDownCircle, Filter, BarChart3, FileText, Receipt,
@@ -97,22 +101,12 @@ export default function Finance({
     safeId: safes.find(s => s.isDefault)?.id || ''
   });
 
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat(localStorage.getItem('app_locale') || 'ar-EG', {
-      style: 'currency',
-      currency: localStorage.getItem('app_currency') || 'EGP',
-      maximumFractionDigits: 0
-    }).format(value);
-  };
-
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString(localStorage.getItem('app_locale') || 'ar-EG', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
+  const formatDate = (dateStr: string) => formatIntlDate(dateStr, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
 
   // Filter by period
   const getPeriodStart = (p: PeriodType): Date => {
@@ -155,6 +149,15 @@ export default function Finance({
     }
     return result.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [periodTransactions, typeFilter]);
+
+  // حركة الخزينة كانت مقيّدة بـ slice(0, 50): أي أكتر من 50 معاملة في الشهر
+  // بتبقى مخفية من غير أي طريقة للوصول ليها. بقى تقسيم صفحات كامل.
+  const financePage = usePagination(displayTransactions, { defaultPageSize: 25, storageKey: 'mobpos_page_size_finance' });
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    financePage.resetPage();
+  }, [period, typeFilter]);
 
   // Calculate totals for period
   const stats = useMemo(() => {
@@ -575,7 +578,7 @@ export default function Finance({
             </div>
           ) : (
             <div className="divide-y divide-gray-200 dark:divide-gray-700">
-              {displayTransactions.slice(0, 50).map(trans => {
+              {financePage.pageRows.map(trans => {
                 const safe = safes.find(s => s.id === trans.safeId);
                 const isIncome = trans.amount > 0;
                 return (
@@ -617,6 +620,20 @@ export default function Finance({
               })}
             </div>
           )}
+
+                  <PaginationBar
+                    total={financePage.total}
+                    page={financePage.page}
+                    pageSize={financePage.pageSize}
+                    totalPages={financePage.totalPages}
+                    from={financePage.from}
+                    to={financePage.to}
+                    canPrev={financePage.canPrev}
+                    canNext={financePage.canNext}
+                    onPageChange={financePage.setPage}
+                    onPageSizeChange={financePage.setPageSize}
+                    itemLabel="معاملة"
+                  />
         </div>
       </div>
 

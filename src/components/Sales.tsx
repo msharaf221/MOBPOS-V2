@@ -1,4 +1,8 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { formatCurrency, formatDate as formatIntlDate } from '../utils/format';
+import { usePagination } from '../hooks/usePagination';
+import PaginationBar from './PaginationBar';
+
 import { Search, Eye, Printer, X, Filter, RotateCcw, FileSpreadsheet } from 'lucide-react';
 import { Sale, SaleReturn, Customer, InventoryItem, IMEIUnit, User } from '../types';
 import { downloadExcel, fmtDate } from '../utils/reports';
@@ -65,23 +69,24 @@ export default function Sales({ sales, saleReturns, customers, inventory, imeiUn
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [sales, customers, searchTerm, dateFilter]);
 
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat(localStorage.getItem('app_locale') || 'ar-EG', {
-      style: 'currency',
-      currency: localStorage.getItem('app_currency') || 'EGP',
-      maximumFractionDigits: 0
-    }).format(value);
-  };
+  // خريطة العملاء بدل customers.find لكل صف في الجدول
+  const customerById = useMemo(() => new Map(customers.map(c => [c.id, c])), [customers]);
 
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString(localStorage.getItem('app_locale') || 'ar-EG', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
+  const salesPage = usePagination(filteredSales, { defaultPageSize: 50, storageKey: 'mobpos_page_size_sales' });
+
+  // تغيير البحث أو الفلتر يرجّع المستخدم لأول صفحة
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    salesPage.resetPage();
+  }, [searchTerm, dateFilter]);
+
+  const formatDate = (dateStr: string) => formatIntlDate(dateStr, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
 
   // Stats
   const totalRevenue = filteredSales.reduce((sum, s) => sum + s.total, 0);
@@ -217,8 +222,8 @@ export default function Sales({ sales, saleReturns, customers, inventory, imeiUn
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-              {filteredSales.map(sale => {
-                const customer = customers.find(c => c.id === sale.customerId);
+              {salesPage.pageRows.map(sale => {
+                const customer = customerById.get(sale.customerId);
                 // const cashier = users.find(u => u.id === sale.cashierId);
                 
                 return (
@@ -277,6 +282,20 @@ export default function Sales({ sales, saleReturns, customers, inventory, imeiUn
             لا توجد مبيعات مطابقة
           </div>
         )}
+
+                <PaginationBar
+                  total={salesPage.total}
+                  page={salesPage.page}
+                  pageSize={salesPage.pageSize}
+                  totalPages={salesPage.totalPages}
+                  from={salesPage.from}
+                  to={salesPage.to}
+                  canPrev={salesPage.canPrev}
+                  canNext={salesPage.canNext}
+                  onPageChange={salesPage.setPage}
+                  onPageSizeChange={salesPage.setPageSize}
+                  itemLabel="فاتورة"
+                />
       </div>
 
       {/* Detail Modal */}

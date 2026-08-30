@@ -9,6 +9,11 @@ import {
 import { Customer, InventoryItem, IMEIUnit, Safe, Category, SaleItem } from '../types';
 import { printReceipt } from '../utils/print';
 import { posSound } from '../utils/audio';
+import { buildImeiStockIndex, groupCountsBy } from '../utils/stockCounts';
+import { formatCurrency } from '../utils/format';
+
+/** عدد كروت الأصناف اللي بتترسم في الأول وكل ضغطة «عرض المزيد». */
+const POS_GRID_STEP = 60;
 
 interface POSProps {
   inventory: InventoryItem[];
@@ -201,20 +206,18 @@ export default function POS({
     }, 2800);
   }, []);
 
+  // فهرس واحد لوحدات IMEI المتاحة: الكمية والوحدات نفسها بـ lookup واحد O(1)
+  // بدل مسح قائمة الـ IMEI كاملة لكل كارت في الشبكة ولكل عملية إضافة للسلة.
+  const imeiStock = useMemo(() => buildImeiStockIndex(imeiUnits), [imeiUnits]);
+
   // Get available IMEI units for a product
-  const getAvailableIMEIs = useCallback((inventoryId: string) => {
-    return imeiUnits.filter(
-      unit => unit.inventoryId === inventoryId && unit.status === 'available'
-    );
-  }, [imeiUnits]);
+  const getAvailableIMEIs = useCallback(
+    (inventoryId: string) => imeiStock.availableUnits.get(inventoryId) ?? [],
+    [imeiStock]
+  );
 
   // Calculate actual stock for any item
-  const getItemAvailableStock = useCallback((item: InventoryItem) => {
-    if (item.hasIMEI) {
-      return getAvailableIMEIs(item.id).length;
-    }
-    return item.quantity;
-  }, [getAvailableIMEIs]);
+  const getItemAvailableStock = useCallback((item: InventoryItem) => imeiStock.availableStockOf(item), [imeiStock]);
 
   // Flash highlight an item in cart
   const triggerHighlight = useCallback((id: string) => {
@@ -650,11 +653,25 @@ export default function POS({
       if (!term) return true;
       return (
         item.name.toLowerCase().includes(term) ||
-        item.code.toLowerCase().includes(term) ||
-        (item.barcode && item.barcode.includes(term))
+        (item.code || '').toLowerCase().includes(term) ||
+        ((item.barcode || '').includes(term))
       );
     });
   }, [inventory, selectedCategory, searchTerm]);
+
+  // ===== حدّ شبكة الأصناف (load more) =====
+  // الشبكة كانت ترسم كل المنتجات المطابقة في الـ DOM — مع كتالوج كبير ده كان
+  // يبلّع ثواني في كل ضغطة حرف بالكاشير. بنرسم أول دفعة والباقي بضغطة.
+  const [visibleProductCount, setVisibleProductCount] = useState(POS_GRID_STEP);
+  useEffect(() => {
+    setVisibleProductCount(POS_GRID_STEP);
+  }, [searchTerm, selectedCategory]);
+  const visibleProducts = filteredProducts.length > visibleProductCount
+    ? filteredProducts.slice(0, visibleProductCount)
+    : filteredProducts;
+
+  // عدد أصناف كل فئة للـ pills — كان inventory.filter لكل فئة في كل ريندر
+  const productCountByCategory = useMemo(() => groupCountsBy(inventory, item => item.categoryId), [inventory]);
 
   // Complete Sale
   const completeSale = () => {
@@ -863,14 +880,6 @@ export default function POS({
     showToast(`تم تسجيل وإضافة "${created.name}" للسلة بنجاح!`, 'success');
   };
 
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat(localStorage.getItem('app_locale') || 'ar-EG', {
-      style: 'currency',
-      currency: localStorage.getItem('app_currency') || 'EGP',
-      maximumFractionDigits: 0
-    }).format(value);
-  };
-
   return (
     <div className="h-[calc(100vh-120px)] flex flex-col md:flex-row gap-4 select-none">
       {/* Toast Notification Banner */}
@@ -1056,7 +1065,7 @@ export default function POS({
                 الكل ({inventory.length})
               </button>
               {categories.map(cat => {
-                const count = inventory.filter(i => i.categoryId === cat.id).length;
+                const count = productCountByCategory.get(cat.id) || 0;
                 return (
                   <button
                     key={cat.id}
@@ -1104,7 +1113,7 @@ export default function POS({
             </div>
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-              {filteredProducts.map(item => {
+              {visibleProducts.map(item => {
                 const category = categories.find(c => c.id === item.categoryId);
                 const availableStock = getItemAvailableStock(item);
                 const isOutOfStock = availableStock <= 0;
@@ -1169,6 +1178,15 @@ export default function POS({
                   </button>
                 );
               })}
+
+              {filteredProducts.length > visibleProducts.length && (
+                <button
+                  onClick={() => setVisibleProductCount(prev => prev + POS_GRID_STEP)}
+                  className="col-span-full w-full py-3 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-xl text-sm font-bold text-gray-700 dark:text-gray-200 transition"
+                >
+                  عرض المزيد • باقي {filteredProducts.length - visibleProducts.length} صنفًا من {filteredProducts.length}
+                </button>
+              )}
             </div>
           )}
         </div>

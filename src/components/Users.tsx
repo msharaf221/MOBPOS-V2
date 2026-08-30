@@ -1,4 +1,8 @@
-import { useState } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { formatDate as formatIntlDate } from '../utils/format';
+import { usePagination } from '../hooks/usePagination';
+import PaginationBar from './PaginationBar';
+
 import { Search, Plus, Edit2, Trash2, X, Shield, Eye, EyeOff } from 'lucide-react';
 import { User } from '../types';
 import { hashPasswordForStorage } from '../utils/passwords';
@@ -69,10 +73,20 @@ export default function Users({ users, currentUser, onUpdate }: UsersProps) {
     role: 'staff' as 'admin' | 'manager' | 'staff'
   });
 
-  const filteredUsers = users.filter(u =>
-    u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    u.username.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredUsers = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    return users.filter(u =>
+      u.name.toLowerCase().includes(term) ||
+      u.username.toLowerCase().includes(term)
+    );
+  }, [users, searchTerm]);
+
+  const usersPage = usePagination(filteredUsers, { defaultPageSize: 20, storageKey: 'mobpos_page_size_users' });
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    usersPage.resetPage();
+  }, [searchTerm]);
 
   const handleSave = async () => {
     if (!formData.username || !formData.name || (!editingUser && !formData.password)) {
@@ -177,13 +191,11 @@ export default function Users({ users, currentUser, onUpdate }: UsersProps) {
     setShowPermissionsModal(true);
   };
 
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString('ar-EG', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
-    });
-  };
+  const formatDate = (dateStr: string) => formatIntlDate(dateStr, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  });
 
   return (
     <div className="space-y-6 animate-fadeIn">
@@ -256,7 +268,7 @@ export default function Users({ users, currentUser, onUpdate }: UsersProps) {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-              {filteredUsers.map(user => (
+              {usersPage.pageRows.map(user => (
                 <tr key={user.id} className={`hover:bg-gray-50 dark:hover:bg-gray-700/50 ${user.id === currentUser.id ? 'bg-blue-50 dark:bg-blue-900/10' : ''}`}>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
@@ -322,6 +334,20 @@ export default function Users({ users, currentUser, onUpdate }: UsersProps) {
             لا يوجد مستخدمين
           </div>
         )}
+
+                <PaginationBar
+                  total={usersPage.total}
+                  page={usersPage.page}
+                  pageSize={usersPage.pageSize}
+                  totalPages={usersPage.totalPages}
+                  from={usersPage.from}
+                  to={usersPage.to}
+                  canPrev={usersPage.canPrev}
+                  canNext={usersPage.canNext}
+                  onPageChange={usersPage.setPage}
+                  onPageSizeChange={usersPage.setPageSize}
+                  itemLabel="مستخدم"
+                />
       </div>
 
       {/* Permissions Legend */}

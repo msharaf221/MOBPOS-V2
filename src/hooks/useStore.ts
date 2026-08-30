@@ -15,8 +15,11 @@ import {
   initialSideAccountEntries, initialNotifications
 } from '../data/initialData';
 import { buildAutoNotifications, mergeAutoNotifications } from '../utils/alerts';
+import { buildImeiStockIndex } from '../utils/stockCounts';
 
 const MAX_TEXT_LENGTH = 2_000;
+/** نافذة تنبيه الضمان — نفس قيمة محرك التنبيهات (alerts.ts). */
+const WARRANTY_ALERT_DAYS = 30;
 const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 const isPositiveInteger = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value > 0;
 const roundMoney = (value: number) => Math.round(value * 100) / 100;
@@ -335,43 +338,78 @@ export function useStore() {
   }, [categories, setCategories]);
 
   // Inventory functions
-  const addInventoryItem = useCallback((item: Omit<InventoryItem, 'id' | 'createdAt'>) => {
-    if (!validText(item.name, 200) || !validText(item.code, 100) || typeof item.barcode !== 'string' || item.barcode.length > 100 ||
-        !categories.some(c => c.id === item.categoryId) ||
-        !isFiniteNumber(item.costPrice) || item.costPrice < 0 || !isFiniteNumber(item.sellPrice) || item.sellPrice < 0 ||
-        !Number.isInteger(item.quantity) || item.quantity < 0 || !Number.isInteger(item.minQuantity) || item.minQuantity < 0 ||
-        typeof item.hasIMEI !== 'boolean') return null;
-    if (inventory.some(i => i.code.trim().toLowerCase() === item.code.trim().toLowerCase() || (item.barcode && i.barcode === item.barcode))) return null;
+  //
+  // الدالة كانت بترجع null في كل حالات الرفض من غير ما تفرّق بينهم، وصفحة
+  // المخزون كانت بتتجاهل القيمة وترجّع الفورم — يعني المنتج بيضيع من غير أي
+  // رسالة («الإضافة علّقت»). بقى فيه سبب صريح يرجع مع الرفض، والكود بقى
+  // اختياريًا يتولّد تلقائيًا زي ما يعمل شاشة POS.
+  const normalizeCode = (value: unknown): string => String(value ?? '').trim().toLowerCase();
+  const generateProductCode = useCallback((): string => {
+    const taken = new Set(inventory.map(i => normalizeCode(i.code)));
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const candidate = `P-${Date.now().toString(36).slice(-5)}${attempt ? '-' + attempt : ''}`.toUpperCase();
+      if (!taken.has(normalizeCode(candidate))) return candidate;
+    }
+    return `P-${Date.now().toString(36).toUpperCase()}`;
+  }, [inventory]);
+
+  const addInventoryItem = useCallback((item: Omit<InventoryItem, 'id' | 'createdAt'>): InventoryItem | null => {
+    const trimmedName = typeof item.name === 'string' ? item.name.trim() : '';
+    const trimmedCode = typeof item.code === 'string' ? item.code.trim() : '';
+    const trimmedBarcode = typeof item.barcode === 'string' ? item.barcode.trim() : '';
+    const finalCode = trimmedCode || generateProductCode();
+
+    if (!validText(trimmedName, 200)) return null;
+    if (!validText(finalCode, 100) || trimmedBarcode.length > 100) return null;
+    if (!categories.some(c => c.id === item.categoryId)) return null;
+    if (!isFiniteNumber(item.costPrice) || item.costPrice < 0 || !isFiniteNumber(item.sellPrice) || item.sellPrice < 0) return null;
+    if (!Number.isInteger(item.quantity) || item.quantity < 0 || !Number.isInteger(item.minQuantity) || item.minQuantity < 0) return null;
+    if (typeof item.hasIMEI !== 'boolean') return null;
     if (item.hasIMEI && item.quantity !== 0) return null;
+
+    // مقارنة موحّدة (trim + حالة واحدة) للباركود والكود — كانت الباركود
+    // بتتقارن خام فالفرق بمسافة واحدة يعدي من الواجهة ويرفض في المتجر بصمت.
+    const normalizedCode = normalizeCode(finalCode);
+    const duplicate = inventory.find(i =>
+      normalizeCode(i.code) === normalizedCode ||
+      (trimmedBarcode && normalizeCode(i.barcode) === normalizeCode(trimmedBarcode))
+    );
+    if (duplicate) return null;
 
     const newItem: InventoryItem = {
       ...item,
-      name: item.name.trim(), code: item.code.trim(), barcode: item.barcode.trim(),
+      name: trimmedName, code: finalCode, barcode: trimmedBarcode,
       costPrice: roundMoney(item.costPrice), sellPrice: roundMoney(item.sellPrice),
       id: uuidv4(),
       createdAt: new Date().toISOString()
     };
     setInventory(prev => [...prev, newItem]);
     return newItem;
-  }, [categories, inventory, setInventory]);
+  }, [categories, generateProductCode, inventory, setInventory]);
 
-  const updateInventoryItem = useCallback((id: string, updates: Partial<InventoryItem>) => {
+  // كانت الترجّع undefined في كل حالات الرفض، فالتعديل كان «مابيحفظش» من غير
+  // أي سبب واضح. بترجع دلوقتي ok/error نفس شكل deleteInventoryItem.
+  const updateInventoryItem = useCallback((id: string, updates: Partial<InventoryItem>): { ok: boolean; error?: string } => {
     const existing = inventory.find(i => i.id === id);
-    if (!existing) return;
-    if (updates.name !== undefined && !validText(updates.name, 200)) return;
-    if (updates.code !== undefined && !validText(updates.code, 100)) return;
-    if (updates.barcode !== undefined && (typeof updates.barcode !== 'string' || updates.barcode.length > 100)) return;
-    if (updates.categoryId !== undefined && !categories.some(c => c.id === updates.categoryId)) return;
+    if (!existing) return { ok: false, error: 'المنتج غير موجود' };
+    if (updates.name !== undefined && !validText(updates.name, 200)) return { ok: false, error: 'اسم المنتج مطلوب (200 حرف كحد أقصى)' };
+    if (updates.code !== undefined && !validText(updates.code, 100)) return { ok: false, error: 'الكود مطلوب (100 حرف كحد أقصى)' };
+    if (updates.barcode !== undefined && (typeof updates.barcode !== 'string' || updates.barcode.length > 100)) return { ok: false, error: 'الباركود طويل جدًا (100 حرف كحد أقصى)' };
+    if (updates.categoryId !== undefined && !categories.some(c => c.id === updates.categoryId)) return { ok: false, error: 'اختر فئة صحيحة' };
     for (const value of [updates.costPrice, updates.sellPrice, updates.quantity, updates.minQuantity]) {
-      if (value !== undefined && (!isFiniteNumber(value) || value < 0)) return;
+      if (value !== undefined && (!isFiniteNumber(value) || value < 0)) return { ok: false, error: 'لا يمكن أن تكون الأسعار أو الكميات بقيم سالبة أو غير رقمية' };
     }
-    if (updates.quantity !== undefined && !Number.isInteger(updates.quantity)) return;
-    if (updates.minQuantity !== undefined && !Number.isInteger(updates.minQuantity)) return;
-    if (existing.hasIMEI && updates.quantity !== undefined && updates.quantity !== 0) return;
-    if (updates.hasIMEI === true && (updates.quantity ?? existing.quantity) !== 0) return;
-    if (updates.hasIMEI === false && existing.hasIMEI && imeiUnits.some(u => u.inventoryId === id)) return;
-    if (updates.code && inventory.some(i => i.id !== id && i.code.trim().toLowerCase() === updates.code!.trim().toLowerCase())) return;
-    if (updates.barcode && inventory.some(i => i.id !== id && i.barcode === updates.barcode)) return;
+    if (updates.quantity !== undefined && !Number.isInteger(updates.quantity)) return { ok: false, error: 'الكمية يجب أن تكون عددًا صحيحًا' };
+    if (updates.minQuantity !== undefined && !Number.isInteger(updates.minQuantity)) return { ok: false, error: 'حد الطلب يجب أن يكون عددًا صحيحًا' };
+    if (existing.hasIMEI && updates.quantity !== undefined && updates.quantity !== 0) return { ok: false, error: 'كمية منتجات الـ IMEI تُحسب من الوحدات، عدّلها من شاشة IMEI' };
+    if (updates.hasIMEI === true && (updates.quantity ?? existing.quantity) !== 0) return { ok: false, error: 'تحويل منتج إلى IMEI يتطلب أن تكون الكمية صفرًا' };
+    if (updates.hasIMEI === false && existing.hasIMEI && imeiUnits.some(u => u.inventoryId === id)) return { ok: false, error: 'لا يمكن إلغاء خاصية IMEI والمنتج له وحدات مسجلة' };
+    if (updates.code && inventory.some(i => i.id !== id && normalizeCode(i.code) === normalizeCode(updates.code))) {
+      return { ok: false, error: 'هذا الكود مستخدم بالفعل في منتج آخر' };
+    }
+    if (updates.barcode && inventory.some(i => i.id !== id && normalizeCode(i.barcode) === normalizeCode(updates.barcode))) {
+      return { ok: false, error: 'هذا الباركود مستخدم بالفعل في منتج آخر' };
+    }
 
     const safeUpdates: Partial<InventoryItem> = { ...updates };
     delete safeUpdates.id;
@@ -382,6 +420,7 @@ export function useStore() {
     if (safeUpdates.costPrice !== undefined) safeUpdates.costPrice = roundMoney(safeUpdates.costPrice);
     if (safeUpdates.sellPrice !== undefined) safeUpdates.sellPrice = roundMoney(safeUpdates.sellPrice);
     setInventory(prev => prev.map(i => i.id === id ? { ...i, ...safeUpdates } : i));
+    return { ok: true };
   }, [categories, inventory, setInventory]);
 
   const deleteInventoryItem = useCallback((id: string): { ok: boolean; error?: string } => {
@@ -1365,26 +1404,21 @@ export function useStore() {
     // Low stock uses the same "real quantity" rule as the Inventory page: for
     // device templates the stock is the number of available IMEI units, not the
     // template's `quantity` field (which is 0 for IMEI products).
-    const lowStockItems = inventory
-      .filter(i => {
-        const realQuantity = i.hasIMEI
-          ? imeiUnits.filter(u => u.inventoryId === i.id && u.status === 'available').length
-          : i.quantity;
-        return realQuantity <= i.minQuantity;
-      })
-      .map(i => {
-        const realQuantity = i.hasIMEI
-          ? imeiUnits.filter(u => u.inventoryId === i.id && u.status === 'available').length
-          : i.quantity;
-        return { ...i, realQuantity };
-      });
+    // فهرس واحد O(imeiUnits) بدل مسح كامل لكل منتج — مرتين (كانت 4 مسحات).
+    const { availableStockOf } = buildImeiStockIndex(imeiUnits);
+    const lowStockItems = inventory.reduce<Array<InventoryItem & { realQuantity: number }>>((acc, i) => {
+      const realQuantity = availableStockOf(i);
+      if (realQuantity <= i.minQuantity) acc.push({ ...i, realQuantity });
+      return acc;
+    }, []);
 
+    // تاريخ «بعد 30 يوم» كان بيتبني من الصفر لكل وحدة IMEI في كل إحصائية.
+    const warrantyWindowEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate() + WARRANTY_ALERT_DAYS);
     const expiringWarranties = imeiUnits.filter(u => {
       if (!u.warrantyEndDate || u.status !== 'sold') return false;
       const warrantyDate = new Date(u.warrantyEndDate);
-      const thirtyDaysFromNow = new Date();
-      thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
-      return warrantyDate <= thirtyDaysFromNow && warrantyDate >= today;
+      if (Number.isNaN(warrantyDate.getTime())) return false;
+      return warrantyDate <= warrantyWindowEnd && warrantyDate >= today;
     });
 
     return {
