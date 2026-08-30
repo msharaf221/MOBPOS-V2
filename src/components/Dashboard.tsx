@@ -113,6 +113,12 @@ export default function Dashboard({
     return Object.entries(categoryMap).map(([name, value]) => ({ name, value }));
   }, [sales, inventory, categories]);
 
+  // Total sales across all categories (used by the donut's center + legend %)
+  const totalCategorySales = React.useMemo(
+    () => salesByCategory.reduce((sum, c) => sum + (c.value || 0), 0),
+    [salesByCategory]
+  );
+
   // Maintenance by status
   const maintenanceByStatus = React.useMemo(() => {
     const statusLabels: Record<string, string> = {
@@ -254,28 +260,92 @@ formatter={(value) => formatCurrency(Number(value) || 0)}
         {/* Sales by Category */}
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-6 border border-gray-200 dark:border-gray-700">
           <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-4">المبيعات حسب الفئة</h3>
-          <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={salesByCategory}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={100}
-                  fill="#8884d8"
-                  paddingAngle={2}
-                  dataKey="value"
-                  label={({ name, percent }) => `${name} (${((percent || 0) * 100).toFixed(0)}%)`}
-                >
-                  {salesByCategory.map((_, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip formatter={(value) => formatCurrency(Number(value) || 0)} />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
+
+          {salesByCategory.length === 0 ? (
+            <div className="h-72 flex items-center justify-center text-gray-400 dark:text-gray-500">
+              لا توجد مبيعات لعرضها بعد
+            </div>
+          ) : (
+            <div className="flex flex-col sm:flex-row items-center gap-6">
+              {/* Donut with center total */}
+              <div className="relative w-52 h-52 shrink-0">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={salesByCategory}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={64}
+                      outerRadius={92}
+                      fill="#8884d8"
+                      paddingAngle={3}
+                      cornerRadius={7}
+                      dataKey="value"
+                      stroke="none"
+                    >
+                      {salesByCategory.map((_, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      content={({ active, payload }) => {
+                        if (!active || !payload || payload.length === 0) return null;
+                        const entry = payload[0];
+                        const pct = totalCategorySales
+                          ? Math.round((Number(entry.value) / totalCategorySales) * 100)
+                          : 0;
+                        return (
+                          <div
+                            dir="rtl"
+                            className="rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 shadow-xl"
+                          >
+                            <p className="text-sm font-semibold text-gray-800 dark:text-white">
+                              {entry.name}
+                            </p>
+                            <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+                              {formatCurrency(Number(entry.value) || 0)} · {pct}%
+                            </p>
+                          </div>
+                        );
+                      }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+                {/* Center content */}
+                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                  <span className="text-xl font-bold text-gray-800 dark:text-white">
+                    {formatCurrency(totalCategorySales)}
+                  </span>
+                  <span className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    إجمالي المبيعات
+                  </span>
+                </div>
+              </div>
+
+              {/* Legend */}
+              <div className="w-full flex-1 space-y-2.5 min-w-0">
+                {salesByCategory.map((cat, index) => {
+                  const pct = totalCategorySales
+                    ? Math.round((cat.value / totalCategorySales) * 100)
+                    : 0;
+                  return (
+                    <div key={index} className="flex items-center gap-2.5">
+                      <span
+                        className="w-2.5 h-2.5 rounded-full shrink-0"
+                        style={{ backgroundColor: COLORS[index % COLORS.length] }}
+                      />
+                      <span className="flex-1 min-w-0 text-sm font-medium text-gray-700 dark:text-gray-200 truncate">
+                        {cat.name}
+                      </span>
+                      <span className="text-sm font-bold text-gray-800 dark:text-white tabular-nums">
+                        {pct}%
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
