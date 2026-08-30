@@ -568,6 +568,68 @@ export function useIndexedDBSetting<T>(
   return [value, updateValue, isLoading];
 }
 
+export interface MultiStoreDelta<T extends StoreRecord = StoreRecord> {
+  storeName: string;
+  previous: T[];
+  next: T[];
+  known?: boolean;
+}
+
+/**
+ * يكتب فروقات عدة مخازن في معاملة IndexedDB ذرّية واحدة.
+ * إذا فشلت الكتابة في أي مخزن، تتراجع المعاملة بالكامل عن كل المخازن.
+ */
+export async function persistMultiStoreDeltas(
+  deltas: MultiStoreDelta[]
+): Promise<void> {
+  if (deltas.length === 0) return;
+  const storeNames = Array.from(new Set(deltas.map(d => d.storeName)));
+
+  await runTransaction(storeNames, 'readwrite', transaction => {
+    for (const delta of deltas) {
+      const store = transaction.objectStore(delta.storeName);
+      if (delta.known === false) {
+        store.clear();
+        delta.next.forEach(item => store.put(item));
+        continue;
+      }
+
+      const { addedOrChanged, removedIds } = diffStore(delta.previous, delta.next);
+      if (addedOrChanged.length === 0 && removedIds.length === 0) {
+        continue;
+      }
+
+      const fullRewriteCost = delta.next.length + 1;
+      const deltaCost = addedOrChanged.length + removedIds.length;
+
+      if (deltaCost >= fullRewriteCost) {
+        store.clear();
+        delta.next.forEach(item => store.put(item));
+      } else {
+        removedIds.forEach(id => store.delete(id));
+        addedOrChanged.forEach(item => store.put(item));
+      }
+    }
+  });
+}
+
+/**
+ * ينفذ عملية ذرية على عدة مخازن مع ضمان التراجع الكامل في حالة حدوث أي خطأ.
+ */
+export async function runAtomicTransaction(
+  storeNames: string[],
+  operation: (stores: Record<string, IDBObjectStore>, transaction: IDBTransaction) => void
+): Promise<void> {
+  if (storeNames.length === 0) return;
+  await runTransaction(storeNames, 'readwrite', transaction => {
+    const stores: Record<string, IDBObjectStore> = {};
+    for (const name of storeNames) {
+      stores[name] = transaction.objectStore(name);
+    }
+    operation(stores, transaction);
+  });
+}
+
 export const indexedDBUtils = {
   openDB,
   getAll,
@@ -585,5 +647,8 @@ export const indexedDBUtils = {
   replaceStoresData,
   resetAllStores,
   flushPendingWrites,
+  persistMultiStoreDeltas,
+  runAtomicTransaction,
+  runTransaction,
   STORES,
 };
