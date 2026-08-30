@@ -9,7 +9,7 @@ import {
 } from 'recharts';
 import { Sale, Maintenance, IMEIUnit, InventoryItem, Category } from '../types';
 import AnimatedNumber from './AnimatedNumber';
-import { formatCurrency } from '../utils/format';
+import { formatCurrency, formatDate } from '../utils/format';
 
 /**
  * كروت لوحة المعلومات كانت ترسم القائمة كلها في الـ DOM (كل منتجات تحت الحد
@@ -76,7 +76,7 @@ export default function Dashboard({
           d.getDate() === date.getDate()
         );
       };
-      const dayName = date.toLocaleDateString(localStorage.getItem('app_locale') || 'ar-EG', { weekday: 'short' });
+      const dayName = formatDate(date, { weekday: 'short' });
       
       const daySales = sales.filter(s => isSameLocalDay(s.createdAt));
       const saleRevenue = daySales.reduce((sum, s) => sum + s.total, 0);

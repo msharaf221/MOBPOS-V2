@@ -3,6 +3,7 @@
 // ============================================================
 
 import ExcelJS from 'exceljs';
+import { formatNumber, formatDateTime } from './format.ts';
 // الخط يُضمَّن داخل ملفات التقارير نفسها (base64) عشان الطباعة والـ PDF
 // يطلعوا بخط Cairo حتى لو الخط مش متثبت على جهاز العميل
 import cairoArabic400 from '@fontsource/cairo/files/cairo-arabic-400-normal.woff2?url';
@@ -95,7 +96,11 @@ export async function downloadExcel(
 // ============================================================
 
 function csvEscape(value: ReportCell): string {
-  const s = String(value ?? '');
+  let s = String(value ?? '');
+  // حماية من حقن صيغ ومعادلات CSV (Formula/DDE Injection)
+  if (/^[=+\-@\t\r]/.test(s)) {
+    s = `'${s}`;
+  }
   if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
   return s;
 }
@@ -220,7 +225,7 @@ export function buildReportHTML(opts: ReportInput): string {
     ${opts.shopName ? `<div class="shop">${esc(opts.shopName)}<small>نظام MOBPOS</small></div>` : ''}
   </div>
   ${sectionsHtml}
-  <div class="foot">أُنشئ بواسطة نظام MOBPOS — ${esc(new Date().toLocaleString('ar-EG'))}</div>
+  <div class="foot">أُنشئ بواسطة نظام MOBPOS — ${esc(formatDateTime(new Date()))}</div>
 </body>
 </html>`;
 }
@@ -258,11 +263,10 @@ export function openPrintReport(opts: ReportInput): void {
 // ===== Number formatting helper =====
 
 export const fmtNum = (n: number): string =>
-  (Math.round((Number(n) || 0) * 100) / 100).toLocaleString('ar-EG');
+  formatNumber(n, 2);
 
 export const fmtDate = (iso: string): string => {
-  try { return new Date(iso).toLocaleString('ar-EG', { dateStyle: 'short', timeStyle: 'short' }); }
-  catch { return iso; }
+  return formatDateTime(iso);
 };
 
 // ===== Daily closing report builder =====

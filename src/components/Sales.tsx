@@ -433,7 +433,7 @@ export default function Sales({ sales, saleReturns, customers, inventory, imeiUn
                   رقم الفاتورة: {selectedSale.invoiceNumber}
                 </p>
                 <p className="text-sm text-gray-600 dark:text-gray-400">
-                  التاريخ: {new Date(selectedSale.createdAt).toLocaleDateString(localStorage.getItem('app_locale') || 'ar-EG')}
+                  التاريخ: {formatDate(selectedSale.createdAt)}
                 </p>
                 {selectedSale.customerId && (
                   <p className="text-sm text-gray-600 dark:text-gray-400">

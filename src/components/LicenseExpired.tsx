@@ -6,6 +6,7 @@ import {
 import { ActiveLicense, PLAN_FEATURES } from '../license/types';
 import { activateLicense } from '../license/engine';
 import { indexedDBUtils } from '../hooks/useIndexedDB';
+import { formatDate } from '../utils/format';
 
 interface LicenseExpiredProps {
   expiredLicense: ActiveLicense;
@@ -95,7 +96,7 @@ export default function LicenseExpired({ expiredLicense, onRenewed, onDeactivate
             <h2 className="text-xl font-bold text-white mb-2">انتهت صلاحية اشتراكك</h2>
             <p className="text-sm text-slate-400 leading-relaxed">
               انتهى اشتراك باقة <span className="text-orange-300 font-bold">{PLAN_FEATURES[expiredLicense.plan].nameAr}</span> بتاريخ{' '}
-              <span className="text-orange-300">{new Date(expiredLicense.expiresAt).toLocaleDateString('ar-EG')}</span>
+              <span className="text-orange-300">{formatDate(expiredLicense.expiresAt)}</span>
             </p>
           </div>
 

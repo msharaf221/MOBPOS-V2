@@ -16,6 +16,7 @@ import {
 } from '../data/initialData';
 import { buildAutoNotifications, mergeAutoNotifications } from '../utils/alerts';
 import { buildImeiStockIndex } from '../utils/stockCounts';
+import { formatDate } from '../utils/format';
 
 const MAX_TEXT_LENGTH = 2_000;
 /** نافذة تنبيه الضمان — نفس قيمة محرك التنبيهات (alerts.ts). */
@@ -839,7 +840,7 @@ export function useStore() {
     const newAudit: InventoryAudit = {
       id: uuidv4(),
       auditNumber: generateAuditNumber(),
-      title: title || `جرد ${new Date().toLocaleDateString('ar-EG')}`,
+      title: title || `جرد ${formatDate(new Date())}`,
       status: applyNow ? 'applied' : 'draft',
       items: auditItems,
       totalShortage: auditItems.filter(i => i.difference < 0).reduce((sum, i) => sum + Math.abs(i.difference), 0),

@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { LicenseKey, PlanType, PLAN_FEATURES } from '../license/types';
 import { LICENSE_PUBLIC_KEY, ACTIVATION_SERVER_URL } from '../license/keys';
+import { formatDate } from '../utils/format';
 import {
   generateLicenseKey, verifyMasterPassword, hasMasterPassword, setupMasterPassword,
   getStoredMasterKeys, storeMasterKeys, getDaysRemaining,
@@ -469,7 +470,7 @@ export default function MasterAdmin({ onBack }: MasterAdminProps) {
                           ) : `${getDaysRemaining(k.expiresAt)} يوم`}
                         </td>
                         <td className="px-4 py-3 text-slate-400 text-sm">
-                          {k.lifetime ? '∞ لا ينتهي' : new Date(k.expiresAt).toLocaleDateString('ar-EG')}
+                          {k.lifetime ? '∞ لا ينتهي' : formatDate(k.expiresAt)}
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center justify-center gap-1">

@@ -12,7 +12,7 @@
  */
 
 import type { Customer, IMEIUnit, InventoryItem, Maintenance, Notification } from '../types';
-import { formatCurrency } from './format.ts';
+import { formatCurrency, formatDate as formatIntlDate } from './format.ts';
 import { buildImeiStockIndex } from './stockCounts.ts';
 
 export interface AutoAlertInput {
@@ -34,7 +34,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 function formatDate(value: string): string {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleDateString('ar-EG', { year: 'numeric', month: 'short', day: 'numeric' });
+  return formatIntlDate(d, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
 function daysBetween(fromMs: number, toMs: number): number {

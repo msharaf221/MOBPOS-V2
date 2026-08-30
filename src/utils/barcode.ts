@@ -1,3 +1,5 @@
+import { formatCurrency } from './format.ts';
+
 // Barcode generation and rendering utilities for POS & Inventory
 // Generates standard barcodes and prints barcode label stickers
 
@@ -153,11 +155,7 @@ export function printBarcodeSticker(
   const safeBarcode = escapeHtml(barcode);
   const safeShopName = escapeHtml(shopName);
   const copyCount = Math.min(1000, Math.max(1, Math.floor(Number(copies) || 1)));
-  const formattedPrice = new Intl.NumberFormat('ar-EG', {
-    style: 'currency',
-    currency: 'EGP',
-    maximumFractionDigits: 0
-  }).format(price);
+  const formattedPrice = formatCurrency(price);
 
   const svgBarcode = generateBarcodeSvg(barcode, 40);
 

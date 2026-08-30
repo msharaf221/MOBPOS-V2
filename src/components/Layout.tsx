@@ -12,6 +12,7 @@ import { getDaysRemaining } from '../license/engine';
 import { useIndexedDBSetting } from '../hooks/useIndexedDB';
 import { countUnreadNotifications, selectVisibleNotifications } from '../utils/alerts';
 import { defaultAppSettings } from '../hooks/useStore';
+import { formatDate } from '../utils/format';
 import TitleBar from './TitleBar';
 
 // Must match the event name dispatched from Settings.tsx after saving branding changes.
@@ -85,7 +86,7 @@ function relativeTime(iso: string): string {
   if (hours < 24) return `منذ ${arabicCount(hours, 'ساعة', 'ساعتين', 'ساعات', 'ساعة')}`;
   const days = Math.floor(hours / 24);
   if (days < 30) return `منذ ${arabicCount(days, 'يوم', 'يومين', 'أيام', 'يوم')}`;
-  return new Date(time).toLocaleDateString('ar-EG', { year: 'numeric', month: 'short', day: 'numeric' });
+  return formatDate(time, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
 export default function Layout({
@@ -265,7 +266,7 @@ export default function Layout({
                 ) : (
                   <>
                     <p className="text-[10px] text-blue-200/60">
-                      ينتهي: {new Date(license.expiresAt).toLocaleDateString('ar-EG')}
+                      ينتهي: {formatDate(license.expiresAt)}
                     </p>
                     <p className="text-[10px] text-blue-200/60">
                       {getDaysRemaining(license.expiresAt)} يوم متبقي

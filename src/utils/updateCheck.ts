@@ -5,6 +5,8 @@
 //  إلى رسالة عربية واضحة + حالة جاهزة للواجهة.
 // ============================================================
 
+import { formatDate } from './format.ts';
+
 export interface UpdateCheckResponse {
   ok: boolean;
   /** true إذا كان التحديث يعمل في وضع التطوير / المتصفح (غير مثبت). */
@@ -74,5 +76,5 @@ export function buildUpdateCheckMessage(
 /** تنسيق «آخر فحص» بالعربي. */
 export function formatLastChecked(date: Date): string {
   if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+  return formatDate(date, { hour: '2-digit', minute: '2-digit' });
 }

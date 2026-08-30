@@ -330,7 +330,7 @@ export default function Finance({
             onClick={() =>
               openPrintReport({
                 title: 'تقرير الإقفال اليومي',
-                subtitle: new Date().toLocaleDateString('ar-EG', { dateStyle: 'full' }),
+                subtitle: formatIntlDate(new Date(), { dateStyle: 'full' }),
                 shopName,
                 sections: buildDailyCloseReport({ sales, saleReturns, transactions, safes }),
               })
@@ -815,7 +815,7 @@ export default function Finance({
                   <option value="">اختر الخزنة</option>
                   {safes.map(safe => (
                     <option key={safe.id} value={safe.id}>
-                      {safe.name} ({(safe.balance || 0).toLocaleString(localStorage.getItem('app_locale') || 'ar-EG')} ج.م.)
+                      {safe.name} ({formatCurrency(safe.balance || 0)})
                     </option>
                   ))}
                 </select>
@@ -834,7 +834,7 @@ export default function Finance({
                     <option value="">نفس الخزنة</option>
                     {safes.map(safe => (
                       <option key={safe.id} value={safe.id}>
-                        {safe.name} ({(safe.balance || 0).toLocaleString(localStorage.getItem('app_locale') || 'ar-EG')} ج.م.)
+                        {safe.name} ({formatCurrency(safe.balance || 0)})
                       </option>
                     ))}
                   </select>

@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect } from 'react';
-import { formatCurrency } from '../utils/format';
+import { formatCurrency, formatDate, formatDateTime } from '../utils/format';
 import { usePagination } from '../hooks/usePagination';
 import PaginationBar from './PaginationBar';
 
@@ -150,7 +150,7 @@ export default function SideAccounts({ entries, safes, onAddEntry, onUpdateEntry
         </div>
         <div className="flex gap-2 flex-wrap">
           <button
-            onClick={() => downloadExcel(`side-accounts-${new Date().toISOString().slice(0, 10)}`, ['الشخص', 'النوع', 'التأثير', 'المبلغ', 'المدفوع', 'المتبقي', 'الحالة', 'الوصف', 'التاريخ'], entries.map(e => [e.partyName, typeLabels[e.type], impactLabels[e.impact], e.amount, e.paidAmount, Math.max(0, e.amount - e.paidAmount), statusLabels[e.status], e.description, new Date(e.createdAt).toLocaleString('ar-EG')]))}
+            onClick={() => downloadExcel(`side-accounts-${new Date().toISOString().slice(0, 10)}`, ['الشخص', 'النوع', 'التأثير', 'المبلغ', 'المدفوع', 'المتبقي', 'الحالة', 'الوصف', 'التاريخ'], entries.map(e => [e.partyName, typeLabels[e.type], impactLabels[e.impact], e.amount, e.paidAmount, Math.max(0, e.amount - e.paidAmount), statusLabels[e.status], e.description, formatDateTime(e.createdAt)]))}
             className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition"
           ><FileSpreadsheet size={20} />تصدير</button>
           <button onClick={() => setShowModal(true)} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"><Plus size={20} />عملية جديدة</button>
@@ -212,7 +212,7 @@ export default function SideAccounts({ entries, safes, onAddEntry, onUpdateEntry
                     <td className="px-4 py-3 font-bold text-gray-800 dark:text-white">{formatCurrency(entry.amount)}</td>
                     <td className="px-4 py-3 font-bold text-gray-800 dark:text-white">{remaining ? formatCurrency(remaining) : '-'}</td>
                     <td className="px-4 py-3"><span className={`badge ${statusBadge(entry.status)}`}>{statusLabels[entry.status]}</span></td>
-                    <td className="px-4 py-3 text-sm text-gray-500">{new Date(entry.createdAt).toLocaleDateString('ar-EG')}</td>
+                    <td className="px-4 py-3 text-sm text-gray-500">{formatDate(entry.createdAt)}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-center gap-1">
                         {(entry.type === 'receivable' || entry.type === 'payable') && <button onClick={() => openSettle(entry)} className="p-2 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg" title="تحديث المدفوع"><CheckCircle2 size={18} /></button>}

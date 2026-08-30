@@ -10,7 +10,7 @@ import { Customer, InventoryItem, IMEIUnit, Safe, Category, SaleItem } from '../
 import { printReceipt } from '../utils/print';
 import { posSound } from '../utils/audio';
 import { buildImeiStockIndex, groupCountsBy } from '../utils/stockCounts';
-import { formatCurrency } from '../utils/format';
+import { formatCurrency, formatDate } from '../utils/format';
 
 /** عدد كروت الأصناف اللي بتترسم في الأول وكل ضغطة «عرض المزيد». */
 const POS_GRID_STEP = 60;
@@ -769,7 +769,7 @@ export default function POS({
       paymentMethod,
       customer: selectedCustomer,
       invoiceNumber: saleResult.invoiceNumber,
-      date: new Date().toLocaleDateString(localStorage.getItem('app_locale') || 'ar-EG')
+      date: formatDate(new Date())
     });
     setShowReceipt(true);
 
@@ -792,7 +792,7 @@ export default function POS({
     }
     const newParked: ParkedSale = {
       id: Date.now().toString(),
-      timestamp: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }),
+      timestamp: formatDate(new Date(), { hour: '2-digit', minute: '2-digit' }),
       cart: [...cart],
       customer: selectedCustomer,
       discount: Number(discount) || 0,
