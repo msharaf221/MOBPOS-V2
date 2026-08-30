@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { formatCurrency, formatDate as formatIntlDate } from '../utils/format';
 import {
   Plus, Clock, Wrench, CheckCircle, Truck, X, Phone,
   Smartphone, DollarSign, Package, Printer
@@ -70,6 +71,11 @@ export default function MaintenanceBoard({
     isManual: true // default to manual entry
   });
 
+  // الأعمدة كانت مقيّدة بـ 10 تذاكر «مسلّمة» أقدم حاجة — يعني أحدث التسليمات
+  // كانت مخفية. بقى حد أقصى لكل عمود + زرار «عرض الكل» يشوف الباقي.
+  const COLUMN_LIMIT = 12;
+  const [expandedColumns, setExpandedColumns] = useState<Record<string, boolean>>({});
+
   // Derive selected maintenance LIVE from the array so it reflects
   // any updates (added parts, changed costs, profit) instantly
   const selectedMaintenance = useMemo(
@@ -83,13 +89,23 @@ export default function MaintenanceBoard({
     categories.find(c => c.id === i.categoryId)?.type === 'spare_part'
   );
 
-  // Group maintenance by status
-  const groupedMaintenance = {
-    received: maintenance.filter(m => m.status === 'received'),
-    in_progress: maintenance.filter(m => m.status === 'in_progress'),
-    completed: maintenance.filter(m => m.status === 'completed'),
-    delivered: maintenance.filter(m => m.status === 'delivered').slice(0, 10) // Show only last 10 delivered
-  };
+  // Group maintenance by status — مرور واحد على التذاكر بدل 4 مسحات كاملة
+  // في كل ريندر، والأحدث الأول.
+  const groupedMaintenance = useMemo(() => {
+    // 'cancelled' حالة موجودة في البيانات لكن ملهاش عمود في البورد — بنحطها
+    // في مجموعة مستقلة عشان المقارنة تكون سليمة والتذكرة ماضيعش منها أثر.
+    const groups: Record<MaintenanceStatus | 'cancelled', Maintenance[]> = {
+      received: [], in_progress: [], completed: [], delivered: [], cancelled: []
+    };
+    for (const ticket of maintenance) {
+      const bucket = groups[ticket.status];
+      if (bucket) bucket.push(ticket);
+    }
+    const newestFirst = (a: Maintenance, b: Maintenance) =>
+      (a.receivedAt < b.receivedAt ? 1 : a.receivedAt > b.receivedAt ? -1 : 0);
+    (Object.keys(groups) as Array<MaintenanceStatus | 'cancelled'>).forEach(status => groups[status].sort(newestFirst));
+    return groups;
+  }, [maintenance]);
 
   const calculateProfit = (maint: Maintenance) => {
     const partsCost = maint.parts.reduce((sum, p) => sum + p.total, 0);
@@ -206,18 +222,7 @@ export default function MaintenanceBoard({
     setShowDetailModal(true);
   };
 
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat(localStorage.getItem('app_locale') || 'ar-EG', {
-      style: 'currency',
-      currency: localStorage.getItem('app_currency') || 'EGP',
-      maximumFractionDigits: 0
-    }).format(value);
-  };
-
-  const formatDate = (dateStr: string) => {
-    if (!dateStr) return '-';
-    return new Date(dateStr).toLocaleDateString(localStorage.getItem('app_locale') || 'ar-EG');
-  };
+  const formatDate = (dateStr: string) => (dateStr ? formatIntlDate(dateStr) : '-');
 
   return (
     <div className="h-[calc(100vh-120px)] flex flex-col gap-4 animate-fadeIn">
@@ -241,6 +246,8 @@ export default function MaintenanceBoard({
         {(['received', 'in_progress', 'completed', 'delivered'] as MaintenanceStatus[]).map(status => {
           const config = statusConfig[status];
           const tickets = groupedMaintenance[status];
+          const isColumnExpanded = !!expandedColumns[status];
+          const visibleTickets = isColumnExpanded ? tickets : tickets.slice(0, COLUMN_LIMIT);
           const Icon = config.icon;
 
           return (
@@ -263,7 +270,7 @@ export default function MaintenanceBoard({
 
               {/* Tickets */}
               <div className="flex-1 p-3 space-y-3 overflow-y-auto">
-                {tickets.map(ticket => {
+                {visibleTickets.map(ticket => {
                   const daysSince = getDaysSince(ticket.receivedAt);
                   const isDelayed = daysSince > 7 && status !== 'delivered';
 
@@ -342,6 +349,17 @@ export default function MaintenanceBoard({
                   </div>
                 )}
               </div>
+
+              {tickets.length > COLUMN_LIMIT && (
+                <button
+                  onClick={() => setExpandedColumns(prev => ({ ...prev, [status]: !prev[status] }))}
+                  className="m-3 mt-0 px-3 py-2 text-sm font-bold text-blue-600 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20 transition"
+                >
+                  {isColumnExpanded
+                    ? 'عرض أقل'
+                    : `عرض كل التذاكر (${tickets.length - COLUMN_LIMIT} أخرى)`}
+                </button>
+              )}
             </div>
           );
         })}

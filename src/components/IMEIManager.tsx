@@ -1,4 +1,8 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { formatCurrency, formatDate as formatIntlDate } from '../utils/format';
+import { usePagination } from '../hooks/usePagination';
+import PaginationBar from './PaginationBar';
+
 import {
   Search, Plus, Edit2, Trash2, Eye, History, AlertTriangle,
   X, Smartphone
@@ -65,6 +69,17 @@ export default function IMEIManager({
       return matchesSearch && matchesStatus && matchesProduct && matchesCondition;
     });
   }, [imeiUnits, searchTerm, statusFilter, productFilter, conditionFilter]);
+
+  // فهارس بدل inventory.find / customers.find لكل صف
+  const productById = useMemo(() => new Map(inventory.map(i => [i.id, i])), [inventory]);
+  const customerById = useMemo(() => new Map(customers.map(c => [c.id, c])), [customers]);
+
+  const imeiPage = usePagination(filteredUnits, { defaultPageSize: 50, storageKey: 'mobpos_page_size_imei' });
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    imeiPage.resetPage();
+  }, [searchTerm, statusFilter, productFilter, conditionFilter]);
 
   // Check warranty status
   const getWarrantyStatus = (endDate: string) => {
@@ -186,18 +201,7 @@ export default function IMEIManager({
     setShowHistoryModal(true);
   };
 
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat(localStorage.getItem('app_locale') || 'ar-EG', {
-      style: 'currency',
-      currency: localStorage.getItem('app_currency') || 'EGP',
-      maximumFractionDigits: 0
-    }).format(value);
-  };
-
-  const formatDate = (dateStr: string) => {
-    if (!dateStr) return '-';
-    return new Date(dateStr).toLocaleDateString(localStorage.getItem('app_locale') || 'ar-EG');
-  };
+  const formatDate = (dateStr: string) => (dateStr ? formatIntlDate(dateStr) : '-');
 
   const getStatusBadge = (status: string) => {
     const styles: Record<string, string> = {
@@ -343,9 +347,9 @@ export default function IMEIManager({
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-              {filteredUnits.map(unit => {
-                const product = inventory.find(i => i.id === unit.inventoryId);
-                const customer = customers.find(c => c.id === unit.customerId);
+              {imeiPage.pageRows.map(unit => {
+                const product = productById.get(unit.inventoryId);
+                const customer = customerById.get(unit.customerId);
                 const warrantyStatus = getWarrantyStatus(unit.warrantyEndDate);
 
                 return (
@@ -465,6 +469,20 @@ export default function IMEIManager({
             لا توجد أجهزة مطابقة للبحث
           </div>
         )}
+
+                <PaginationBar
+                  total={imeiPage.total}
+                  page={imeiPage.page}
+                  pageSize={imeiPage.pageSize}
+                  totalPages={imeiPage.totalPages}
+                  from={imeiPage.from}
+                  to={imeiPage.to}
+                  canPrev={imeiPage.canPrev}
+                  canNext={imeiPage.canNext}
+                  onPageChange={imeiPage.setPage}
+                  onPageSizeChange={imeiPage.setPageSize}
+                  itemLabel="جهاز"
+                />
       </div>
 
       {/* Add Modal */}

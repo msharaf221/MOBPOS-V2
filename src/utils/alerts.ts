@@ -12,6 +12,8 @@
  */
 
 import type { Customer, IMEIUnit, InventoryItem, Maintenance, Notification } from '../types';
+import { formatCurrency } from './format.ts';
+import { buildImeiStockIndex } from './stockCounts.ts';
 
 export interface AutoAlertInput {
   inventory: InventoryItem[];
@@ -29,17 +31,6 @@ const MAINTENANCE_DELAY_DAYS = 7;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-function formatCurrency(value: number): string {
-  return new Intl.NumberFormat(
-    (typeof localStorage !== 'undefined' && localStorage.getItem('app_locale')) || 'ar-EG',
-    {
-      style: 'currency',
-      currency: (typeof localStorage !== 'undefined' && localStorage.getItem('app_currency')) || 'EGP',
-      maximumFractionDigits: 0,
-    }
-  ).format(value || 0);
-}
-
 function formatDate(value: string): string {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
@@ -54,10 +45,13 @@ function daysBetween(fromMs: number, toMs: number): number {
  * Real on-hand quantity: for IMEI products the stock is the number of
  * available units, not the template's `quantity` field (which stays 0).
  * Same rule as `useStore.getStatistics` and the Inventory page.
+ *
+ * النسخة دي بتبني فهرس واحد O(M) بدل ما تعمل مسح كامل لـ imeiUnits لكل
+ * منتج في كل تغيير في المخزون (كانت O(inventory × imeiUnits)).
  */
-function realQuantityOf(item: InventoryItem, imeiUnits: IMEIUnit[]): number {
-  if (!item.hasIMEI) return item.quantity || 0;
-  return imeiUnits.filter(u => u.inventoryId === item.id && u.status === 'available').length;
+function makeQuantityLookup(imeiUnits: IMEIUnit[]) {
+  const { availableStockOf } = buildImeiStockIndex(imeiUnits);
+  return (item: InventoryItem): number => availableStockOf(item);
 }
 
 /** Splits a list into the rows shown individually + the count left over. */
@@ -67,6 +61,7 @@ function capList<T>(items: T[]): { shown: T[]; rest: number } {
 
 export function buildAutoNotifications(input: AutoAlertInput): Notification[] {
   const { inventory, imeiUnits, maintenance, customers } = input;
+  const realQuantityOf = makeQuantityLookup(imeiUnits);
   const now = Date.now();
   const createdAt = new Date(now).toISOString();
   const alerts: Notification[] = [];
@@ -77,7 +72,7 @@ export function buildAutoNotifications(input: AutoAlertInput): Notification[] {
 
   // ── 1) Low stock ─────────────────────────────────────────────────────────
   const lowStock = inventory
-    .map(item => ({ item, realQuantity: realQuantityOf(item, imeiUnits) }))
+    .map(item => ({ item, realQuantity: realQuantityOf(item) }))
     .filter(({ item, realQuantity }) => realQuantity <= (item.minQuantity || 0))
     // most critical first
     .sort((a, b) => a.realQuantity - b.realQuantity || a.item.name.localeCompare(b.item.name, 'ar'));

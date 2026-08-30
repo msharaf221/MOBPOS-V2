@@ -1,4 +1,8 @@
-import { useState } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { formatCurrency } from '../utils/format';
+import { usePagination } from '../hooks/usePagination';
+import PaginationBar from './PaginationBar';
+
 import { Search, Plus, Edit2, Trash2, X, Phone, MapPin, Wallet } from 'lucide-react';
 import { Supplier } from '../types';
 
@@ -13,10 +17,20 @@ export default function Suppliers({ suppliers, onUpdate }: SuppliersProps) {
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
   const [formData, setFormData] = useState({ name: '', phone: '', address: '', balance: 0 });
 
-  const filteredSuppliers = suppliers.filter(s =>
-    s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    s.phone.includes(searchTerm)
-  );
+  const filteredSuppliers = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    return suppliers.filter(s =>
+      s.name.toLowerCase().includes(term) ||
+      s.phone.includes(searchTerm)
+    );
+  }, [suppliers, searchTerm]);
+
+  const suppliersPage = usePagination(filteredSuppliers, { defaultPageSize: 20, storageKey: 'mobpos_page_size_suppliers' });
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    suppliersPage.resetPage();
+  }, [searchTerm]);
 
   const handleSave = () => {
     if (!formData.name || !formData.phone) {
@@ -52,14 +66,6 @@ export default function Suppliers({ suppliers, onUpdate }: SuppliersProps) {
       balance: supplier.balance
     });
     setShowModal(true);
-  };
-
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat(localStorage.getItem('app_locale') || 'ar-EG', {
-      style: 'currency',
-      currency: localStorage.getItem('app_currency') || 'EGP',
-      maximumFractionDigits: 0
-    }).format(value);
   };
 
   const totalBalance = suppliers.reduce((sum, s) => sum + s.balance, 0);
@@ -109,7 +115,7 @@ export default function Suppliers({ suppliers, onUpdate }: SuppliersProps) {
 
       {/* Suppliers Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filteredSuppliers.map(supplier => (
+        {suppliersPage.pageRows.map(supplier => (
           <div
             key={supplier.id}
             className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-5"
@@ -164,6 +170,20 @@ export default function Suppliers({ suppliers, onUpdate }: SuppliersProps) {
           لا يوجد موردين
         </div>
       )}
+
+              <PaginationBar
+                total={suppliersPage.total}
+                page={suppliersPage.page}
+                pageSize={suppliersPage.pageSize}
+                totalPages={suppliersPage.totalPages}
+                from={suppliersPage.from}
+                to={suppliersPage.to}
+                canPrev={suppliersPage.canPrev}
+                canNext={suppliersPage.canNext}
+                onPageChange={suppliersPage.setPage}
+                onPageSizeChange={suppliersPage.setPageSize}
+                itemLabel="مورد"
+              />
 
       {/* Modal */}
       {showModal && (

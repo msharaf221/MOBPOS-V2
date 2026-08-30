@@ -119,9 +119,11 @@ function todayTag(d = new Date()): string {
 
 /** Export every store (except the backups store itself) into one payload. */
 export async function createBackupPayload(): Promise<BackupPayload> {
-  const data = await indexedDBUtils.exportAllData();
-  // Never nest backups inside backups
-  delete data[indexedDBUtils.STORES.backups];
+  // أي تعديل لسه في طريقه للديسك لازم يخلص الأول، وإلا النسخة الاحتياطية
+  // هتتعمل من لقطة قديمة والنسخة الحديثة ضايعة (خصوصًا بعد دمج الكتابات).
+  await indexedDBUtils.flushPendingWrites();
+
+  const data = await indexedDBUtils.exportAllData([indexedDBUtils.STORES.backups]);
 
   let shopName: string | undefined;
   try {
@@ -344,7 +346,12 @@ export async function restoreFromParsed(parsed: unknown): Promise<void> {
   // importAllData performs one transaction for all supplied stores. Validate
   // everything first, then write settings only after the data transaction has
   // succeeded so a bad file cannot leave a half-restored database.
+  //
+  // أي كتابة لسه في الطريق للديسك لازم تخلص قبل الاستعادة وإلا هتنزل فوق
+  // الداتا المستعادة بعد لحظات (خصوصًا بعد دمج الكتابات المتأخرة).
+  await indexedDBUtils.flushPendingWrites();
   await indexedDBUtils.importAllData(stores);
+  await indexedDBUtils.flushPendingWrites();
 
   if (Array.isArray(legacySettings) && legacySettings[0] && typeof legacySettings[0] === 'object') {
     await indexedDBUtils.setSetting('shopSettings', legacySettings[0]);

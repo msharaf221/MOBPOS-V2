@@ -1,4 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
+import { formatCurrency } from '../utils/format';
+import { usePagination } from '../hooks/usePagination';
+import PaginationBar from './PaginationBar';
+
 import type React from 'react';
 import { Plus, Search, Trash2, WalletCards, ArrowDownCircle, ArrowUpCircle, CheckCircle2, FileSpreadsheet } from 'lucide-react';
 import { Safe, SideAccountEntry, SideAccountEntryType, SideAccountImpact, SideAccountStatus } from '../types';
@@ -61,12 +65,6 @@ export default function SideAccounts({ entries, safes, onAddEntry, onUpdateEntry
     newSafeName: ''
   });
 
-  const formatCurrency = (value: number) => new Intl.NumberFormat(localStorage.getItem('app_locale') || 'ar-EG', {
-    style: 'currency',
-    currency: localStorage.getItem('app_currency') || 'EGP',
-    maximumFractionDigits: 0
-  }).format(value || 0);
-
   const filteredEntries = useMemo(() => {
     const term = searchTerm.toLowerCase();
     return entries.filter(entry => {
@@ -75,6 +73,13 @@ export default function SideAccounts({ entries, safes, onAddEntry, onUpdateEntry
       return matchesSearch && matchesFilter;
     }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [entries, searchTerm, filter]);
+
+  const entriesPage = usePagination(filteredEntries, { defaultPageSize: 50, storageKey: 'mobpos_page_size_side_accounts' });
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    entriesPage.resetPage();
+  }, [searchTerm, filter]);
 
   const stats = useMemo(() => {
     const receivable = entries.filter(e => e.type === 'receivable').reduce((sum, e) => sum + Math.max(0, e.amount - e.paidAmount), 0);
@@ -191,7 +196,7 @@ export default function SideAccounts({ entries, safes, onAddEntry, onUpdateEntry
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-              {filteredEntries.map(entry => {
+              {entriesPage.pageRows.map(entry => {
                 const remaining = entry.type === 'receivable' || entry.type === 'payable' ? Math.max(0, entry.amount - entry.paidAmount) : 0;
                 return (
                   <tr key={entry.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
@@ -221,6 +226,20 @@ export default function SideAccounts({ entries, safes, onAddEntry, onUpdateEntry
           </table>
         </div>
         {filteredEntries.length === 0 && <div className="p-8 text-center text-gray-500 dark:text-gray-400">لا توجد عمليات مطابقة</div>}
+
+                <PaginationBar
+                  total={entriesPage.total}
+                  page={entriesPage.page}
+                  pageSize={entriesPage.pageSize}
+                  totalPages={entriesPage.totalPages}
+                  from={entriesPage.from}
+                  to={entriesPage.to}
+                  canPrev={entriesPage.canPrev}
+                  canNext={entriesPage.canNext}
+                  onPageChange={entriesPage.setPage}
+                  onPageSizeChange={entriesPage.setPageSize}
+                  itemLabel="عملية"
+                />
       </div>
 
       {showModal && (

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   TrendingUp, DollarSign, ShoppingCart,
   Package, Users, Wrench, AlertTriangle, Clock
@@ -9,6 +9,14 @@ import {
 } from 'recharts';
 import { Sale, Maintenance, IMEIUnit, InventoryItem, Category } from '../types';
 import AnimatedNumber from './AnimatedNumber';
+import { formatCurrency } from '../utils/format';
+
+/**
+ * كروت لوحة المعلومات كانت ترسم القائمة كلها في الـ DOM (كل منتجات تحت الحد
+ * الأقصى + كل الضمانات المنتهية). الكارت بيستعرض أول DASHBOARD_CARD_LIMIT بس
+ * وفي زرار «عرض الكل» لو في أكتر — نفس الشكل لكن بدون آلاف العُقد.
+ */
+const DASHBOARD_CARD_LIMIT = 10;
 
 interface DashboardProps {
   statistics: {
@@ -42,6 +50,16 @@ export default function Dashboard({
   categories,
   inventory
 }: DashboardProps) {
+  const [showAllLowStock, setShowAllLowStock] = useState(false);
+  const [showAllWarranties, setShowAllWarranties] = useState(false);
+
+  const lowStockItems = statistics.lowStockItems;
+  const visibleLowStockItems = showAllLowStock ? lowStockItems : lowStockItems.slice(0, DASHBOARD_CARD_LIMIT);
+  const warrantyNow = Date.now();
+  const visibleWarranties = showAllWarranties
+    ? statistics.expiringWarranties
+    : statistics.expiringWarranties.slice(0, DASHBOARD_CARD_LIMIT);
+
   // Prepare chart data - Last 7 days sales
   const last7DaysSales = React.useMemo(() => {
     const days = [];
@@ -113,14 +131,6 @@ export default function Dashboard({
 
     return Object.entries(statusCount).map(([name, value]) => ({ name, value }));
   }, [maintenance]);
-
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat(localStorage.getItem('app_locale') || 'ar-EG', {
-      style: 'currency',
-      currency: localStorage.getItem('app_currency') || 'EGP',
-      maximumFractionDigits: 0
-    }).format(value);
-  };
 
   return (
     <div className="space-y-6 animate-fadeIn">
@@ -299,7 +309,7 @@ formatter={(value) => formatCurrency(Number(value) || 0)}
                 لا توجد منتجات بمخزون منخفض
               </p>
             ) : (
-              statistics.lowStockItems.map(item => (
+              visibleLowStockItems.map(item => (
                 <div
                   key={item.id}
                   className="flex items-center justify-between p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg"
@@ -315,6 +325,14 @@ formatter={(value) => formatCurrency(Number(value) || 0)}
               ))
             )}
           </div>
+          {lowStockItems.length > DASHBOARD_CARD_LIMIT && (
+            <button
+              onClick={() => setShowAllLowStock(prev => !prev)}
+              className="mt-3 text-sm font-bold text-blue-600 hover:underline"
+            >
+              {showAllLowStock ? 'عرض أقل' : `عرض كل المنتجات (${lowStockItems.length})`}
+            </button>
+          )}
         </div>
 
         {/* Expiring Warranties */}
@@ -329,9 +347,9 @@ formatter={(value) => formatCurrency(Number(value) || 0)}
                 لا توجد ضمانات تنتهي قريباً
               </p>
             ) : (
-              statistics.expiringWarranties.map(unit => {
+              visibleWarranties.map(unit => {
                 const daysLeft = Math.ceil(
-                  (new Date(unit.warrantyEndDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
+                  (new Date(unit.warrantyEndDate).getTime() - warrantyNow) / (1000 * 60 * 60 * 24)
                 );
                 return (
                   <div
@@ -356,6 +374,14 @@ formatter={(value) => formatCurrency(Number(value) || 0)}
               })
             )}
           </div>
+          {statistics.expiringWarranties.length > DASHBOARD_CARD_LIMIT && (
+            <button
+              onClick={() => setShowAllWarranties(prev => !prev)}
+              className="mt-3 text-sm font-bold text-blue-600 hover:underline"
+            >
+              {showAllWarranties ? 'عرض أقل' : `عرض كل الضمانات (${statistics.expiringWarranties.length})`}
+            </button>
+          )}
         </div>
       </div>
 

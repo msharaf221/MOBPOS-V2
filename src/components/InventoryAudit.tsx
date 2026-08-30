@@ -17,6 +17,8 @@ import {
   ListChecks
 } from 'lucide-react';
 import { Category, IMEIUnit, InventoryAudit as InventoryAuditType, InventoryItem, User } from '../types';
+import { buildImeiStockIndex } from '../utils/stockCounts';
+import { formatCurrency } from '../utils/format';
 import { downloadExcel } from '../utils/reports';
 
 interface InventoryAuditProps {
@@ -73,18 +75,11 @@ export default function InventoryAudit({
   const [counts, setCounts] = useState<Record<string, { countedQuantity: number; notes: string }>>({});
   const [savedToast, setSavedToast] = useState('');
 
-  const formatCurrency = (value: number) => new Intl.NumberFormat(localStorage.getItem('app_locale') || 'ar-EG', {
-    style: 'currency',
-    currency: localStorage.getItem('app_currency') || 'EGP',
-    maximumFractionDigits: 0
-  }).format(value || 0);
-
-  const getActualQuantity = (item: InventoryItem) => {
-    if (item.hasIMEI) {
-      return imeiUnits.filter(u => u.inventoryId === item.id && u.status === 'available').length;
-    }
-    return item.quantity;
-  };
+  // كمية IMEI المتاحة من فهرس واحد بدل مسح كامل لكل صنف: شاشة الجرد بتلف
+  // على كل المنتجات مع كل ضغطة صفحة وكل تعديل كمية.
+  const imeiStock = useMemo(() => buildImeiStockIndex(imeiUnits), [imeiUnits]);
+  const getActualQuantity = (item: InventoryItem) => imeiStock.availableStockOf(item);
+  const categoryById = useMemo(() => new Map(categories.map(c => [c.id, c])), [categories]);
 
   // ===== Local draft helpers (so a big count can be resumed page by page) =====
   const loadDraft = (): any | null => {
@@ -185,7 +180,7 @@ export default function InventoryAudit({
     const difference = countedQuantity - systemQuantity;
     return {
       item,
-      category: categories.find(c => c.id === item.categoryId),
+      category: categoryById.get(item.categoryId),
       systemQuantity,
       countedQuantity,
       difference,
@@ -196,8 +191,8 @@ export default function InventoryAudit({
   }).filter(row => {
     const search = searchTerm.toLowerCase();
     const matchesSearch = row.item.name.toLowerCase().includes(search)
-      || row.item.code.toLowerCase().includes(search)
-      || row.item.barcode.includes(search);
+      || (row.item.code || '').toLowerCase().includes(search)
+      || (row.item.barcode || '').includes(search);
     const matchesCategory = categoryFilter === 'all' || row.item.categoryId === categoryFilter;
     const matchesType = typeFilter === 'all'
       || (typeFilter === 'imei' && row.item.hasIMEI)
@@ -207,7 +202,7 @@ export default function InventoryAudit({
       || (statusFilter === 'notCounted' && !row.isCounted)
       || (statusFilter === 'difference' && row.difference !== 0);
     return matchesSearch && matchesCategory && matchesType && matchesStatus;
-  }), [inventory, categories, imeiUnits, counts, includedIds, searchTerm, categoryFilter, typeFilter, statusFilter]);
+  }), [inventory, categoryById, imeiStock, counts, includedIds, searchTerm, categoryFilter, typeFilter, statusFilter]);
 
   // Rows that will actually be saved into the audit
   const allRows = useMemo(() => inventory
