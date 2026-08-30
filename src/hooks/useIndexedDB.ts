@@ -302,7 +302,7 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
 }
 
 /** يحسب الفروقات بين لقطتين لنفس المخزن. */
-function diffStore<T extends StoreRecord>(previous: T[], next: T[]): { addedOrChanged: T[]; removedIds: string[] } {
+export function diffStore<T extends StoreRecord>(previous: T[], next: T[]): { addedOrChanged: T[]; removedIds: string[] } {
   const previousById = new Map<string, T>(previous.map(item => [item.id, item]));
   const nextById = new Map<string, T>(next.map(item => [item.id, item]));
 
