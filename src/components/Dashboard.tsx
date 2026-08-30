@@ -35,6 +35,33 @@ interface DashboardProps {
 
 const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'];
 
+/**
+ * ليبلات دائرة "المبيعات حسب الفئة" — بتتكتب على مسافة ثابتة برّه الدايرة
+ * وباتجاه يبدأ/ينتهي حسب جهة الشريحة، عشان الليبلات ما تتزاحمش ولا تغطي
+ * الرسم (الشرايح الأصغر من ١٢٪ من غير ليبل — التفاصيل في الـ Tooltip).
+ */
+function renderCategoryLabel(props: any) {
+  const { cx, cy, midAngle, outerRadius, percent, name } = props;
+  if (!percent || percent < 0.12) return null;
+  const RADIAN = Math.PI / 180;
+  const radius = (outerRadius || 100) + 26;
+  const x = cx + radius * Math.cos(-midAngle * RADIAN);
+  const y = cy + radius * Math.sin(-midAngle * RADIAN);
+  return (
+    <text
+      x={x}
+      y={y}
+      fontSize={12}
+      fill="currentColor"
+      className="text-gray-600 dark:text-gray-300"
+      textAnchor={x > cx ? 'start' : 'end'}
+      dominantBaseline="central"
+    >
+      {`${name} (${Math.round(percent * 100)}%)`}
+    </text>
+  );
+}
+
 export default function Dashboard({
   statistics,
   sales,
@@ -256,7 +283,10 @@ formatter={(value) => formatCurrency(Number(value) || 0)}
                   fill="#8884d8"
                   paddingAngle={2}
                   dataKey="value"
-                  label={({ name, percent }) => `${name} (${((percent || 0) * 100).toFixed(0)}%)`}
+                  /* الشرايح الصغيرة (< ٦٪) من غير ليبل خارجي — الليبلات المتزاحمة
+                     كانت بتغطي الدايرة نفسها؛ التفاصيل الكاملة بتفضل في الـ Tooltip. */
+                  labelLine={false}
+                  label={renderCategoryLabel}
                 >
                   {salesByCategory.map((_, index) => (
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />

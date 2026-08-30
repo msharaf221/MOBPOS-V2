@@ -1,0 +1,143 @@
+{
+  "generatedAt": "2026-08-30T12:27:00.224Z",
+  "app": {
+    "name": "MOBPOS",
+    "version": "1.0.4"
+  },
+  "viewport": "1600x1000@2x",
+  "shopName": "الفهد للموبايلات",
+  "themes": [
+    "light",
+    "dark"
+  ],
+  "images": [
+    {
+      "file": "marketing/screenshots/00-license-activation.png",
+      "note": "شاشة تفعيل الترخيص"
+    },
+    {
+      "file": "marketing/screenshots/00-login.png",
+      "note": "شاشة تسجيل الدخول"
+    },
+    {
+      "file": "marketing/screenshots/01-dashboard-light.png",
+      "note": "لوحة التحكم"
+    },
+    {
+      "file": "marketing/screenshots/02-pos-imei-picker-light.png",
+      "note": "نافذة اختيار السيريال IMEI أثناء البيع"
+    },
+    {
+      "file": "marketing/screenshots/02-pos-light.png",
+      "note": "نقطة البيع مع سلة مشتريات"
+    },
+    {
+      "file": "marketing/screenshots/04-inventory-light.png",
+      "note": "المخزون"
+    },
+    {
+      "file": "marketing/screenshots/05-inventory-audit-light.png",
+      "note": "جرد المخزون"
+    },
+    {
+      "file": "marketing/screenshots/06-imei-light.png",
+      "note": "إدارة IMEI"
+    },
+    {
+      "file": "marketing/screenshots/07-maintenance-light.png",
+      "note": "الصيانة"
+    },
+    {
+      "file": "marketing/screenshots/08-customers-light.png",
+      "note": "العملاء"
+    },
+    {
+      "file": "marketing/screenshots/09-sales-light.png",
+      "note": "المبيعات"
+    },
+    {
+      "file": "marketing/screenshots/10-safes-light.png",
+      "note": "الخزائن"
+    },
+    {
+      "file": "marketing/screenshots/11-finance-light.png",
+      "note": "المالية"
+    },
+    {
+      "file": "marketing/screenshots/12-side-accounts-light.png",
+      "note": "الحسابات الجانبية"
+    },
+    {
+      "file": "marketing/screenshots/13-suppliers-light.png",
+      "note": "الموردين"
+    },
+    {
+      "file": "marketing/screenshots/14-users-light.png",
+      "note": "الموظفين"
+    },
+    {
+      "file": "marketing/screenshots/15-settings-light.png",
+      "note": "الإعدادات"
+    },
+    {
+      "file": "marketing/screenshots/01-dashboard-dark.png",
+      "note": "لوحة التحكم"
+    },
+    {
+      "file": "marketing/screenshots/02-pos-imei-picker-dark.png",
+      "note": "نافذة اختيار السيريال IMEI أثناء البيع"
+    },
+    {
+      "file": "marketing/screenshots/02-pos-dark.png",
+      "note": "نقطة البيع مع سلة مشتريات"
+    },
+    {
+      "file": "marketing/screenshots/04-inventory-dark.png",
+      "note": "المخزون"
+    },
+    {
+      "file": "marketing/screenshots/05-inventory-audit-dark.png",
+      "note": "جرد المخزون"
+    },
+    {
+      "file": "marketing/screenshots/06-imei-dark.png",
+      "note": "إدارة IMEI"
+    },
+    {
+      "file": "marketing/screenshots/07-maintenance-dark.png",
+      "note": "الصيانة"
+    },
+    {
+      "file": "marketing/screenshots/08-customers-dark.png",
+      "note": "العملاء"
+    },
+    {
+      "file": "marketing/screenshots/09-sales-dark.png",
+      "note": "المبيعات"
+    },
+    {
+      "file": "marketing/screenshots/10-safes-dark.png",
+      "note": "الخزائن"
+    },
+    {
+      "file": "marketing/screenshots/11-finance-dark.png",
+      "note": "المالية"
+    },
+    {
+      "file": "marketing/screenshots/12-side-accounts-dark.png",
+      "note": "الحسابات الجانبية"
+    },
+    {
+      "file": "marketing/screenshots/13-suppliers-dark.png",
+      "note": "الموردين"
+    },
+    {
+      "file": "marketing/screenshots/14-users-dark.png",
+      "note": "الموظفين"
+    },
+    {
+      "file": "marketing/screenshots/15-settings-dark.png",
+      "note": "الإعدادات"
+    }
+  ]
+}
