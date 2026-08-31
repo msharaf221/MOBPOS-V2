@@ -10,6 +10,13 @@ import {
 import { Sale, Maintenance, IMEIUnit, InventoryItem, Category } from '../types';
 import AnimatedNumber from './AnimatedNumber';
 import { formatCurrency, formatDate } from '../utils/format';
+import {
+  aggregateSalesByCategory,
+  buildCategoryBreakdown,
+  categoryPercent,
+  getCurrentMonthRange,
+  DEFAULT_TOP_CATEGORY_COUNT
+} from '../utils/salesByCategory';
 
 /**
  * كروت لوحة المعلومات كانت ترسم القائمة كلها في الـ DOM (كل منتجات تحت الحد
@@ -17,6 +24,9 @@ import { formatCurrency, formatDate } from '../utils/format';
  * وفي زرار «عرض الكل» لو في أكتر — نفس الشكل لكن بدون آلاف العُقد.
  */
 const DASHBOARD_CARD_LIMIT = 10;
+
+/** عدد الفئات الظاهرة افتراضيًا في كارت «المبيعات حسب الفئة». */
+const TOP_CATEGORY_COUNT = DEFAULT_TOP_CATEGORY_COUNT;
 
 interface DashboardProps {
   statistics: {
@@ -42,6 +52,8 @@ interface DashboardProps {
 }
 
 const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'];
+/** لون الشريحة المجمّعة «أخرى» (والفئات الصغيرة المندرجة تحتها). */
+const OTHER_CATEGORY_COLOR = '#9CA3AF';
 
 export default function Dashboard({
   statistics,
@@ -52,6 +64,16 @@ export default function Dashboard({
 }: DashboardProps) {
   const [showAllLowStock, setShowAllLowStock] = useState(false);
   const [showAllWarranties, setShowAllWarranties] = useState(false);
+  const [showAllCategories, setShowAllCategories] = useState(false);
+
+  // مفتاح الشهر الحالي: بيتغيّر مع بداية كل شهر جديد، فبيبطل الكاش المؤقت
+  // للكارت ويخليه يتصفّر تلقائيًا حتى لو التطبيق مفتوح على مدار الشهر.
+  const currentMonthKey = getCurrentMonthRange().key;
+  const currentMonthRange = React.useMemo(() => getCurrentMonthRange(), [currentMonthKey]);
+  const currentMonthLabel = React.useMemo(
+    () => formatDate(currentMonthRange.start, { month: 'long', year: 'numeric' }),
+    [currentMonthRange]
+  );
 
   const lowStockItems = statistics.lowStockItems;
   const visibleLowStockItems = showAllLowStock ? lowStockItems : lowStockItems.slice(0, DASHBOARD_CARD_LIMIT);
@@ -95,29 +117,24 @@ export default function Dashboard({
     return days;
   }, [sales, maintenance]);
 
-  // Sales by category
-  const salesByCategory = React.useMemo(() => {
-    const categoryMap: Record<string, number> = {};
-    
-    sales.forEach(sale => {
-      sale.items.forEach(item => {
-        const invItem = inventory.find(i => i.id === item.inventoryId);
-        if (invItem) {
-          const category = categories.find(c => c.id === invItem.categoryId);
-          const categoryName = category?.name || 'أخرى';
-          categoryMap[categoryName] = (categoryMap[categoryName] || 0) + item.total;
-        }
-      });
-    });
+  // Sales by category — مبيعات الشهر الحالي فقط (يتصفّر مع كل شهر جديد)
+  const salesByCategory = React.useMemo(
+    () => aggregateSalesByCategory({ sales, inventory, categories, range: currentMonthRange }),
+    [sales, inventory, categories, currentMonthRange]
+  );
 
-    return Object.entries(categoryMap).map(([name, value]) => ({ name, value }));
-  }, [sales, inventory, categories]);
-
-  // Total sales across all categories (used by the donut's center + legend %)
-  const totalCategorySales = React.useMemo(
-    () => salesByCategory.reduce((sum, c) => sum + (c.value || 0), 0),
+  // الرسم (أعلى الفئات + «أخرى») والقائمة الجانبية (أعلى 5 + زرار عرض المزيد)
+  const categoryBreakdown = React.useMemo(
+    () => buildCategoryBreakdown(salesByCategory, { topCount: TOP_CATEGORY_COUNT }),
     [salesByCategory]
   );
+
+  // إجمالي مبيعات الشهر (يستخدمه مركز الرسم والنِسب المئوية)
+  const totalCategorySales = categoryBreakdown.total;
+  const donutData = categoryBreakdown.slices;
+  const visibleCategories = showAllCategories
+    ? categoryBreakdown.expanded
+    : categoryBreakdown.collapsed;
 
   // Maintenance by status
   const maintenanceByStatus = React.useMemo(() => {
@@ -259,11 +276,18 @@ formatter={(value) => formatCurrency(Number(value) || 0)}
 
         {/* Sales by Category */}
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-6 border border-gray-200 dark:border-gray-700">
-          <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-4">المبيعات حسب الفئة</h3>
+          <div className="mb-4">
+            <h3 className="text-lg font-bold text-gray-800 dark:text-white">
+              المبيعات حسب الفئة
+            </h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+              مبيعات شهر {currentMonthLabel} فقط
+            </p>
+          </div>
 
           {salesByCategory.length === 0 ? (
             <div className="h-72 flex items-center justify-center text-gray-400 dark:text-gray-500">
-              لا توجد مبيعات لعرضها بعد
+              لا توجد مبيعات هذا الشهر بعد
             </div>
           ) : (
             <div className="flex flex-col sm:flex-row items-center gap-6">
@@ -272,7 +296,7 @@ formatter={(value) => formatCurrency(Number(value) || 0)}
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
-                      data={salesByCategory}
+                      data={donutData}
                       cx="50%"
                       cy="50%"
                       innerRadius={64}
@@ -283,17 +307,21 @@ formatter={(value) => formatCurrency(Number(value) || 0)}
                       dataKey="value"
                       stroke="none"
                     >
-                      {salesByCategory.map((_, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      {donutData.map((slice) => (
+                        <Cell
+                          key={`cell-${slice.key}`}
+                          fill={slice.colorIndex >= 0 ? COLORS[slice.colorIndex % COLORS.length] : OTHER_CATEGORY_COLOR}
+                        />
                       ))}
                     </Pie>
                     <Tooltip
                       content={({ active, payload }) => {
                         if (!active || !payload || payload.length === 0) return null;
                         const entry = payload[0];
-                        const pct = totalCategorySales
-                          ? Math.round((Number(entry.value) / totalCategorySales) * 100)
-                          : 0;
+                        const { percent, isRoundedToZero } = categoryPercent(
+                          Number(entry.value) || 0,
+                          totalCategorySales
+                        );
                         return (
                           <div
                             dir="rtl"
@@ -303,7 +331,8 @@ formatter={(value) => formatCurrency(Number(value) || 0)}
                               {entry.name}
                             </p>
                             <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-                              {formatCurrency(Number(entry.value) || 0)} · {pct}%
+                              {formatCurrency(Number(entry.value) || 0)} ·{' '}
+                              {isRoundedToZero ? '<1%' : `${percent}%`}
                             </p>
                           </div>
                         );
@@ -312,37 +341,54 @@ formatter={(value) => formatCurrency(Number(value) || 0)}
                   </PieChart>
                 </ResponsiveContainer>
                 {/* Center content */}
-                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none px-6 text-center">
                   <span className="text-xl font-bold text-gray-800 dark:text-white">
                     {formatCurrency(totalCategorySales)}
                   </span>
                   <span className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                    إجمالي المبيعات
+                    إجمالي مبيعات الشهر
                   </span>
                 </div>
               </div>
 
-              {/* Legend */}
-              <div className="w-full flex-1 space-y-2.5 min-w-0">
-                {salesByCategory.map((cat, index) => {
-                  const pct = totalCategorySales
-                    ? Math.round((cat.value / totalCategorySales) * 100)
-                    : 0;
-                  return (
-                    <div key={index} className="flex items-center gap-2.5">
-                      <span
-                        className="w-2.5 h-2.5 rounded-full shrink-0"
-                        style={{ backgroundColor: COLORS[index % COLORS.length] }}
-                      />
-                      <span className="flex-1 min-w-0 text-sm font-medium text-gray-700 dark:text-gray-200 truncate">
-                        {cat.name}
-                      </span>
-                      <span className="text-sm font-bold text-gray-800 dark:text-white tabular-nums">
-                        {pct}%
-                      </span>
-                    </div>
-                  );
-                })}
+              {/* Legend — أعلى 5 فئات + «عرض المزيد» للباقي */}
+              <div className="w-full flex-1 min-w-0">
+                <div className="space-y-2.5">
+                  {visibleCategories.map((cat) => {
+                    const { percent, isRoundedToZero } = categoryPercent(cat.value, totalCategorySales);
+                    return (
+                      <div key={cat.key} className="flex items-center gap-2.5">
+                        <span
+                          className="w-2.5 h-2.5 rounded-full shrink-0"
+                          style={{
+                            backgroundColor:
+                              cat.colorIndex >= 0
+                                ? COLORS[cat.colorIndex % COLORS.length]
+                                : OTHER_CATEGORY_COLOR
+                          }}
+                        />
+                        <span className="flex-1 min-w-0 text-sm font-medium text-gray-700 dark:text-gray-200 truncate">
+                          {cat.name}
+                        </span>
+                        <span className="text-sm font-bold text-gray-800 dark:text-white tabular-nums">
+                          {isRoundedToZero ? '<1%' : `${percent}%`}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {categoryBreakdown.hasMore && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllCategories(prev => !prev)}
+                    className="mt-3 text-sm font-bold text-blue-600 dark:text-blue-400 hover:underline"
+                  >
+                    {showAllCategories
+                      ? 'عرض أقل'
+                      : `عرض المزيد (${salesByCategory.length - TOP_CATEGORY_COUNT} فئة أخرى)`}
+                  </button>
+                )}
               </div>
             </div>
           )}
