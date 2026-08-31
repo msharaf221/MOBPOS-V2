@@ -1589,6 +1589,30 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                 </div>
               </div>
 
+              {/* ===== Privacy & data protection ===== */}
+              {/* PDPL (Law 151/2020): the privacy notice must be reachable
+                  from the product itself, not only from the marketing site. */}
+              <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+                <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
+                  <Shield size={16} />
+                  الخصوصية وحماية البيانات
+                </h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed mb-4">
+                  بيانات محلك (المنتجات، المبيعات، العملاء) محفوظة محلياً على جهازك ولا تُرفع لأي خادم
+                  إلا لو فعّلت النسخ الاحتياطي على Google Drive أو المزامنة عبر Supabase بنفسك.
+                  تفاصيل ما نجمعه ومدد الاحتفاظ وحقوقك موضحة في سياسة الخصوصية وفقاً للقانون المصري 151 لسنة 2020.
+                </p>
+                <a
+                  href="/privacy.html"
+                  target="_blank"
+                  rel="privacy-policy noopener noreferrer"
+                  className="inline-flex items-center gap-2 px-5 py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition"
+                >
+                  <Shield size={16} />
+                  عرض سياسة الخصوصية
+                </a>
+              </div>
+
               {/* ===== Master Panel Access ===== */}
               {/* The panel itself is protected by the master password, so it is
                   safe even if an employee finds this button. */}

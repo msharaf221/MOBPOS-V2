@@ -1,0 +1,43 @@
+# ============================================================
+#  MOBPOS — robots.txt
+#  النظام تطبيق إدارة داخلي (POS) — الصفحات العامة فقط هي المسموح فهرستها
+# ============================================================
+
+User-agent: *
+Allow: /$
+Allow: /privacy.html
+Allow: /brochure.html
+Allow: /icon.png
+
+# مسارات إدارية/داخلية ممنوع فهرستها
+Disallow: /api
+Disallow: /api/
+Disallow: /admin
+Disallow: /admin/
+Disallow: /master
+Disallow: /master/
+Disallow: /settings
+Disallow: /settings/
+Disallow: /users
+Disallow: /users/
+Disallow: /license
+Disallow: /license/
+Disallow: /backup
+Disallow: /backup/
+Disallow: /reports
+Disallow: /reports/
+Disallow: /_next/
+Disallow: /*.json$
+Disallow: /*?*
+
+# روبوتات تجميع البيانات للتدريب — مرفوضة
+User-agent: GPTBot
+Disallow: /
+
+User-agent: CCBot
+Disallow: /
+
+User-agent: ClaudeBot
+Disallow: /
+
+Sitemap: https://mob-pos-v2.vercel.app/sitemap.xml

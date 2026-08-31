@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <meta name="description" content="سياسة الخصوصية الخاصة بنظام MOBPOS لإدارة محلات الموبايلات — وفقاً لقانون حماية البيانات الشخصية المصري رقم 151 لسنة 2020">
+  <title>سياسة الخصوصية — MOBPOS</title>
+  <link rel="icon" type="image/png" href="/icon.png">
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{
+      font-family:'Cairo','Segoe UI',Tahoma,sans-serif;
+      background:linear-gradient(135deg,#0c1f4d 0%,#172f6b 55%,#1e3a8a 100%);
+      background-attachment:fixed;
+      color:#0f172a;
+      line-height:1.9;
+      padding:32px 16px;
+    }
+    .wrap{max-width:900px;margin:0 auto}
+    header{text-align:center;color:#fff;margin-bottom:28px}
+    header .logo{
+      width:64px;height:64px;border-radius:18px;margin:0 auto 14px;
+      background:linear-gradient(145deg,#3b82f6,#1d4ed8);
+      display:flex;align-items:center;justify-content:center;
+      font-size:30px;font-weight:800;color:#fff;
+      box-shadow:0 14px 35px rgba(0,0,0,.4)
+    }
+    header h1{font-size:28px;font-weight:800;margin-bottom:6px}
+    header p{color:#bfd2f5;font-size:14px}
+    .card{background:#fff;border-radius:20px;padding:34px;box-shadow:0 24px 60px rgba(0,0,0,.28)}
+    .meta{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:26px;font-size:13px;color:#475569}
+    .meta span{background:#f1f5f9;border:1px solid #e2e8f0;border-radius:999px;padding:6px 14px}
+    h2{font-size:19px;font-weight:800;color:#0c1f4d;margin:28px 0 10px;padding-right:12px;border-right:4px solid #3b82f6}
+    h2:first-of-type{margin-top:0}
+    p{margin-bottom:10px;font-size:15px;color:#334155}
+    ul{margin:0 20px 12px 0;font-size:15px;color:#334155}
+    li{margin-bottom:6px}
+    table{width:100%;border-collapse:collapse;margin:12px 0 16px;font-size:14px}
+    th,td{border:1px solid #e2e8f0;padding:10px 12px;text-align:right}
+    th{background:#f8fafc;font-weight:700;color:#0c1f4d}
+    .note{background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:14px 16px;margin:16px 0;font-size:14px;color:#1e40af}
+    .contact{background:#f8fafc;border:1px solid #e2e8f0;border-radius:14px;padding:18px;margin-top:12px;font-size:15px}
+    .contact a{color:#1d4ed8;font-weight:700;text-decoration:none}
+    .contact a:hover{text-decoration:underline}
+    footer{text-align:center;color:#bfd2f5;font-size:13px;margin-top:24px}
+    footer a{color:#fff;font-weight:700;text-decoration:none}
+    footer a:hover{text-decoration:underline}
+    code{background:#f1f5f9;border-radius:6px;padding:2px 6px;font-size:13px;direction:ltr;display:inline-block}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="logo">M</div>
+      <h1>سياسة الخصوصية</h1>
+      <p>نظام MOBPOS لإدارة محلات الموبايلات</p>
+    </header>
+
+    <main class="card">
+      <div class="meta">
+        <span>آخر تحديث: 31 أغسطس 2026</span>
+        <span>القانون المطبَّق: قانون حماية البيانات الشخصية المصري رقم 151 لسنة 2020</span>
+      </div>
+
+      <h2>1. من نحن</h2>
+      <p>
+        MOBPOS نظام لإدارة محلات الموبايلات (نقطة بيع، مخزون، صيانة، عملاء، حسابات).
+        النظام مصمَّم ليعمل <strong>محلياً على جهاز صاحب المحل</strong>، ولا يقوم برفع بيانات المحل
+        إلى خوادمنا بشكل تلقائي.
+      </p>
+      <p>
+        <strong>مسؤول المعالجة (Data Controller):</strong> صاحب المحل / الجهة التي تستخدم النظام هي المتحكم في
+        بيانات عملائها. <strong>MOBPOS</strong> يعمل كمزوّد للبرنامج (Processor) في حدود خدمات التفعيل
+        والمزامنة الاختيارية الموضحة أدناه.
+      </p>
+
+      <h2>2. البيانات التي نجمعها</h2>
+      <table>
+        <thead>
+          <tr><th>نوع البيانات</th><th>أين تُخزَّن</th><th>الغرض</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>بيانات التشغيل: المنتجات، المبيعات، الفواتير، أرقام IMEI، بيانات العملاء والموردين، تذاكر الصيانة، الخزائن</td>
+            <td>محلياً على جهازك داخل متصفح/تطبيق النظام (IndexedDB) — لا تُرسل إلينا</td>
+            <td>تشغيل النظام</td>
+          </tr>
+          <tr>
+            <td>حسابات المستخدمين داخل المحل (اسم المستخدم وكلمة مرور مُجزّأة hash)</td>
+            <td>محلياً على جهازك</td>
+            <td>التحكم في الصلاحيات والدخول</td>
+          </tr>
+          <tr>
+            <td>بيانات الترخيص: مُعرِّف المفتاح، بصمة الجهاز (قيمة مُجزّأة لا تكشف هوية)، توكن الجهاز، عنوان IP وقت التفعيل</td>
+            <td>خادم التفعيل <code>mobpos.onrender.com</code></td>
+            <td>منع استخدام المفتاح الواحد على أكثر من جهاز، ومكافحة الاحتيال</td>
+          </tr>
+          <tr>
+            <td>النسخ الاحتياطي على Google Drive (اختياري — بتفعيل منك)</td>
+            <td>حساب Google Drive الخاص بك أنت</td>
+            <td>حفظ نسخة احتياطية من بيانات محلك</td>
+          </tr>
+          <tr>
+            <td>المزامنة عبر Supabase (اختيارية — بإعدادك أنت)</td>
+            <td>مشروع Supabase الذي تملكه أنت</td>
+            <td>مزامنة البيانات بين أجهزة المحل</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="note">
+        لا نستخدم أي كوكيز تتبُّع، ولا إعلانات، ولا أدوات تحليل سلوك المستخدمين من طرف ثالث.
+      </div>
+
+      <h2>3. الأساس القانوني للمعالجة</h2>
+      <ul>
+        <li><strong>تنفيذ العقد:</strong> تفعيل الترخيص والتحقق منه لتقديم الخدمة.</li>
+        <li><strong>المصلحة المشروعة:</strong> حماية النظام من الاستخدام غير المصرّح به والاحتيال.</li>
+        <li><strong>الموافقة الصريحة:</strong> خدمات النسخ الاحتياطي على Google Drive والمزامنة عبر Supabase — لا تعمل إلا إذا فعّلتها بنفسك، ويمكنك إيقافها في أي وقت.</li>
+      </ul>
+
+      <h2>4. مشاركة البيانات مع الغير</h2>
+      <p>نحن لا نبيع بياناتك ولا نؤجّرها ولا نشاركها لأغراض تسويقية. تقتصر المشاركة على:</p>
+      <ul>
+        <li><strong>Vercel</strong> — استضافة الواجهة العامة للنظام (سجلات وصول تقنية فقط).</li>
+        <li><strong>Render</strong> — استضافة خادم التفعيل.</li>
+        <li><strong>Google Drive</strong> — فقط إذا فعّلت النسخ الاحتياطي، والبيانات تذهب لحسابك أنت.</li>
+        <li><strong>Supabase</strong> — فقط إذا فعّلت المزامنة، والبيانات تذهب لمشروعك أنت.</li>
+        <li><strong>الجهات الرسمية</strong> — عند وجود إلزام قانوني صريح.</li>
+      </ul>
+
+      <h2>5. مدد الاحتفاظ</h2>
+      <ul>
+        <li>بيانات التشغيل المحلية: تبقى على جهازك حتى تحذفها أنت — نحن لا نتحكم فيها ولا نصل إليها.</li>
+        <li>سجلات التفعيل: تُحفظ طوال سريان الترخيص، وتُحذف خلال 12 شهراً من انتهائه أو إلغائه.</li>
+        <li>سجلات الوصول التقنية لدى مزودي الاستضافة: حسب سياساتهم (عادةً 30 يوماً).</li>
+      </ul>
+
+      <h2>6. أمن البيانات</h2>
+      <ul>
+        <li>تشفير النقل بالكامل عبر HTTPS/TLS، مع تفعيل HSTS.</li>
+        <li>رؤوس حماية للمتصفح: Content-Security-Policy، X-Frame-Options، X-Content-Type-Options، Referrer-Policy، Permissions-Policy.</li>
+        <li>كلمات المرور تُخزَّن مُجزّأة (hashed) ولا تُحفظ كنص صريح.</li>
+        <li>صلاحيات متدرجة داخل النظام (مدير / مشرف / موظف).</li>
+        <li>عزل بيانات كل متجر على مستوى الصفوف (Row Level Security) عند استخدام المزامنة.</li>
+        <li>حدّ لمعدل الطلبات (Rate Limiting) وتوكنات وصول على خادم التفعيل.</li>
+      </ul>
+
+      <h2>7. حقوقك بموجب القانون 151 لسنة 2020</h2>
+      <ul>
+        <li>الحق في العلم بالبيانات الشخصية الخاصة بك والمحتفظ بها لدينا.</li>
+        <li>الحق في الوصول إلى بياناتك والحصول على نسخة منها.</li>
+        <li>الحق في تصحيح أو تعديل أو تحديث البيانات.</li>
+        <li>الحق في محو البيانات أو حذفها.</li>
+        <li>الحق في تقييد المعالجة أو الاعتراض عليها.</li>
+        <li>الحق في سحب الموافقة في أي وقت (للخدمات الاختيارية).</li>
+        <li>الحق في التظلم أمام <strong>مركز حماية البيانات الشخصية</strong> المصري.</li>
+      </ul>
+      <p>نرد على أي طلب من هذه الطلبات خلال مدة أقصاها <strong>30 يوماً</strong> من تاريخ استلامه.</p>
+
+      <h2>8. بيانات الأطفال</h2>
+      <p>
+        النظام موجَّه للاستخدام التجاري من قِبل أصحاب المحلات وموظفيهم، ولا نجمع عمداً أي بيانات
+        تخص أشخاصاً دون سن 18 عاماً.
+      </p>
+
+      <h2>9. نقل البيانات خارج مصر</h2>
+      <p>
+        قد تُخزَّن بعض البيانات التقنية (سجلات التفعيل والاستضافة) على خوادم خارج جمهورية مصر العربية
+        لدى مزودي الاستضافة المذكورين. تُنقل هذه البيانات في أضيق الحدود اللازمة لتشغيل الخدمة،
+        وعبر قنوات مشفّرة، ووفقاً لمتطلبات المادتين (14) و(15) من القانون 151 لسنة 2020.
+      </p>
+
+      <h2>10. تعديل هذه السياسة</h2>
+      <p>
+        قد نُحدِّث هذه السياسة عند تغيّر الخدمة أو المتطلبات القانونية، ويظهر تاريخ آخر تحديث أعلى الصفحة.
+        التغييرات الجوهرية سيتم إخطارك بها داخل النظام.
+      </p>
+
+      <h2>11. التواصل معنا</h2>
+      <div class="contact">
+        <p>لممارسة أي من حقوقك أو للاستفسار عن هذه السياسة:</p>
+        <p>📧 البريد الإلكتروني: <a href="mailto:muhamedhussein89@gmail.com">muhamedhussein89@gmail.com</a></p>
+        <p>💬 الدعم الفني: <a href="https://github.com/msharaf221/MOBPOS-V2/issues" target="_blank" rel="noopener noreferrer">GitHub Issues</a> <span style="color:#64748b;font-size:13px">(للمشاكل التقنية فقط — لا ترسل بيانات شخصية في تذكرة علنية)</span></p>
+        <p>⏱️ مدة الرد: حتى 30 يوماً من تاريخ الطلب</p>
+      </div>
+    </main>
+
+    <footer>
+      <p><a href="/">العودة إلى MOBPOS</a> &nbsp;·&nbsp; © 2026 MOBPOS — جميع الحقوق محفوظة</p>
+    </footer>
+  </div>
+</body>
+</html>

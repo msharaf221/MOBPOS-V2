@@ -23,14 +23,42 @@ const MIME = {
   '.jpg': 'image/jpeg',
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
+  '.txt': 'text/plain; charset=utf-8',
+  '.xml': 'application/xml; charset=utf-8',
   '.woff2': 'font/woff2',
 };
+
+// رؤوس الحماية — تُرسل مع كل رد (حتى صفحات الخطأ) عشان المتصفح المدمج
+// في إلكترون يتصرف زي ما الويب بيتصرف بالظبط:
+//  - nosniff       يمنع تخمين نوع الملف وتنفيذه كسكربت
+//  - DENY          يمنع تضمين التطبيق داخل iframe (Clickjacking)
+//  - Referrer      يمنع تسريب الروابط الكاملة لأي طرف خارجي
+//  - Permissions   يقفل الكاميرا/المايك/الموقع افتراضياً
+const SECURITY_HEADERS = {
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'Permissions-Policy':
+    'accelerometer=(), autoplay=(), camera=(), display-capture=(), encrypted-media=(), ' +
+    'fullscreen=(self), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), ' +
+    'midi=(), payment=(), picture-in-picture=(), screen-wake-lock=(), serial=(), usb=(), ' +
+    'xr-spatial-tracking=()',
+  'X-Permitted-Cross-Domain-Policies': 'none',
+  'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
+  'Cross-Origin-Resource-Policy': 'same-origin',
+  'Origin-Agent-Cluster': '?1',
+};
+
+/** يدمج رؤوس الحماية مع أي رؤوس خاصة بالرد. */
+function withSecurityHeaders(headers = {}) {
+  return { ...SECURITY_HEADERS, ...headers };
+}
 
 function createServer() {
   return http.createServer((req, res) => {
     try {
       if (req.method !== 'GET' && req.method !== 'HEAD') {
-        res.writeHead(405, { Allow: 'GET, HEAD' });
+        res.writeHead(405, withSecurityHeaders({ Allow: 'GET, HEAD' }));
         res.end('Method Not Allowed');
         return;
       }
@@ -38,7 +66,7 @@ function createServer() {
       try {
         urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
       } catch {
-        res.writeHead(400);
+        res.writeHead(400, withSecurityHeaders());
         res.end('Bad Request');
         return;
       }
@@ -47,7 +75,7 @@ function createServer() {
       const filePath = path.normalize(path.join(DIST_DIR, urlPath));
       // منع الخروج من مجلد dist
       if (!filePath.startsWith(DIST_DIR + path.sep) && filePath !== DIST_DIR) {
-        res.writeHead(403);
+        res.writeHead(403, withSecurityHeaders());
         res.end('Forbidden');
         return;
       }
@@ -63,12 +91,14 @@ function createServer() {
       // expose a file outside the distribution directory.
       const realServedPath = fs.existsSync(servedPath) ? fs.realpathSync.native(servedPath) : '';
       if (!realServedPath || !realServedPath.startsWith(REAL_DIST_DIR + path.sep)) {
-        res.writeHead(404);
+        res.writeHead(404, withSecurityHeaders());
         res.end('Not Found');
         return;
       }
       const ext = path.extname(realServedPath).toLowerCase();
-      const headers = { 'Content-Type': MIME[ext] || 'application/octet-stream' };
+      const headers = withSecurityHeaders({
+        'Content-Type': MIME[ext] || 'application/octet-stream',
+      });
       if (req.method === 'HEAD') {
         res.writeHead(200, headers);
         res.end();
@@ -77,7 +107,7 @@ function createServer() {
       res.writeHead(200, headers);
       fs.createReadStream(realServedPath).pipe(res);
     } catch (err) {
-      res.writeHead(500);
+      res.writeHead(500, withSecurityHeaders());
       res.end('Server error');
     }
   });
@@ -105,4 +135,4 @@ function startServer(preferredPort = PREFERRED_PORT) {
   });
 }
 
-module.exports = { startServer, createServer, PREFERRED_PORT };
+module.exports = { startServer, createServer, PREFERRED_PORT, SECURITY_HEADERS };
