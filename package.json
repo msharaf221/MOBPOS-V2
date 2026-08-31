@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test src/utils/alerts.test.ts src/utils/barcode.test.ts src/license/status.test.ts src/utils/updateCheck.test.ts src/hooks/storeDiff.test.ts src/hooks/atomicTransaction.test.ts src/utils/format.test.ts src/utils/salesByCategory.test.ts",
     "verify:updates": "node scripts/verify-update-feed.cjs",
+    "verify:security": "node scripts/verify-security-headers.cjs",
     "preview": "vite preview",
     "electron:dev": "node scripts/electron-dev.cjs",
     "setup:ci": "node scripts/install-workflow.cjs",

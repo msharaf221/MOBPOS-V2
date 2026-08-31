@@ -5,10 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://accounts.google.com https://www.googleapis.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https:; media-src 'self' data: blob:; connect-src 'self' http://127.0.0.1:8420 ws://127.0.0.1:8420 https://mobpos.onrender.com https://accounts.google.com https://www.googleapis.com https://*.googleapis.com https://*.supabase.co wss://*.supabase.co; frame-src 'self' https://accounts.google.com"
+      content="default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://accounts.google.com https://apis.google.com https://www.googleapis.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https:; media-src 'self' data: blob:; connect-src 'self' http://127.0.0.1:8420 ws://127.0.0.1:8420 https://mobpos.onrender.com https://accounts.google.com https://www.googleapis.com https://*.googleapis.com https://*.supabase.co wss://*.supabase.co; frame-src 'self' https://accounts.google.com; worker-src 'self' blob:; manifest-src 'self'"
     />
+    <!-- Fallback for hosts that cannot set response headers; the real
+         Referrer-Policy / X-Frame-Options / nosniff headers are sent by
+         vercel.json (web) and electron/local-server.cjs (desktop). -->
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
     <meta name="theme-color" content="#0c1f4d" />
+    <meta
+      name="description"
+      content="MOBPOS — نظام إدارة محلات الموبايلات: نقطة بيع، مخزون، IMEI، صيانة، عملاء وحسابات."
+    />
     <link rel="icon" type="image/png" href="/icon.png" />
+    <!-- Privacy policy (PDPL — Law 151/2020) discoverable from the homepage -->
+    <link rel="privacy-policy" href="/privacy.html" />
     <title>MOBPOS — نظام إدارة محلات الموبايلات</title>
     <style>
       /* شاشة البداية — تظهر فوراً قبل تحميل React وتمسح نفسها عند التشغيل */
@@ -58,6 +68,14 @@
         background: rgba(255, 255, 255, 0.15);
         overflow: hidden;
       }
+      .mobpos-splash .legal {
+        margin-top: 10px;
+        font-size: 12px;
+      }
+      .mobpos-splash .legal a {
+        color: #bfd2f5;
+        text-decoration: underline;
+      }
       .mobpos-splash .bar span {
         display: block;
         height: 100%;
@@ -87,8 +105,17 @@
         <h1>MOBPOS</h1>
         <p>نظام إدارة محلات الموبايلات</p>
         <div class="bar"><span></span></div>
+        <p class="legal">
+          <a href="/privacy.html" rel="privacy-policy">سياسة الخصوصية — Privacy Policy</a>
+        </p>
       </div>
     </div>
+    <noscript>
+      <p style="text-align:center;font-family:sans-serif">
+        هذا النظام يحتاج تفعيل الجافاسكريبت. —
+        <a href="/privacy.html">سياسة الخصوصية (Privacy Policy)</a>
+      </p>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

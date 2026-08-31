@@ -129,6 +129,19 @@ export default function Login({ onLogin, shopName }: LoginProps) {
             )}
           </button>
 
+          {/* Privacy policy — PDPL (Law 151/2020) transparency requirement.
+              Must stay reachable without logging in. */}
+          <p className="mt-5 text-center text-xs text-blue-200/80">
+            باستخدامك النظام فإنك توافق على{' '}
+            <a
+              href="/privacy.html"
+              target="_blank"
+              rel="privacy-policy noopener noreferrer"
+              className="underline hover:text-white transition"
+            >
+              سياسة الخصوصية
+            </a>
+          </p>
         </form>
       </div>
     </div>

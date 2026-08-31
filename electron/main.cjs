@@ -36,14 +36,35 @@ const CONTENT_SECURITY_POLICY = [
   "base-uri 'self'",
   "object-src 'none'",
   "frame-ancestors 'none'",
-  "script-src 'self' 'unsafe-inline' https://accounts.google.com https://www.googleapis.com",
+  "form-action 'self'",
+  "script-src 'self' 'unsafe-inline' https://accounts.google.com https://apis.google.com https://www.googleapis.com",
   "style-src 'self' 'unsafe-inline'",
   "font-src 'self' data:",
   "img-src 'self' data: blob: https:",
   "media-src 'self' data: blob:",
   "connect-src 'self' http://127.0.0.1:8420 ws://127.0.0.1:8420 https://mobpos.onrender.com https://accounts.google.com https://www.googleapis.com https://*.googleapis.com https://*.supabase.co wss://*.supabase.co",
   "frame-src 'self' https://accounts.google.com",
+  "worker-src 'self' blob:",
+  "manifest-src 'self'",
 ].join('; ');
+
+// نفس رؤوس الحماية المستخدمة على الويب — تُطبَّق أيضاً داخل نافذة إلكترون
+// حتى لو الملفات اتقدمت من السيرفر المحلي أو من file://
+const EXTRA_SECURITY_HEADERS = {
+  'X-Content-Type-Options': ['nosniff'],
+  'X-Frame-Options': ['DENY'],
+  'Referrer-Policy': ['strict-origin-when-cross-origin'],
+  'Permissions-Policy': [
+    'accelerometer=(), autoplay=(), camera=(), display-capture=(), encrypted-media=(), ' +
+      'fullscreen=(self), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), ' +
+      'midi=(), payment=(), picture-in-picture=(), screen-wake-lock=(), serial=(), usb=(), ' +
+      'xr-spatial-tracking=()',
+  ],
+  'X-Permitted-Cross-Domain-Policies': ['none'],
+  'Cross-Origin-Opener-Policy': ['same-origin-allow-popups'],
+  'Cross-Origin-Resource-Policy': ['same-origin'],
+  'Origin-Agent-Cluster': ['?1'],
+};
 
 // ===== Auto-update =====
 function setupAutoUpdate() {
@@ -78,10 +99,21 @@ function setupCspHeaders() {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
+        ...EXTRA_SECURITY_HEADERS,
         'Content-Security-Policy': [CONTENT_SECURITY_POLICY],
       },
     });
   });
+
+  // اقفل صلاحيات المتصفح الحساسة (كاميرا/مايك/موقع/إشعارات) — التطبيق
+  // مش محتاجها، فأي كود مدسوس مش هيقدر يطلبها أصلاً.
+  const ALLOWED_PERMISSIONS = new Set(['clipboard-read', 'clipboard-sanitized-write']);
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+    callback(ALLOWED_PERMISSIONS.has(permission));
+  });
+  session.defaultSession.setPermissionCheckHandler((_wc, permission) =>
+    ALLOWED_PERMISSIONS.has(permission)
+  );
 }
 
 function hashMachineId(value) {

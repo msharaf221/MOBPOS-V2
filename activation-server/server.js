@@ -168,11 +168,64 @@ const app = express();
 if (TRUST_PROXY) app.set('trust proxy', 1);
 app.use(express.json({ limit: '10kb' }));
 
-// CORS (the client app may run from any origin)
+// ===== Security headers =====
+// السيرفر ده API فقط — مفيش صفحات HTML، فبنقفل كل حاجة بالكامل:
+// CSP صارم يمنع أي تنفيذ، nosniff، DENY للـ iframe، وقفل صلاحيات المتصفح.
+const API_CSP = [
+  "default-src 'none'",
+  "base-uri 'none'",
+  "form-action 'none'",
+  "frame-ancestors 'none'",
+  "sandbox",
+].join('; ');
+
+app.disable('x-powered-by');
 app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Content-Security-Policy', API_CSP);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader(
+    'Permissions-Policy',
+    'accelerometer=(), autoplay=(), camera=(), display-capture=(), encrypted-media=(), ' +
+      'fullscreen=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), midi=(), ' +
+      'payment=(), picture-in-picture=(), screen-wake-lock=(), serial=(), usb=(), xr-spatial-tracking=()'
+  );
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-site');
+  res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
+  res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
+  // ردود التفعيل شخصية ومرتبطة بجهاز — ممنوع تتخزّن في أي كاش وسيط
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  res.setHeader('Pragma', 'no-cache');
+  next();
+});
+
+// ===== CORS =====
+// افتراضياً بنسمح لأي أصل (تطبيق سطح المكتب بيشتغل من http://127.0.0.1:8420
+// والنسخة الويب من دومين العميل). لو ضبطت ALLOWED_ORIGINS بقائمة مفصولة
+// بفواصل، السيرفر بيقفل على الأصول دي بس — وده المفضّل في الإنتاج.
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map(o => o.trim())
+  .filter(Boolean);
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  res.setHeader('Vary', 'Origin');
+
+  if (ALLOWED_ORIGINS.length === 0) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  } else if (origin && ALLOWED_ORIGINS.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else if (origin) {
+    // أصل غير مسموح — نرفض الطلب قبل ما يوصل لأي منطق
+    return res.status(403).json({ ok: false, reason: 'origin_not_allowed' });
+  }
+
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Max-Age', '600');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });

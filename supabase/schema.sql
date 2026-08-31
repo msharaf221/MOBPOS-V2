@@ -60,3 +60,53 @@ create index if not exists mobpos_stores_owner_tenant_idx
 
 -- Recommended operational limits. Supabase Auth users should be provisioned by
 -- an administrator; do not expose the service_role key to this Electron app.
+
+-- ============================================================
+--  Supabase Storage hardening
+--
+--  MOBPOS does not use Supabase Storage. This block exists so a deployment
+--  can prove that no bucket is publicly listable/readable — the exact class
+--  of finding raised as "Public Storage Bucket Listing" in security scans.
+--
+--  Run it against your project; it is idempotent and safe to re-run.
+-- ============================================================
+
+-- 1) No bucket may be public. `public = true` makes every object in the
+--    bucket world-readable *and* listable without a token.
+update storage.buckets set public = false where public = true;
+
+-- 2) RLS must stay on for the object/bucket tables (Supabase default).
+alter table storage.objects enable row level security;
+alter table storage.buckets enable row level security;
+
+-- 3) Remove any permissive anon policy left over from a template project.
+do $$
+declare pol record;
+begin
+  for pol in
+    select policyname
+    from pg_policies
+    where schemaname = 'storage'
+      and tablename = 'objects'
+      and (
+        'anon' = any(roles)
+        or 'public' = any(roles)
+        or qual = 'true'
+      )
+  loop
+    execute format('drop policy %I on storage.objects', pol.policyname);
+  end loop;
+end $$;
+
+-- 4) If you later add a bucket, scope it to its owner like this:
+--
+--   create policy "Owner can read own objects"
+--     on storage.objects for select to authenticated
+--     using (bucket_id = 'mobpos-backups' and owner = auth.uid());
+--
+--   create policy "Owner can write own objects"
+--     on storage.objects for insert to authenticated
+--     with check (bucket_id = 'mobpos-backups' and owner = auth.uid());
+
+-- 5) Verification query — must return zero rows:
+--   select id, name, public from storage.buckets where public;
