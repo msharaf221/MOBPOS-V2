@@ -35,14 +35,49 @@
 > single-file (`vite-plugin-singlefile`) بيضمّن السكربت جوه الـ HTML.
 > ده مقبول لأن مفيش أي محتوى من المستخدم بيتحقن في الصفحة كـ HTML خام.
 
-### التحقق بعد أي نشر
+### التحقق
+
+فيه أداتين مختلفتين، كل واحدة ليها وقتها:
+
+| الأمر | بيفحص إيه | امتى |
+|---|---|---|
+| `npm run verify:security:config` | **الكود نفسه** — الرؤوس في `vercel.json`، وجود robots/sitemap/privacy، إعدادات إلكترون وخادم التفعيل وSupabase | قبل الدمج (بيشتغل تلقائي في CI) |
+| `npm run verify:security` | **الموقع المنشور** — بيطلب الصفحة فعلاً ويتأكد إن الرؤوس وصلت للمتصفح | بعد كل deploy |
 
 ```bash
-npm run verify:security                       # يفحص الدومين الافتراضي
-npm run verify:security -- https://your.com   # يفحص دومين تاني
+npm run verify:security:config                # أوفلاين، مش محتاج إنترنت
+npm run verify:security                       # الدومين الافتراضي
+npm run verify:security -- https://your.com   # دومين تاني
 ```
 
-السكربت بيرجّع exit code `1` لو أي رأس ناقص — فينفع تحطه في CI.
+الاتنين بيرجّعوا exit code `1` لو أي حاجة ناقصة.
+
+### CI
+
+> **⚠️ محتاج تفعيل مرة واحدة منك:** ملف الـ workflow محفوظ في `ci/ci.yml` مش في
+> `.github/workflows/` لأن توكن GitHub في جلسات Arena ملوش صلاحية `workflows`.
+> فعّله بأمر واحد من جهازك:
+>
+> ```bash
+> npm run setup:ci     # بينسخ ci/ci.yml و ci/release.yml لمكانهم
+> git add .github/workflows/
+> git commit -m "ci: enable workflows"
+> git push
+> ```
+
+`ci/ci.yml` بيشتغل على **كل Pull Request** وكل دفعة على `main`:
+
+1. `npm run typecheck`
+2. `npm test`
+3. `npm run verify:security:config` — 34 فحص
+4. `npm run build`
+5. التأكد إن `robots.txt` و `sitemap.xml` و `privacy.html` وصلوا `dist/`
+6. التأكد إن مفيش بيانات تواصل وهمية في `public/`
+
+يعني لو حد شال رأس حماية أو ملف بالغلط، الـ CI هيقع قبل الدمج بدل ما الفينيدنج
+ترجع في فحص الأمان الجاي.
+
+> `release.yml` منفصل وبيشتغل على tags بس (بناء ونشر نسخة الويندوز).
 
 ---
 
