@@ -6,7 +6,7 @@
 > workflow النشر (`.github/workflows/release.yml`) بياخد القسم الخاص بالإصدار
 > من الملف ده ويحطه كـ Release Notes على GitHub.
 
-## [Unreleased]
+## [1.0.9]
 
 ### إصلاحات — الحسابات الجانبية
 
