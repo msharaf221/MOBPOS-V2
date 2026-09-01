@@ -246,6 +246,8 @@ export interface PurchaseItem {
   quantity: number;
   unitCost: number;
   total: number;
+  /** معرّفات وحدات IMEI اللي اتولدت من البند ده (للمنتجات اللي بسيريال) */
+  imeiUnitIds?: string[];
 }
 
 export interface Purchase {
@@ -256,8 +258,10 @@ export interface Purchase {
   total: number;
   paid: number;
   remaining: number;
+  /** الخزنة اللي اتدفع منها المبلغ المدفوع ('' لو الفاتورة آجل بالكامل) */
   safeId: string;
   userId: string;
+  notes: string;
   createdAt: string;
 }
 
@@ -317,4 +321,10 @@ export interface AppSettings {
   accentColor?: string;
   /** Overall visual theme style, on top of light/dark mode */
   themeStyle?: 'default' | 'midnightGold';
+  /**
+   * إظهار أسعار قطع الغيار في إيصال الصيانة الخاص بالعميل.
+   * افتراضياً `false` — أسعار القطع دي تكلفة المحل (سر تجاري)، وإظهارها
+   * بيخلي العميل يقدر يحسب المصنعية بالطرح من الإجمالي.
+   */
+  maintenanceReceiptShowPartPrices?: boolean;
 }

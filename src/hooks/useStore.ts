@@ -5,13 +5,14 @@ import { hashPasswordForStorage, verifyLoginPassword, needsRehash } from '../uti
 import {
   User, Customer, Category, InventoryItem, IMEIUnit,
   Sale, SaleItem, SaleReturn, Maintenance, MaintenancePart, Safe, Transaction, Supplier, Notification,
+  Purchase, PurchaseItem,
   StockWaste, InventoryAudit, InventoryAuditItem, SideAccountEntry, SideAccountEntryType,
   SideAccountImpact, AppSettings
 } from '../types';
 import {
   initialUsers, initialCustomers, initialCategories, initialInventory,
   initialIMEIUnits, initialSales, initialSaleReturns, initialMaintenance, initialSafes,
-  initialTransactions, initialSuppliers, initialStockWastes, initialInventoryAudits,
+  initialTransactions, initialSuppliers, initialPurchases, initialStockWastes, initialInventoryAudits,
   initialSideAccountEntries, initialNotifications
 } from '../data/initialData';
 import { buildAutoNotifications, mergeAutoNotifications } from '../utils/alerts';
@@ -55,6 +56,7 @@ export function useStore() {
   const [safes, setSafes, safesLoading] = useIndexedDB<Safe>('safes', initialSafes);
   const [transactions, setTransactions, transactionsLoading] = useIndexedDB<Transaction>('transactions', initialTransactions);
   const [suppliers, setSuppliers, suppliersLoading] = useIndexedDB<Supplier>('suppliers', initialSuppliers);
+  const [purchases, setPurchases, purchasesLoading] = useIndexedDB<Purchase>('purchases', initialPurchases);
   const [stockWastes, setStockWastes, stockWastesLoading] = useIndexedDB<StockWaste>('stockWastes', initialStockWastes);
   const [inventoryAudits, setInventoryAudits, inventoryAuditsLoading] = useIndexedDB<InventoryAudit>('inventoryAudits', initialInventoryAudits);
   const [sideAccountEntries, setSideAccountEntries, sideAccountEntriesLoading] = useIndexedDB<SideAccountEntry>('sideAccountEntries', initialSideAccountEntries);
@@ -82,7 +84,7 @@ export function useStore() {
   // Loading state
   const isLoading = usersLoading || customersLoading || categoriesLoading || 
     inventoryLoading || imeiLoading || salesLoading || maintenanceLoading ||
-    saleReturnsLoading || safesLoading || transactionsLoading || suppliersLoading || stockWastesLoading ||
+    saleReturnsLoading || safesLoading || transactionsLoading || suppliersLoading || purchasesLoading || stockWastesLoading ||
     inventoryAuditsLoading || sideAccountEntriesLoading || notificationsLoading ||
     userLoading || darkModeLoading || appSettingsLoading;
 
@@ -147,8 +149,9 @@ export function useStore() {
       ids.add(supplier.id);
       return true;
     })) return;
-    // Never allow removing a supplier referenced by a stock-waste record.
+    // Never allow removing a supplier referenced by a stock-waste record or a purchase invoice.
     if (suppliers.some(s => !currentIds.has(s.id) && stockWastes.some(w => w.supplierId === s.id))) return;
+    if (suppliers.some(s => !currentIds.has(s.id) && purchases.some(p => p.supplierId === s.id))) return;
     const normalized = nextSuppliers.map(supplier => {
       const existing = suppliers.find(s => s.id === supplier.id);
       return {
@@ -159,7 +162,7 @@ export function useStore() {
       };
     });
     setSuppliers(normalized);
-  }, [setSuppliers, stockWastes, suppliers]);
+  }, [purchases, setSuppliers, stockWastes, suppliers]);
 
   // Change a user's password (validates the old one first, stores hashed)
   const changePassword = useCallback(async (
@@ -706,6 +709,217 @@ export function useStore() {
     }
     return returnRecord;
   }, [currentUser, safes, sales, setCustomers, setInventory, setImeiUnits, setSaleReturns, setSales, setSafes, setTransactions]);
+
+  // ============================================================
+  //  فواتير المشتريات (توريد من المورد)
+  // ============================================================
+
+  const generatePurchaseNumber = useCallback(() => {
+    const year = new Date().getFullYear();
+    const count = purchases.filter(p => p.invoiceNumber.includes(year.toString())).length + 1;
+    return `PUR-${year}-${count.toString().padStart(4, '0')}`;
+  }, [purchases]);
+
+  /**
+   * إنشاء فاتورة مشتريات:
+   *  - بتزوّد المخزون (كمية عادية، أو وحدات IMEI جديدة للمنتجات اللي بسيريال)
+   *  - بتحدّث سعر التكلفة للمنتج (اختياري) بآخر سعر شراء
+   *  - بتخصم المدفوع من الخزنة وتسجّل حركة نوعها `purchase`
+   *  - بتزوّد رصيد المورد بالمتبقي (اللي إحنا مدينين بيه)
+   * بترجّع `{ ok: false, error }` عشان الواجهة تعرض سبب الرفض بدل الفشل الصامت.
+   */
+  const createPurchase = useCallback((data: {
+    supplierId: string;
+    items: {
+      inventoryId: string;
+      quantity: number;
+      unitCost: number;
+      imeis?: Array<Pick<IMEIUnit, 'imei1' | 'imei2' | 'color' | 'storage' | 'ram' | 'condition' | 'warrantyEndDate' | 'notes'>>;
+    }[];
+    paid: number;
+    safeId: string;
+    notes?: string;
+    updateCostPrice?: boolean;
+  }): { ok: true; purchase: Purchase } | { ok: false; error: string } => {
+    const supplier = suppliers.find(sup => sup.id === data.supplierId);
+    if (!supplier) return { ok: false, error: 'المورد غير موجود' };
+    if (!Array.isArray(data.items) || data.items.length === 0) return { ok: false, error: 'أضف صنف واحد على الأقل للفاتورة' };
+    const notes = typeof data.notes === 'string' ? data.notes.slice(0, MAX_TEXT_LENGTH) : '';
+
+    // ===== التحقق من البنود =====
+    const seenImeis = new Set<string>();
+    for (const line of data.items) {
+      const item = inventory.find(inv => inv.id === line.inventoryId);
+      if (!item) return { ok: false, error: 'أحد الأصناف غير موجود في المخزون' };
+      if (!isPositiveInteger(line.quantity)) return { ok: false, error: `كمية غير صحيحة للصنف: ${item.name}` };
+      if (!isFiniteNumber(line.unitCost) || line.unitCost < 0) return { ok: false, error: `سعر شراء غير صحيح للصنف: ${item.name}` };
+      if (item.hasIMEI) {
+        const imeis = line.imeis || [];
+        if (imeis.length !== line.quantity) {
+          return { ok: false, error: `لازم تدخل ${line.quantity} سيريال (IMEI) للصنف: ${item.name}` };
+        }
+        for (const unit of imeis) {
+          const imei1 = unit.imei1?.trim();
+          const imei2 = unit.imei2?.trim() || '';
+          if (!validText(imei1, 40)) return { ok: false, error: `سيريال غير صحيح للصنف: ${item.name}` };
+          if (imei2 && (imei2.length > 40 || imei2 === imei1)) return { ok: false, error: `IMEI2 غير صحيح للصنف: ${item.name}` };
+          for (const value of [imei1, imei2].filter(Boolean) as string[]) {
+            if (seenImeis.has(value)) return { ok: false, error: `سيريال مكرر داخل الفاتورة: ${value}` };
+            seenImeis.add(value);
+            if (imeiUnits.some(u => u.imei1 === value || u.imei2 === value)) {
+              return { ok: false, error: `السيريال ${value} مسجّل قبل كده في المخزون` };
+            }
+          }
+        }
+      }
+    }
+
+    const total = roundMoney(data.items.reduce((sum, line) => sum + line.quantity * line.unitCost, 0));
+    if (!isFiniteNumber(data.paid) || data.paid < 0) return { ok: false, error: 'المبلغ المدفوع غير صحيح' };
+    const paid = roundMoney(Math.min(data.paid, total));
+    const remaining = roundMoney(total - paid);
+
+    const safe = safes.find(sf => sf.id === data.safeId);
+    if (paid > 0) {
+      if (!safe) return { ok: false, error: 'اختر الخزنة اللي هيتدفع منها' };
+      if (safe.balance < paid) return { ok: false, error: `رصيد ${safe.name} لا يكفي (${safe.balance})` };
+    }
+
+    const now = new Date().toISOString();
+    const purchaseId = uuidv4();
+    const newUnits: IMEIUnit[] = [];
+    const purchaseItems: PurchaseItem[] = data.items.map(line => {
+      const imeiUnitIds: string[] = [];
+      (line.imeis || []).forEach(unit => {
+        const created: IMEIUnit = {
+          id: uuidv4(),
+          inventoryId: line.inventoryId,
+          imei1: unit.imei1.trim(),
+          imei2: unit.imei2?.trim() || '',
+          color: unit.color || '',
+          storage: unit.storage || '',
+          ram: unit.ram || '',
+          condition: unit.condition || 'new',
+          warrantyEndDate: unit.warrantyEndDate || '',
+          status: 'available',
+          saleId: '',
+          customerId: '',
+          purchasePrice: roundMoney(line.unitCost),
+          notes: unit.notes || '',
+          createdAt: now,
+        };
+        newUnits.push(created);
+        imeiUnitIds.push(created.id);
+      });
+      return {
+        id: uuidv4(),
+        inventoryId: line.inventoryId,
+        quantity: line.quantity,
+        unitCost: roundMoney(line.unitCost),
+        total: roundMoney(line.quantity * line.unitCost),
+        ...(imeiUnitIds.length > 0 ? { imeiUnitIds } : {}),
+      };
+    });
+
+    const purchase: Purchase = {
+      id: purchaseId,
+      invoiceNumber: generatePurchaseNumber(),
+      supplierId: data.supplierId,
+      items: purchaseItems,
+      total,
+      paid,
+      remaining,
+      safeId: paid > 0 ? data.safeId : '',
+      userId: currentUser?.id || '',
+      notes,
+      createdAt: now,
+    };
+
+    // ===== تطبيق الأثر على المخزون =====
+    if (newUnits.length > 0) setImeiUnits(prev => [...prev, ...newUnits]);
+
+    const costUpdates = new Map<string, number>();
+    const quantityUpdates = new Map<string, number>();
+    data.items.forEach(line => {
+      const item = inventory.find(inv => inv.id === line.inventoryId);
+      if (!item) return;
+      // منتجات الـ IMEI كميتها محسوبة من الوحدات نفسها، فمش بنلمس quantity
+      if (!item.hasIMEI) {
+        quantityUpdates.set(line.inventoryId, (quantityUpdates.get(line.inventoryId) || 0) + line.quantity);
+      }
+      if (data.updateCostPrice) costUpdates.set(line.inventoryId, roundMoney(line.unitCost));
+    });
+
+    if (quantityUpdates.size > 0 || costUpdates.size > 0) {
+      setInventory(prev => prev.map(item => {
+        const addQty = quantityUpdates.get(item.id);
+        const newCost = costUpdates.get(item.id);
+        if (addQty === undefined && newCost === undefined) return item;
+        return {
+          ...item,
+          quantity: addQty !== undefined ? item.quantity + addQty : item.quantity,
+          costPrice: newCost !== undefined ? newCost : item.costPrice,
+        };
+      }));
+    }
+
+    // ===== النقدية + حساب المورد =====
+    if (paid > 0 && safe) {
+      setSafes(prev => prev.map(sf => sf.id === safe.id ? { ...sf, balance: roundMoney(sf.balance - paid) } : sf));
+      setTransactions(prev => [...prev, {
+        id: uuidv4(),
+        type: 'purchase',
+        amount: -paid,
+        description: `فاتورة شراء ${purchase.invoiceNumber} - ${supplier.name}`,
+        referenceId: purchase.id,
+        safeId: safe.id,
+        userId: currentUser?.id || '',
+        createdAt: now,
+      }]);
+    }
+
+    if (remaining > 0) {
+      setSuppliers(prev => prev.map(sup => sup.id === supplier.id
+        ? { ...sup, balance: roundMoney(sup.balance + remaining) }
+        : sup));
+    }
+
+    setPurchases(prev => [...prev, purchase]);
+    return { ok: true, purchase };
+  }, [currentUser, generatePurchaseNumber, imeiUnits, inventory, safes, setImeiUnits, setInventory,
+      setPurchases, setSafes, setSuppliers, setTransactions, suppliers]);
+
+  /** سداد دفعة لمورد: بتخصم من الخزنة وتقلّل رصيد المورد (المديونية). */
+  const recordSupplierPayment = useCallback((
+    supplierId: string,
+    amount: number,
+    safeId: string,
+    notes = ''
+  ): { ok: true } | { ok: false; error: string } => {
+    const supplier = suppliers.find(s => s.id === supplierId);
+    if (!supplier) return { ok: false, error: 'المورد غير موجود' };
+    if (!isFiniteNumber(amount) || amount <= 0) return { ok: false, error: 'المبلغ غير صحيح' };
+    if (amount > supplier.balance) return { ok: false, error: `المبلغ أكبر من مديونية المورد (${supplier.balance})` };
+    const safe = safes.find(s => s.id === safeId);
+    if (!safe) return { ok: false, error: 'اختر الخزنة' };
+    if (safe.balance < amount) return { ok: false, error: `رصيد ${safe.name} لا يكفي` };
+
+    const value = roundMoney(amount);
+    const now = new Date().toISOString();
+    setSafes(prev => prev.map(s => s.id === safe.id ? { ...s, balance: roundMoney(s.balance - value) } : s));
+    setSuppliers(prev => prev.map(s => s.id === supplier.id ? { ...s, balance: roundMoney(s.balance - value) } : s));
+    setTransactions(prev => [...prev, {
+      id: uuidv4(),
+      type: 'purchase',
+      amount: -value,
+      description: `سداد للمورد ${supplier.name}${notes ? ` - ${notes.slice(0, 200)}` : ''}`,
+      referenceId: supplier.id,
+      safeId: safe.id,
+      userId: currentUser?.id || '',
+      createdAt: now,
+    }]);
+    return { ok: true };
+  }, [currentUser, safes, setSafes, setSuppliers, setTransactions, suppliers]);
 
   const recordStockWaste = useCallback((
     inventoryId: string,
@@ -1529,6 +1743,7 @@ export function useStore() {
       safes: initialSafes,
       transactions: initialTransactions,
       suppliers: initialSuppliers,
+      purchases: initialPurchases,
       stockWastes: initialStockWastes,
       inventoryAudits: initialInventoryAudits,
       sideAccountEntries: initialSideAccountEntries,
@@ -1556,6 +1771,7 @@ export function useStore() {
     safes,
     transactions,
     suppliers,
+    purchases,
     stockWastes,
     inventoryAudits,
     sideAccountEntries,
@@ -1576,6 +1792,7 @@ export function useStore() {
     setSafes,
     setTransactions,
     setSuppliers,
+    setPurchases,
     setStockWastes,
     setInventoryAudits,
     setSideAccountEntries,
@@ -1616,6 +1833,11 @@ export function useStore() {
     generateInvoiceNumber,
     createSale,
     processSaleReturn,
+
+    // Purchases
+    generatePurchaseNumber,
+    createPurchase,
+    recordSupplierPayment,
 
     // Waste
     recordStockWaste,

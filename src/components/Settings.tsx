@@ -63,6 +63,7 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
   const [shopAddress, setShopAddress] = useState(settings.shopAddress);
   const [receiptFooter, setReceiptFooter] = useState(settings.receiptFooter);
   const [notifSound, setNotifSound] = useState(settings.notifSound);
+  const [showPartPrices, setShowPartPrices] = useState(settings.maintenanceReceiptShowPartPrices === true);
   const [autoRefresh, setAutoRefresh] = useState(settings.autoRefresh);
   const [shopLogo, setShopLogo] = useState<string | undefined>(settings.shopLogo);
   const [accentColor, setAccentColor] = useState<string>(settings.accentColor || '#3b82f6');
@@ -293,6 +294,7 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
     setShopAddress(settings.shopAddress);
     setReceiptFooter(settings.receiptFooter);
     setNotifSound(settings.notifSound);
+    setShowPartPrices(settings.maintenanceReceiptShowPartPrices === true);
     setAutoRefresh(settings.autoRefresh);
     setShopLogo(settings.shopLogo);
     setAccentColor(settings.accentColor || '#3b82f6');
@@ -324,11 +326,12 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
       shopLogo,
       accentColor,
       themeStyle,
+      maintenanceReceiptShowPartPrices: showPartPrices,
       ...overrides,
     };
     onSaveSettings(updated);
     window.dispatchEvent(new CustomEvent(BRANDING_UPDATED_EVENT, { detail: updated }));
-  }, [shopName, shopPhone, shopAddress, receiptFooter, notifSound, autoRefresh, shopLogo, accentColor, themeStyle, onSaveSettings]);
+  }, [shopName, shopPhone, shopAddress, receiptFooter, notifSound, autoRefresh, shopLogo, accentColor, themeStyle, showPartPrices, onSaveSettings]);
 
   const handleLogoFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files && e.target.files[0];
@@ -525,6 +528,24 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                     rows={2}
                     className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
                   />
+                </div>
+
+                {/* خصوصية إيصال الصيانة: أسعار قطع الغيار = تكلفة المحل */}
+                <div className="mt-5 flex items-start justify-between gap-4 p-4 rounded-xl bg-gray-50 dark:bg-gray-700/40">
+                  <div>
+                    <p className="font-medium text-gray-800 dark:text-white">إظهار أسعار قطع الغيار في إيصال الصيانة</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      مقفول افتراضياً — الأسعار دي تكلفة الشراء بتاعتك، ولو ظهرت للعميل هيقدر يطرحها من الإجمالي ويعرف المصنعية.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { const next = !showPartPrices; setShowPartPrices(next); persistBranding({ maintenanceReceiptShowPartPrices: next }); showSaved(); }}
+                    className={`shrink-0 w-14 h-8 rounded-full transition relative ${showPartPrices ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'}`}
+                    aria-pressed={showPartPrices}
+                  >
+                    <span className={`absolute top-1 w-6 h-6 bg-white rounded-full transition-all ${showPartPrices ? 'right-1' : 'right-7'}`} />
+                  </button>
                 </div>
               </div>
 

@@ -4,8 +4,10 @@ import {
   Plus, Clock, Wrench, CheckCircle, Truck, X, Phone,
   Smartphone, DollarSign, Package, Printer
 } from 'lucide-react';
-import { Maintenance, MaintenancePart, InventoryItem, Safe, Customer, Category } from '../types';
+import { Maintenance, MaintenancePart, InventoryItem, Safe, Customer, Category, AppSettings } from '../types';
 import { printReceipt } from '../utils/print';
+import { useIndexedDBSetting } from '../hooks/useIndexedDB';
+import { defaultAppSettings } from '../hooks/useStore';
 
 interface MaintenanceBoardProps {
   maintenance: Maintenance[];
@@ -40,6 +42,11 @@ export default function MaintenanceBoard({
   onRemovePart,
   onDeliverMaintenance
 }: MaintenanceBoardProps) {
+  // إعدادات المحل (بتتقري مباشرة زي Layout) — محتاجينها عشان نعرف
+  // هل المدير سامح بإظهار أسعار قطع الغيار في إيصال العميل ولا لأ.
+  const [appSettings] = useIndexedDBSetting<AppSettings>('shopSettings', defaultAppSettings);
+  const showPartPrices = appSettings.maintenanceReceiptShowPartPrices === true;
+
   const [showNewModal, setShowNewModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [selectedMaintenanceId, setSelectedMaintenanceId] = useState<string | null>(null);
@@ -1014,11 +1021,16 @@ export default function MaintenanceBoard({
 
               {selectedMaintenance.parts.length > 0 && (
                 <div className="mb-4">
-                  <p className="text-gray-600 mb-2">قطع الغيار:</p>
+                  <p className="text-gray-600 mb-2">قطع الغيار المستخدمة:</p>
                   {selectedMaintenance.parts.map(part => (
                     <div key={part.id} className="flex justify-between text-sm">
                       <span>{part.name} × {part.quantity}</span>
-                      <span>{formatCurrency(part.total)}</span>
+                      {/*
+                        أسعار القطع دي تكلفة الشراء بتاعة المحل (سر تجاري):
+                        لو ظهرت للعميل يقدر يطرحها من الإجمالي ويعرف المصنعية.
+                        بتتعرض بس لو المدير فعّل الخيار من الإعدادات.
+                      */}
+                      {showPartPrices && <span>{formatCurrency(part.total)}</span>}
                     </div>
                   ))}
                 </div>
