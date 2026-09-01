@@ -304,7 +304,12 @@ export default function Finance({
       income: 'دخل',
       transfer: 'تحويل',
       return: 'مرتجع',
-      waste: 'هوالك'
+      waste: 'هوالك',
+      capital: 'رأس مال',
+      side_account: 'حساب جانبي',
+      customer_payment: 'دفعة عميل',
+      wallet_deposit: 'إيداع محفظة',
+      wallet_withdrawal: 'سحب محفظة'
     };
     return labels[type] || type;
   };
@@ -566,6 +571,8 @@ export default function Finance({
               <option value="sale">المبيعات</option>
               <option value="maintenance">الصيانة</option>
               <option value="transfer">التحويلات</option>
+              <option value="side_account">الحسابات الجانبية</option>
+              <option value="capital">رأس المال</option>
             </select>
           </div>
         </div>
