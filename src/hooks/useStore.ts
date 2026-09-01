@@ -15,6 +15,7 @@ import {
   initialSideAccountEntries, initialNotifications
 } from '../data/initialData';
 import { buildAutoNotifications, mergeAutoNotifications } from '../utils/alerts';
+import { planSettlementReversal, settledThroughSafes } from '../utils/sideAccounts';
 import { buildImeiStockIndex } from '../utils/stockCounts';
 import { formatDate } from '../utils/format';
 
@@ -922,27 +923,42 @@ export function useStore() {
         typeof input.dueDate !== 'string' || input.dueDate.length > 30 ||
         (input.newSafeName !== undefined && input.newSafeName.length > 200)) return null;
 
+    // Resolve the target safe before touching any state:
+    //  - separate_safe + new name → reuse a safe with the same name or create it
+    //  - separate_safe + existing selection → use that safe
+    //  - main_safe/capital → use the selected safe, falling back to the default
     let safeId = input.safeId;
-    if (input.impact === 'separate_safe' && !input.newSafeName?.trim()) return null;
-    if (input.impact !== 'separate_safe' && input.impact !== 'none' &&
+    let createdSafe: Safe | null = null;
+    const newName = input.newSafeName?.trim();
+    if (input.impact === 'separate_safe' && newName) {
+      const existingSafe = safes.find(s => s.name.trim().toLowerCase() === newName.toLowerCase());
+      if (existingSafe) {
+        safeId = existingSafe.id;
+      } else {
+        createdSafe = {
+          id: uuidv4(),
+          name: newName,
+          balance: 0,
+          isDefault: false,
+          type: 'cash'
+        };
+        safeId = createdSafe.id;
+      }
+    }
+    const cashMovement = input.type === 'incoming' || input.type === 'outgoing';
+    if (cashMovement && input.impact !== 'none' && !createdSafe &&
         (!safeId || !safes.some(s => s.id === safeId))) {
+      // separate_safe requires either a new safe name or a valid existing safe.
+      if (input.impact === 'separate_safe') return null;
       safeId = safes.find(s => s.isDefault)?.id || safes[0]?.id || '';
       if (!safeId) return null;
     }
     let safeDelta = 0;
     let transactionId = '';
     const nowIso = new Date().toISOString();
-    const cashMovement = input.type === 'incoming' || input.type === 'outgoing';
 
-    if (input.impact === 'separate_safe' && input.newSafeName?.trim()) {
-      const newSafe: Safe = {
-        id: uuidv4(),
-        name: input.newSafeName.trim(),
-        balance: 0,
-        isDefault: false,
-        type: 'cash'
-      };
-      safeId = newSafe.id;
+    if (createdSafe) {
+      const newSafe = createdSafe;
       setSafes(prev => [...prev, newSafe]);
     }
 
@@ -998,35 +1014,42 @@ export function useStore() {
   const updateSideAccountEntry = useCallback((
     id: string,
     updates: Partial<Pick<SideAccountEntry, 'paidAmount' | 'status' | 'notes' | 'dueDate'>> & { safeId?: string }
-  ) => {
+  ): SideAccountEntry | null => {
     const entry = sideAccountEntries.find(e => e.id === id);
-    if (!entry) return;
+    if (!entry) return null;
+
+    if (updates.notes !== undefined && (typeof updates.notes !== 'string' || updates.notes.length > MAX_TEXT_LENGTH)) return null;
+    if (updates.dueDate !== undefined && (typeof updates.dueDate !== 'string' || updates.dueDate.length > 30)) return null;
+    // An empty/unknown safeId is treated as "not provided" instead of failing
+    // the whole update — the UI only sends it when the user picks a safe.
+    const requestedSafeId = updates.safeId && safes.some(s => s.id === updates.safeId) ? updates.safeId : undefined;
 
     let paidAmount = entry.paidAmount;
-    if (updates.notes !== undefined && (typeof updates.notes !== 'string' || updates.notes.length > MAX_TEXT_LENGTH)) return;
-    if (updates.dueDate !== undefined && (typeof updates.dueDate !== 'string' || updates.dueDate.length > 30)) return;
-    if (updates.safeId !== undefined && !safes.some(s => s.id === updates.safeId)) return;
+    let lastSettlementSafeId = entry.safeId;
     if (updates.paidAmount !== undefined) {
-      if (!isFiniteNumber(updates.paidAmount) || updates.paidAmount < 0 || updates.paidAmount > entry.amount) return;
+      if (!isFiniteNumber(updates.paidAmount) || updates.paidAmount < 0 || updates.paidAmount > entry.amount) return null;
       paidAmount = roundMoney(updates.paidAmount);
       const delta = roundMoney(paidAmount - entry.paidAmount);
 
       // Settling a receivable/payable moves real cash — unlike
-      // incoming/outgoing entries, this wasn't recorded against any safe at
-      // creation time, so record it now against the chosen (or default) safe.
+      // incoming/outgoing entries, nothing was recorded against a safe at
+      // creation time, so the movement is recorded here.
       if (delta !== 0 && (entry.type === 'receivable' || entry.type === 'payable')) {
         const settlementTransactions = transactions.filter(t => t.referenceId === entry.id && t.safeId);
-        const lastSettlementSafeId = settlementTransactions[settlementTransactions.length - 1]?.safeId;
-        const targetSafeId = delta < 0
-          ? (lastSettlementSafeId || entry.safeId || '')
-          : (updates.safeId || entry.safeId || safes.find(s => s.isDefault)?.id || safes[0]?.id || '');
-        if (!targetSafeId || !safes.some(s => s.id === targetSafeId)) return;
-        {
-          // Collecting a receivable = cash in; paying off a payable = cash out.
+        const settledTotal = settledThroughSafes(settlementTransactions);
+        const nowIso = new Date().toISOString();
+
+        if (delta > 0) {
+          // Collecting more of a receivable = cash in; paying more of a
+          // payable = cash out — through the chosen (or last/default) safe.
+          const fallbackSafeId = entry.safeId && safes.some(s => s.id === entry.safeId)
+            ? entry.safeId
+            : safes.find(s => s.isDefault)?.id || safes[0]?.id || '';
+          const targetSafeId = requestedSafeId || fallbackSafeId;
+          if (!targetSafeId) return null;
           const safeDelta = entry.type === 'receivable' ? delta : -delta;
           setSafes(prev => prev.map(s => s.id === targetSafeId ? { ...s, balance: roundMoney(s.balance + safeDelta) } : s));
-
-          const transaction: Transaction = {
+          setTransactions(prev => [...prev, {
             id: uuidv4(),
             type: 'side_account',
             amount: safeDelta,
@@ -1034,9 +1057,36 @@ export function useStore() {
             referenceId: entry.id,
             safeId: targetSafeId,
             userId: currentUser?.id || '',
-            createdAt: new Date().toISOString()
-          };
-          setTransactions(prev => [...prev, transaction]);
+            createdAt: nowIso
+          }]);
+          lastSettlementSafeId = targetSafeId;
+        } else {
+          // Reducing the paid amount gives cash back, but only the net cash
+          // this entry actually moved through safes — an initial paidAmount
+          // recorded at creation is note-only and never touched a safe, so
+          // that part of the reduction is note-only too. Reversals run LIFO
+          // over the original-direction settlements so every safe returns
+          // only what it received for this entry.
+          const direction = entry.type === 'receivable' ? 1 : -1;
+          const reversible = direction === 1 ? Math.max(0, settledTotal) : Math.max(0, -settledTotal);
+          const toReverse = roundMoney(Math.min(-delta, reversible));
+          const reversalOps = planSettlementReversal(settlementTransactions, toReverse, direction);
+          reversalOps.forEach(op => {
+            setSafes(prev => prev.map(s => s.id === op.safeId ? { ...s, balance: roundMoney(s.balance + op.amount) } : s));
+            setTransactions(prev => [...prev, {
+              id: uuidv4(),
+              type: 'side_account',
+              amount: op.amount,
+              description: `${entry.type === 'receivable' ? 'تعديل تحصيل' : 'تعديل سداد'} حساب جانبي - ${entry.partyName}`,
+              referenceId: entry.id,
+              safeId: op.safeId,
+              userId: currentUser?.id || '',
+              createdAt: nowIso
+            }]);
+          });
+          if (reversalOps.length > 0) {
+            lastSettlementSafeId = reversalOps[0].safeId;
+          }
         }
       }
     }
@@ -1047,12 +1097,14 @@ export function useStore() {
     const safeUpdates = {
       ...(updates.notes !== undefined ? { notes: updates.notes } : {}),
       ...(updates.dueDate !== undefined ? { dueDate: updates.dueDate } : {}),
-      ...(updates.safeId !== undefined ? { safeId: updates.safeId } : {}),
+      ...(lastSettlementSafeId ? { safeId: lastSettlementSafeId } : {}),
       paidAmount,
       status,
     };
 
-    setSideAccountEntries(prev => prev.map(e => (e.id === id ? { ...e, ...safeUpdates } : e)));
+    const updatedEntry: SideAccountEntry = { ...entry, ...safeUpdates };
+    setSideAccountEntries(prev => prev.map(e => (e.id === id ? updatedEntry : e)));
+    return updatedEntry;
   }, [currentUser, safes, sideAccountEntries, transactions, setSafes, setSideAccountEntries, setTransactions]);
 
   const deleteSideAccountEntry = useCallback((id: string) => {

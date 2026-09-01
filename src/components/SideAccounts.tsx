@@ -23,7 +23,7 @@ interface SideAccountsProps {
     dueDate: string;
     newSafeName?: string;
   }) => SideAccountEntry | null;
-  onUpdateEntry: (id: string, updates: Partial<Pick<SideAccountEntry, 'paidAmount' | 'status' | 'notes' | 'dueDate'>> & { safeId?: string }) => void;
+  onUpdateEntry: (id: string, updates: Partial<Pick<SideAccountEntry, 'paidAmount' | 'status' | 'notes' | 'dueDate'>> & { safeId?: string }) => SideAccountEntry | null;
   onDeleteEntry: (id: string) => void;
 }
 
@@ -94,12 +94,20 @@ export default function SideAccounts({ entries, safes, onAddEntry, onUpdateEntry
       alert('اسم الشخص / الجهة مطلوب');
       return;
     }
-    if (form.amount <= 0) {
+    if (!form.amount || form.amount <= 0) {
       alert('المبلغ لازم يكون أكبر من صفر');
       return;
     }
-    if ((form.type === 'incoming' || form.type === 'outgoing') && form.impact !== 'none' && form.impact !== 'separate_safe' && !form.safeId) {
+    if ((form.type === 'receivable' || form.type === 'payable') && form.paidAmount > form.amount) {
+      alert('المدفوع لا يمكن أن يزيد عن المبلغ الإجمالي');
+      return;
+    }
+    if ((form.type === 'incoming' || form.type === 'outgoing') && form.impact !== 'none' && !form.safeId && form.impact !== 'separate_safe') {
       alert('اختر الخزنة');
+      return;
+    }
+    if ((form.type === 'incoming' || form.type === 'outgoing') && form.impact === 'separate_safe' && !form.newSafeName.trim() && !form.safeId) {
+      alert('اختر خزنة مستقلة موجودة أو اكتب اسم خزنة جديدة');
       return;
     }
     const payload = (form.type === 'receivable' || form.type === 'payable')
@@ -121,17 +129,31 @@ export default function SideAccounts({ entries, safes, onAddEntry, onUpdateEntry
   const openSettle = (entry: SideAccountEntry) => {
     setSettleEntry(entry);
     setSettleAmount(entry.paidAmount || 0);
-    setSettleSafeId(entry.safeId || defaultSafe?.id || '');
+    // Fall back to the default safe when the entry's last settlement safe no
+    // longer exists, otherwise the select would render empty.
+    const initialSafeId = safes.some(s => s.id === entry.safeId)
+      ? entry.safeId
+      : (defaultSafe?.id || '');
+    setSettleSafeId(initialSafeId);
   };
 
   const handleSettle = () => {
     if (!settleEntry) return;
     const amount = Math.min(settleEntry.amount, Math.max(0, Number(settleAmount) || 0));
-    if (amount !== settleEntry.paidAmount && !settleSafeId) {
+    if (amount > settleEntry.paidAmount && !settleSafeId) {
       alert('اختر الخزنة التي تحصّل/تدفع منها المبلغ');
       return;
     }
-    onUpdateEntry(settleEntry.id, { paidAmount: amount, safeId: settleSafeId });
+    const result = onUpdateEntry(settleEntry.id, {
+      paidAmount: amount,
+      // Only send a safe when one is actually picked — an empty value would
+      // otherwise be treated as an invalid safe by the store.
+      ...(settleSafeId ? { safeId: settleSafeId } : {})
+    });
+    if (!result) {
+      alert('تعذر تحديث العملية — تأكد من المبلغ (من صفر إلى إجمالي المبلغ) وأن الخزنة موجودة');
+      return;
+    }
     setSettleEntry(null);
   };
 
@@ -150,7 +172,7 @@ export default function SideAccounts({ entries, safes, onAddEntry, onUpdateEntry
         </div>
         <div className="flex gap-2 flex-wrap">
           <button
-            onClick={() => downloadExcel(`side-accounts-${new Date().toISOString().slice(0, 10)}`, ['الشخص', 'النوع', 'التأثير', 'المبلغ', 'المدفوع', 'المتبقي', 'الحالة', 'الوصف', 'التاريخ'], entries.map(e => [e.partyName, typeLabels[e.type], impactLabels[e.impact], e.amount, e.paidAmount, Math.max(0, e.amount - e.paidAmount), statusLabels[e.status], e.description, formatDateTime(e.createdAt)]))}
+            onClick={() => downloadExcel(`side-accounts-${new Date().toISOString().slice(0, 10)}`, ['الشخص', 'النوع', 'التأثير', 'المبلغ', 'المدفوع', 'المتبقي', 'الحالة', 'الوصف', 'التاريخ'], filteredEntries.map(e => [e.partyName, typeLabels[e.type], impactLabels[e.impact], e.amount, e.paidAmount, Math.max(0, e.amount - e.paidAmount), statusLabels[e.status], e.description, formatDateTime(e.createdAt)]))}
             className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition"
           ><FileSpreadsheet size={20} />تصدير</button>
           <button onClick={() => setShowModal(true)} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"><Plus size={20} />عملية جديدة</button>
@@ -207,7 +229,9 @@ export default function SideAccounts({ entries, safes, onAddEntry, onUpdateEntry
                     <td className="px-4 py-3"><span className={`badge ${entry.type === 'receivable' || entry.type === 'incoming' ? 'badge-success' : 'badge-danger'}`}>{typeLabels[entry.type]}</span></td>
                     <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">
                       {impactLabels[entry.impact]}
-                      {entry.safeId && <div className="text-xs text-gray-500">{safes.find(s => s.id === entry.safeId)?.name}</div>}
+                      {entry.impact !== 'none' && entry.safeId && (
+                        <div className="text-xs text-gray-500">{safes.find(s => s.id === entry.safeId)?.name ?? 'خزنة محذوفة'}</div>
+                      )}
                     </td>
                     <td className="px-4 py-3 font-bold text-gray-800 dark:text-white">{formatCurrency(entry.amount)}</td>
                     <td className="px-4 py-3 font-bold text-gray-800 dark:text-white">{remaining ? formatCurrency(remaining) : '-'}</td>
@@ -264,12 +288,20 @@ export default function SideAccounts({ entries, safes, onAddEntry, onUpdateEntry
                   </select>
                 </Field>
                 <Field label="التأثير المالي">
-                  <select value={form.impact} onChange={e => setForm(prev => ({ ...prev, impact: e.target.value as SideAccountImpact }))} className="input">
+                  <select
+                    value={form.impact}
+                    onChange={e => setForm(prev => ({ ...prev, impact: e.target.value as SideAccountImpact }))}
+                    disabled={form.type === 'receivable' || form.type === 'payable'}
+                    className="input disabled:opacity-50"
+                  >
                     <option value="none">بدون تأثير على حسابات المحل</option>
                     <option value="main_safe">تدخل/تخرج من الخزنة الرئيسية</option>
                     <option value="capital">تدخل/تخرج كرأس مال</option>
                     <option value="separate_safe">خزنة مستقلة</option>
                   </select>
+                  {(form.type === 'receivable' || form.type === 'payable') && (
+                    <p className="text-xs text-gray-500 mt-1">التحصيل/السداد للديون بيتسجل لاحقاً من زرار التحديث ✓</p>
+                  )}
                 </Field>
               </div>
 
@@ -286,7 +318,7 @@ export default function SideAccounts({ entries, safes, onAddEntry, onUpdateEntry
 
               {(form.type === 'receivable' || form.type === 'payable') && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Field label="المدفوع من المبلغ حتى الآن"><input type="number" min={0} value={form.paidAmount} onChange={e => setForm(prev => ({ ...prev, paidAmount: Number(e.target.value) }))} className="input" /></Field>
+                  <Field label="المدفوع من المبلغ حتى الآن (نوتة فقط)"><input type="number" min={0} max={form.amount} value={form.paidAmount} onChange={e => setForm(prev => ({ ...prev, paidAmount: Number(e.target.value) }))} className="input" /></Field>
                   <Field label="تاريخ استحقاق اختياري"><input type="date" value={form.dueDate} onChange={e => setForm(prev => ({ ...prev, dueDate: e.target.value }))} className="input" /></Field>
                 </div>
               )}
@@ -296,6 +328,7 @@ export default function SideAccounts({ entries, safes, onAddEntry, onUpdateEntry
 
               <div className="p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg text-sm text-amber-800 dark:text-amber-200">
                 لو اخترت "بدون تأثير" العملية هتفضل نوتة فقط. لو اخترت خزنة أو رأس مال، التأثير يتم فقط مع "فلوس داخلة" أو "فلوس خارجة".
+                «المدفوع حتى الآن» هنا مجرد نوتة — الفلوس بتتحرك فعلاً في الخزنة لما تحدّث المدفوع من زرار ✓ وتختار خزنة.
               </div>
             </div>
             <div className="p-6 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3">
@@ -327,13 +360,18 @@ export default function SideAccounts({ entries, safes, onAddEntry, onUpdateEntry
                   className="input"
                 />
               </Field>
-              {settleAmount !== settleEntry.paidAmount && (
+              {settleAmount > settleEntry.paidAmount && (
                 <Field label="الخزنة">
                   <select value={settleSafeId} onChange={e => setSettleSafeId(e.target.value)} className="input">
                     <option value="">— اختر الخزنة —</option>
                     {safes.map(safe => <option key={safe.id} value={safe.id}>{safe.name} - {formatCurrency(safe.balance)}</option>)}
                   </select>
                 </Field>
+              )}
+              {settleAmount < settleEntry.paidAmount && (
+                <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-sm text-blue-800 dark:text-blue-200">
+                  المبلغ المرتجع هيرجع لنفس الخزنات اللي اتحصّل/اتسدّد منها قبل كده (آخر خزنة أولاً)، وبس اللي دخل الخزنات فعلاً — أي مدفوع كان مسجل كنوتة عند إضافة العملية مش هيتخصم من أي خزنة.
+                </div>
               )}
             </div>
             <div className="p-6 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3">
