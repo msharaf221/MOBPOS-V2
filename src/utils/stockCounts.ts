@@ -14,8 +14,22 @@
 
 import type { IMEIUnit, InventoryItem } from '../types';
 
+/**
+ * الحالات اللي الجهاز فيها معروض للبيع.
+ *
+ * `returned` = جهاز رجع من عميل ورجع للرف. كان بيترجّع لحالة `available`
+ * فيضيع أي أثر إنه اتباع ورجع؛ دلوقتي بيفضل متعلّم «مرتجع» ومع ذلك
+ * بيتحسب ضمن المخزون المتاح للبيع في كل الشاشات.
+ */
+export const SELLABLE_IMEI_STATUSES: ReadonlySet<IMEIUnit['status']> = new Set(['available', 'returned']);
+
+/** هل الوحدة دي متاحة للبيع (جديدة على الرف أو مرتجعة)؟ */
+export function isSellableUnit(unit: Pick<IMEIUnit, 'status'>): boolean {
+  return SELLABLE_IMEI_STATUSES.has(unit.status);
+}
+
 export interface ImeiStockIndex {
-  /** عدد الوحدات المتاحة لكل منتج (inventoryId -> count) */
+  /** عدد الوحدات المتاحة للبيع لكل منتج (جديدة + مرتجعة) */
   availableCounts: ReadonlyMap<string, number>;
   /** الوحدات المتاحة نفسها لكل منتج، مرتبة بنفس ترتيب imeiUnits */
   availableUnits: ReadonlyMap<string, IMEIUnit[]>;
@@ -28,7 +42,7 @@ export function buildImeiStockIndex(imeiUnits: readonly IMEIUnit[]): ImeiStockIn
   const availableUnits = new Map<string, IMEIUnit[]>();
 
   for (const unit of imeiUnits) {
-    if (unit.status !== 'available') continue;
+    if (!isSellableUnit(unit)) continue;
     const id = unit.inventoryId;
     availableCounts.set(id, (availableCounts.get(id) || 0) + 1);
     const bucket = availableUnits.get(id);

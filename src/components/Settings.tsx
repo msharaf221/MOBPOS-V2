@@ -59,6 +59,7 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
   const [activeTab, setActiveTab] = useState<'general' | 'license' | 'appearance' | 'security' | 'data' | 'about'>('general');
   const [shopName, setShopName] = useState(settings.shopName);
   const [currency, setCurrency] = useState(localStorage.getItem("app_currency") || "EGP");
+  const [currencyDecimals, setCurrencyDecimals] = useState(localStorage.getItem("app_currency_decimals") || "auto");
   const [shopPhone, setShopPhone] = useState(settings.shopPhone);
   const [shopAddress, setShopAddress] = useState(settings.shopAddress);
   const [receiptFooter, setReceiptFooter] = useState(settings.receiptFooter);
@@ -375,7 +376,9 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
     
     // Save currency to localStorage
     const oldCurr = localStorage.getItem('app_currency');
+    const oldDecimals = localStorage.getItem('app_currency_decimals') || 'auto';
     localStorage.setItem('app_currency', currency);
+    localStorage.setItem('app_currency_decimals', currencyDecimals);
     
     // Always force Arabic
     localStorage.setItem('app_language', 'ar');
@@ -387,7 +390,7 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
         localStorage.setItem('app_locale', 'ar-EG');
     }
     
-    if (oldCurr !== currency) {
+    if (oldCurr !== currency || oldDecimals !== currencyDecimals) {
       window.location.reload();
     } else {
       showSaved();
@@ -823,6 +826,22 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                       <option value="AED">درهم إماراتي (AED)</option>
                       <option value="USD">دولار أمريكي (USD)</option>
                     </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">عرض القروش</label>
+                    <select
+                      value={currencyDecimals}
+                      onChange={(e) => setCurrencyDecimals(e.target.value)}
+                      className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-800 dark:text-white"
+                    >
+                      <option value="auto">تلقائي (تظهر لما تكون موجودة)</option>
+                      <option value="on">دايمًا منزلتين (0.00)</option>
+                      <option value="off">تقريب لأقرب جنيه</option>
+                    </select>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1.5">
+                      التقريب لأقرب جنيه بيخلّي مجموع السطور مختلف عن الإجمالي المعروض.
+                    </p>
                   </div>
                 </div>
               </div>

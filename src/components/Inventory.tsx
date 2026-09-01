@@ -3,7 +3,7 @@ import { Search, Plus, Edit2, Trash2, X, Package, AlertTriangle, AlertCircle, Fi
 import { InventoryItem, Category, IMEIUnit, Supplier, StockWaste } from '../types';
 import { downloadExcel } from '../utils/reports';
 import { generateBarcode, printBarcodeSticker } from '../utils/barcode';
-import { buildImeiStockIndex } from '../utils/stockCounts';
+import { buildImeiStockIndex, isSellableUnit } from '../utils/stockCounts';
 import { formatCurrency } from '../utils/format';
 import { usePagination } from '../hooks/usePagination';
 import PaginationBar from './PaginationBar';
@@ -387,7 +387,7 @@ export default function Inventory({
             <div>
               <p className="text-gray-500 dark:text-gray-400 text-sm">أجهزة متاحة</p>
               <p className="text-xl font-bold text-green-600">
-                {imeiUnits.filter(u => u.status === 'available').length}
+                {imeiUnits.filter(u => isSellableUnit(u)).length}
               </p>
             </div>
           </div>

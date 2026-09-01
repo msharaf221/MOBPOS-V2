@@ -8,6 +8,7 @@ import {
   X, Smartphone
 } from 'lucide-react';
 import { IMEIUnit, InventoryItem, Customer, Sale, Maintenance } from '../types';
+import { isSellableUnit } from '../utils/stockCounts';
 
 interface IMEIManagerProps {
   imeiUnits: IMEIUnit[];
@@ -308,7 +309,7 @@ export default function IMEIManager({
         <div className="bg-green-50 dark:bg-green-900/20 rounded-xl p-4 border border-green-200 dark:border-green-800">
           <p className="text-green-600 dark:text-green-400 text-sm">متاح</p>
           <p className="text-2xl font-bold text-green-700 dark:text-green-300">
-            {imeiUnits.filter(u => u.status === 'available').length}
+            {imeiUnits.filter(u => isSellableUnit(u)).length}
           </p>
         </div>
         <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-4 border border-blue-200 dark:border-blue-800">
@@ -441,7 +442,7 @@ export default function IMEIManager({
                             <Eye size={18} />
                           </button>
                         )}
-                        {unit.status === 'available' && (
+                        {isSellableUnit(unit) && (
                           <button
                             onClick={() => {
                               if (confirm('هل أنت متأكد من حذف هذا الجهاز؟')) {

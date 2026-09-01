@@ -9,7 +9,7 @@ import {
 import { Customer, InventoryItem, IMEIUnit, Safe, Category, SaleItem } from '../types';
 import { printReceipt } from '../utils/print';
 import { posSound } from '../utils/audio';
-import { buildImeiStockIndex, groupCountsBy } from '../utils/stockCounts';
+import { buildImeiStockIndex, groupCountsBy, isSellableUnit } from '../utils/stockCounts';
 import { formatCurrency, formatDate } from '../utils/format';
 
 /** عدد كروت الأصناف اللي بتترسم في الأول وكل ضغطة «عرض المزيد». */
@@ -378,7 +378,7 @@ export default function POS({
 
     // 1. Direct match on IMEI number
     const matchingImeiUnit = imeiUnits.find(
-      u => (u.imei1.toLowerCase() === cleanCode || u.imei2?.toLowerCase() === cleanCode) && u.status === 'available'
+      u => (u.imei1.toLowerCase() === cleanCode || u.imei2?.toLowerCase() === cleanCode) && isSellableUnit(u)
     );
     if (matchingImeiUnit) {
       const parentItem = inventory.find(i => i.id === matchingImeiUnit.inventoryId);
