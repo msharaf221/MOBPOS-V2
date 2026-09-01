@@ -4,7 +4,7 @@ import { usePagination } from '../hooks/usePagination';
 import PaginationBar from './PaginationBar';
 
 import { Search, Plus, Edit2, Trash2, Eye, X, Phone, MapPin, Calendar } from 'lucide-react';
-import { Customer, Sale, IMEIUnit, InventoryItem, Maintenance, Safe } from '../types';
+import { Customer, Sale, IMEIUnit, InventoryItem, Maintenance, Safe, Transaction } from '../types';
 
 interface CustomersProps {
   customers: Customer[];
@@ -16,7 +16,7 @@ interface CustomersProps {
   onAddCustomer: (customer: Omit<Customer, 'id' | 'createdAt' | 'balance'>) => Customer | null;
   onUpdateCustomer: (id: string, updates: Partial<Customer>) => void;
   onDeleteCustomer: (id: string) => { ok: boolean; error?: string };
-  onRecordPayment: (customerId: string, amount: number, safeId: string, notes: string) => void;
+  onRecordPayment: (customerId: string, amount: number, safeId: string, notes: string) => Transaction | null;
 }
 
 export default function Customers({
@@ -43,19 +43,31 @@ export default function Customers({
   const [paymentSafeId, setPaymentSafeId] = useState(safes.find(s => s.isDefault)?.id || safes[0]?.id || '');
   const [paymentNotes, setPaymentNotes] = useState('');
 
+  // الكارت المفتوح كان بيحمل نسخة مجمّدة من العميل: أي تغيّر في الرصيد
+  // (دفعة، فاتورة آجلة، مرتجع) ما كانش بيظهر غير بعد إعادة فتح الكارت.
+  useEffect(() => {
+    setSelectedCustomer(prev => {
+      if (!prev) return prev;
+      const live = customers.find(c => c.id === prev.id);
+      return live && live !== prev ? live : prev;
+    });
+  }, [customers]);
+
   const handlePayment = () => {
     if (!selectedCustomer || paymentAmount <= 0 || !paymentSafeId) return;
     if (paymentAmount > (selectedCustomer.balance || 0)) {
       alert('لا يمكن أن يتجاوز مبلغ الدفع رصيد العميل');
       return;
     }
-    onRecordPayment(selectedCustomer.id, paymentAmount, paymentSafeId, paymentNotes);
-    
-    setSelectedCustomer({
-      ...selectedCustomer,
-      balance: (selectedCustomer.balance || 0) - paymentAmount
-    });
-    
+    // كانت الشاشة بتنقص الرصيد يدوي من غير ما تبص على نتيجة العملية: لو
+    // المتجر رفض الدفعة (خزنة اتشالت / مبلغ أكبر من الرصيد) العميل بيشوف
+    // إن الدين قل، وبعد أول تحديث للصفحة الدين راجع والفلوس مش مسجّلة.
+    const recorded = onRecordPayment(selectedCustomer.id, paymentAmount, paymentSafeId, paymentNotes);
+    if (!recorded) {
+      alert('تعذر تسجيل الدفعة — راجع المبلغ والخزنة المختارة');
+      return;
+    }
+
     setShowPaymentModal(false);
     setPaymentAmount(0);
     setPaymentNotes('');

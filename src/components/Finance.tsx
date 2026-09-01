@@ -31,7 +31,7 @@ interface FinanceProps {
     description: string,
     safeId: string
   ) => void;
-  onDeleteTransaction: (id: string) => void;
+  onDeleteTransaction: (id: string) => { ok: boolean; error?: string };
   onRecordWalletTransaction: (
     type: 'deposit' | 'withdrawal',
     amount: number,
@@ -612,7 +612,8 @@ export default function Finance({
                         <button
                           onClick={() => {
                             if (confirm('هل تريد حذف هذه المعاملة؟')) {
-                              onDeleteTransaction(trans.id);
+                              const result = onDeleteTransaction(trans.id);
+                              if (!result.ok) alert(result.error || 'تعذر حذف المعاملة');
                             }
                           }}
                           className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"

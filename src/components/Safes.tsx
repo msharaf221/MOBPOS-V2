@@ -212,6 +212,9 @@ export default function Safes({ safes, transactions, currentUser, onAddSafe, onD
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">الرصيد الافتتاحي</label>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1.5">
+                  هيتسجّل كحركة «رأس مال» في المالية عشان يفضل مجموع الحركات مطابق لأرصدة الخزائن.
+                </p>
                 <input
                   type="number"
                   value={newSafe.balance}

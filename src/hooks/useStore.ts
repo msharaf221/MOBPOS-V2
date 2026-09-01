@@ -124,7 +124,7 @@ export function useStore() {
     const usernames = new Set<string>();
     if (!nextUsers.every(user => {
       if (!user || !validText(user.id, 200) || !validText(user.username, 100) || !validText(user.name, 200) ||
-          typeof user.password !== 'string' || user.password.length > 20_000 ||
+          typeof user.password !== 'string' || user.password.length === 0 || user.password.length > 20_000 ||
           !['admin', 'manager', 'staff'].includes(user.role) || typeof user.createdAt !== 'string' ||
           ids.has(user.id) || usernames.has(user.username.toLowerCase())) return false;
       ids.add(user.id); usernames.add(user.username.toLowerCase());
@@ -1462,50 +1462,122 @@ export function useStore() {
     }));
   }, [maintenance, setInventory, setMaintenance]);
 
-  const deliverMaintenance = useCallback((id: string, collectedAmount: number, safeId: string) => {
+  /**
+   * تسليم جهاز صيانة وتحصيل المبلغ.
+   *
+   * كانت بترجّع `null` في كل حالات الرفض، والواجهة بتقفل المودال زي ما تكون
+   * نجحت — فالفني يفتكر إنه سلّم وحصّل والفلوس أصلاً مادخلتش الخزنة. بقت
+   * ترجّع `{ ok, error }` بسبب واضح.
+   *
+   * كمان «المصاريف الإضافية» كانت بتتخصم من الربح المسجّل على التذكرة بس،
+   * من غير ما تخرج من أي خزنة ولا تظهر في المالية — دلوقتي بتتسجل كمصروف
+   * حقيقي على نفس الخزنة.
+   */
+  const deliverMaintenance = useCallback((
+    id: string,
+    collectedAmount: number,
+    safeId: string
+  ): { ok: true } | { ok: false; error: string } => {
     const maint = maintenance.find(m => m.id === id);
+    if (!maint) return { ok: false, error: 'تذكرة الصيانة غير موجودة' };
+    if (maint.status === 'delivered') return { ok: false, error: 'التذكرة مسلّمة بالفعل' };
+    if (maint.status === 'cancelled') return { ok: false, error: 'لا يمكن تسليم تذكرة ملغاة' };
+    if (maint.status !== 'completed') {
+      return { ok: false, error: 'لازم تحوّل التذكرة لحالة «مكتمل» قبل التسليم' };
+    }
     const safe = safes.find(s => s.id === safeId);
-    if (!maint || !safe || maint.status !== 'completed' || !isFiniteNumber(collectedAmount) || collectedAmount < 0) return null;
+    if (!safe) return { ok: false, error: 'اختر الخزنة اللي هيتحصّل فيها المبلغ' };
+    if (!isFiniteNumber(collectedAmount) || collectedAmount < 0) {
+      return { ok: false, error: 'المبلغ المحصّل غير صحيح' };
+    }
 
     const partsCost = maint.parts.reduce((sum, p) => sum + (isFiniteNumber(p.total) && p.total >= 0 ? p.total : 0), 0);
-    const additionalExpenses = isFiniteNumber(maint.additionalExpenses) && maint.additionalExpenses >= 0 ? maint.additionalExpenses : 0;
+    const additionalExpenses = roundMoney(
+      isFiniteNumber(maint.additionalExpenses) && maint.additionalExpenses >= 0 ? maint.additionalExpenses : 0
+    );
     const finalAmount = roundMoney(collectedAmount);
     const profit = roundMoney(finalAmount - partsCost - additionalExpenses);
+
+    // المصاريف الإضافية بتتدفع كاش من نفس الخزنة، فلازم تكون مغطّاة
+    // بالرصيد بعد إضافة المحصّل — غير كده الخزنة كانت هتروح سالب بصمت.
+    if (additionalExpenses > 0 && roundMoney(safe.balance + finalAmount) < additionalExpenses) {
+      return { ok: false, error: `رصيد ${safe.name} لا يكفي لصرف المصاريف الإضافية (${additionalExpenses})` };
+    }
+
+    const now = new Date().toISOString();
 
     setMaintenance(prev => prev.map(m => m.id === id ? {
       ...m,
       status: 'delivered', collectedAmount: finalAmount, finalCost: finalAmount,
-      profit, deliveredAt: new Date().toISOString(), safeId
+      profit, deliveredAt: now, safeId
     } : m));
 
-    // Update safe balance
-    setSafes(prev => prev.map(s => 
-      s.id === safeId ? { ...s, balance: roundMoney(s.balance + finalAmount) } : s
-    ));
+    // صافي الأثر على الخزنة: المحصّل − المصاريف الإضافية
+    const safeDelta = roundMoney(finalAmount - additionalExpenses);
+    if (safeDelta !== 0) {
+      setSafes(prev => prev.map(s =>
+        s.id === safeId ? { ...s, balance: roundMoney(s.balance + safeDelta) } : s
+      ));
+    }
 
-    // Add transaction
-    const transaction: Transaction = {
-      id: uuidv4(),
-      type: 'maintenance',
-      amount: finalAmount,
-      description: `صيانة ${maint.ticketNumber}`,
-      referenceId: id,
-      safeId,
-      userId: currentUser?.id || '',
-      createdAt: new Date().toISOString()
-    };
-    setTransactions(prev => [...prev, transaction]);
+    const newTransactions: Transaction[] = [];
+    if (finalAmount > 0) {
+      newTransactions.push({
+        id: uuidv4(),
+        type: 'maintenance',
+        amount: finalAmount,
+        description: `صيانة ${maint.ticketNumber}`,
+        referenceId: id,
+        safeId,
+        userId: currentUser?.id || '',
+        createdAt: now
+      });
+    }
+    if (additionalExpenses > 0) {
+      newTransactions.push({
+        id: uuidv4(),
+        type: 'expense',
+        amount: -additionalExpenses,
+        description: `مصاريف إضافية - صيانة ${maint.ticketNumber}`,
+        referenceId: id,
+        safeId,
+        userId: currentUser?.id || '',
+        createdAt: now
+      });
+    }
+    if (newTransactions.length > 0) {
+      setTransactions(prev => [...prev, ...newTransactions]);
+    }
+
+    return { ok: true };
   }, [currentUser, maintenance, setMaintenance, safes, setSafes, setTransactions]);
 
   // Safe functions
+  // خزنة جديدة برصيد افتتاحي كانت بتضيف فلوس للنظام من غير أي قيد: إجمالي
+  // الأرصدة يزيد ومجموع الحركات ما يزيدش، فالفرق بينهم يكبر مع الوقت. بقى
+  // الرصيد الافتتاحي يتسجّل كحركة «رأس مال» على الخزنة الجديدة.
   const addSafe = useCallback((safe: Omit<Safe, 'id'>) => {
     const validTypes: NonNullable<Safe['type']>[] = ['cash', 'ewallet', 'bank'];
     if (!validText(safe.name, 200) || !isFiniteNumber(safe.balance) || safe.balance < 0 || typeof safe.isDefault !== 'boolean' ||
         (safe.type !== undefined && !validTypes.includes(safe.type)) || safes.some(s => s.name.trim() === safe.name.trim())) return null;
-    const newSafe: Safe = { ...safe, name: safe.name.trim(), balance: roundMoney(safe.balance), id: uuidv4() };
+    const openingBalance = roundMoney(safe.balance);
+    const newSafe: Safe = { ...safe, name: safe.name.trim(), balance: openingBalance, id: uuidv4() };
     setSafes(prev => [...prev.map(s => newSafe.isDefault ? { ...s, isDefault: false } : s), newSafe]);
+
+    if (openingBalance > 0) {
+      setTransactions(prev => [...prev, {
+        id: uuidv4(),
+        type: 'capital',
+        amount: openingBalance,
+        description: `رصيد افتتاحي - ${newSafe.name}`,
+        referenceId: newSafe.id,
+        safeId: newSafe.id,
+        userId: currentUser?.id || '',
+        createdAt: new Date().toISOString()
+      }]);
+    }
     return newSafe;
-  }, [safes, setSafes]);
+  }, [currentUser, safes, setSafes, setTransactions]);
 
   // Transaction functions (for manual income/expense)
   const deleteSafe = useCallback((id: string): { ok: boolean; error?: string } => {
@@ -1559,15 +1631,20 @@ export function useStore() {
     return transaction;
   }, [currentUser, safes, setTransactions, setSafes]);
 
-  const deleteTransaction = useCallback((id: string) => {
+  // الحركات الناتجة عن عمليات (بيع/شراء/صيانة/مرتجع/تحويل...) مش قابلة للحذف:
+  // حذفها كان بيشيل السطر ويسيب رصيد الخزنة متغيّر، فالسجل ما يبقاش متوازن.
+  // اليدوي بس (income/expense) هو اللي بيتحذف مع عكس أثره.
+  const deleteTransaction = useCallback((id: string): { ok: boolean; error?: string } => {
     const trans = transactions.find(t => t.id === id);
-    if (trans && (trans.type === 'income' || trans.type === 'expense')) {
-      // Reverse the effect on safe balance
-      setSafes(prev => prev.map(s => 
-        s.id === trans.safeId ? { ...s, balance: s.balance - trans.amount } : s
-      ));
+    if (!trans) return { ok: false, error: 'الحركة غير موجودة' };
+    if (trans.type !== 'income' && trans.type !== 'expense') {
+      return { ok: false, error: 'لا يمكن حذف حركة ناتجة عن عملية (بيع/شراء/صيانة/مرتجع) — سجّل عملية عكسية بدلاً من الحذف' };
     }
+    setSafes(prev => prev.map(s =>
+      s.id === trans.safeId ? { ...s, balance: roundMoney(s.balance - trans.amount) } : s
+    ));
     setTransactions(prev => prev.filter(t => t.id !== id));
+    return { ok: true };
   }, [transactions, setSafes, setTransactions]);
 
   const transferBetweenSafes = useCallback((fromId: string, toId: string, amount: number) => {
