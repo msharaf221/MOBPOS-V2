@@ -5,7 +5,7 @@
 //    إلى الصيغة الجديدة عند أول تسجيل دخول ناجح
 // ============================================================
 
-import { sha256Hex, pbkdf2Hex, constantTimeEqual, b64urlEncode, b64urlDecode, PBKDF2_ITERATIONS } from '../license/crypto';
+import { sha256Hex, pbkdf2Hex, constantTimeEqual, b64urlEncode, b64urlDecode, PBKDF2_ITERATIONS } from '../license/crypto.ts';
 
 const PBKDF2_PREFIX = 'pbkdf2';
 // Legacy (deprecated) format: a single unsalted SHA-256 round over a fixed prefix.
@@ -40,8 +40,11 @@ export async function hashPasswordForStorage(plain: string): Promise<string> {
  *  - a legacy plain-text password (e.g. the default admin account)
  */
 export async function verifyLoginPassword(plain: string, stored: string): Promise<boolean> {
-  if (typeof plain !== 'string' || plain.length > 512) return false;
+  if (typeof plain !== 'string' || plain.length === 0 || plain.length > 512) return false;
   const value = typeof stored === 'string' ? stored : '';
+  // حساب من غير كلمة سر (ممكن ييجي من نسخة احتياطية قديمة أو معدّلة) كان
+  // بيعدّي على المقارنة النصية في آخر الدالة: '' === '' → دخول بكلمة سر فاضية.
+  if (value.length === 0) return false;
 
   if (value.startsWith(`${PBKDF2_PREFIX}$`)) {
     const parts = value.split('$');

@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
+import { summarizeReturns, returnsInPeriod } from '../utils/returns';
 import { formatCurrency, formatDate as formatIntlDate } from '../utils/format';
 import { usePagination } from '../hooks/usePagination';
 import PaginationBar from './PaginationBar';
@@ -31,7 +32,7 @@ interface FinanceProps {
     description: string,
     safeId: string
   ) => void;
-  onDeleteTransaction: (id: string) => void;
+  onDeleteTransaction: (id: string) => { ok: boolean; error?: string };
   onRecordWalletTransaction: (
     type: 'deposit' | 'withdrawal',
     amount: number,
@@ -181,8 +182,12 @@ export default function Finance({
     // Sales revenue & profit
     const startDate = getPeriodStart(period);
     const periodSales = sales.filter(s => new Date(s.createdAt) >= startDate);
-    const salesRevenue = periodSales.reduce((sum, s) => sum + s.total, 0);
-    const salesProfit = periodSales.reduce((sum, s) => sum + s.profit, 0);
+    const grossSalesRevenue = periodSales.reduce((sum, s) => sum + s.total, 0);
+    const grossSalesProfit = periodSales.reduce((sum, s) => sum + s.profit, 0);
+    // الفاتورة مستند ثابت: المرتجع بيتخصم هنا بتاريخه هو، مش برجعة على الفاتورة.
+    const periodReturns = summarizeReturns(returnsInPeriod(saleReturns, startDate));
+    const salesRevenue = grossSalesRevenue - periodReturns.revenueReversed;
+    const salesProfit = grossSalesProfit - periodReturns.profitReversed;
 
     // Maintenance revenue & profit
     const periodMaint = maintenance.filter(m => 
@@ -191,9 +196,8 @@ export default function Finance({
     const maintRevenue = periodMaint.reduce((sum, m) => sum + m.collectedAmount, 0);
     const maintProfit = periodMaint.reduce((sum, m) => sum + m.profit, 0);
     // Match every other stat card: respect the selected period instead of summing all-time.
-    const returnsTotal = saleReturns
-      .filter(saleReturn => new Date(saleReturn.createdAt) >= startDate)
-      .reduce((sum, saleReturn) => sum + saleReturn.refundAmount, 0);
+    const returnsTotal = periodReturns.cashRefunded;
+    const returnsValue = periodReturns.revenueReversed;
     const wasteTotal = stockWastes
       .filter(waste => new Date(waste.createdAt) >= startDate)
       .reduce((sum, waste) => sum + waste.totalCost, 0);
@@ -205,8 +209,11 @@ export default function Finance({
       income,
       expenses,
       netProfit,
+      grossSalesRevenue,
+      grossSalesProfit,
       salesRevenue,
       salesProfit,
+      returnsValue,
       maintRevenue,
       maintProfit,
       returnsTotal,
@@ -305,6 +312,8 @@ export default function Finance({
       transfer: 'تحويل',
       return: 'مرتجع',
       waste: 'هوالك',
+      maintenance_cost: 'تكلفة صيانة',
+      inventory_adjustment: 'تسوية جرد',
       capital: 'رأس مال',
       side_account: 'حساب جانبي',
       customer_payment: 'دفعة عميل',
@@ -434,8 +443,9 @@ export default function Finance({
               <ArrowDownCircle className="text-orange-600" size={20} />
             </div>
           </div>
-          <p className="text-gray-500 dark:text-gray-400 text-sm">المرتجعات</p>
+          <p className="text-gray-500 dark:text-gray-400 text-sm">المرتجعات (كاش مرتجع)</p>
           <p className="text-2xl font-bold text-orange-600 mt-1">{formatCurrency(stats.returnsTotal)}</p>
+          <p className="text-xs text-gray-400 mt-1">قيمة البضاعة المرتجعة: {formatCurrency(stats.returnsValue)}</p>
         </div>
 
         <div className="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-sm border border-gray-200 dark:border-gray-700">
@@ -532,9 +542,14 @@ export default function Finance({
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800">
-            <p className="text-sm text-gray-500 dark:text-gray-400">📈 إيرادات المبيعات</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400">📈 إيرادات المبيعات (صافي)</p>
             <p className="text-xl font-bold text-blue-600 mt-1">{formatCurrency(stats.salesRevenue)}</p>
             <p className="text-xs text-gray-400 mt-1">الربح: {formatCurrency(stats.salesProfit)}</p>
+            {stats.returnsValue > 0 && (
+              <p className="text-xs text-orange-500 mt-1">
+                إجمالي {formatCurrency(stats.grossSalesRevenue)} − مرتجعات {formatCurrency(stats.returnsValue)}
+              </p>
+            )}
           </div>
           <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-xl border border-green-200 dark:border-green-800">
             <p className="text-sm text-gray-500 dark:text-gray-400">🔧 إيرادات الصيانة</p>
@@ -612,7 +627,8 @@ export default function Finance({
                         <button
                           onClick={() => {
                             if (confirm('هل تريد حذف هذه المعاملة؟')) {
-                              onDeleteTransaction(trans.id);
+                              const result = onDeleteTransaction(trans.id);
+                              if (!result.ok) alert(result.error || 'تعذر حذف المعاملة');
                             }
                           }}
                           className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"

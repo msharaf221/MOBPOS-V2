@@ -93,6 +93,10 @@ export interface Sale {
 }
 
 // Sale Return Types
+//
+// المرتجع مستند مستقل بذاته: الفاتورة الأصلية **مابتتعدلش** بعد ما تتسجّل
+// (كانت بتتعدل بأثر رجعي فأي تقرير قديم مابقاش مطابق للنظام). عشان كده
+// المرتجع بيحمل أثره المالي كامل جوّه، والتقارير بتطرحه في **تاريخ المرتجع**.
 export interface SaleReturn {
   id: string;
   saleId: string;
@@ -100,10 +104,25 @@ export interface SaleReturn {
   inventoryId: string;
   imeiUnitId?: string;
   quantity: number;
+  /** الكاش اللي رجع للعميل فعلاً من الخزنة. */
   refundAmount: number;
   reason: string;
   createdAt: string;
   processedBy: string;
+  /**
+   * قيمة البضاعة المرتجعة بعد نصيبها من خصم الفاتورة = الإيراد اللي اتلغى.
+   * (`refundAmount` كاش + `debtForgiven` دين متشال).
+   *
+   * غير موجود في المرتجعات القديمة اللي اتسجلت قبل الإصلاح — ووقتها كانت
+   * الفاتورة نفسها بتتخصم، فالتقارير بتعتبره صفر عشان ماينخصمش مرتين.
+   */
+  netValue?: number;
+  /** الجزء اللي اتشال من دين العميل بدل ما يرجع كاش. */
+  debtForgiven?: number;
+  /** تكلفة الشراء للقطع المرتجعة (رجعت للمخزون). */
+  costValue?: number;
+  /** الربح اللي اتلغى بالمرتجع = netValue − costValue. */
+  profitImpact?: number;
 }
 
 // Maintenance Types
@@ -153,7 +172,14 @@ export interface Safe {
 // Transaction Types
 export interface Transaction {
   id: string;
-  type: 'sale' | 'purchase' | 'maintenance' | 'expense' | 'income' | 'transfer' | 'return' | 'waste' | 'customer_payment' | 'wallet_deposit' | 'wallet_withdrawal' | 'capital' | 'side_account';
+  /**
+   * أنواع الحركات.
+   *
+   * ملاحظة: `waste` و`maintenance_cost` و`inventory_adjustment` هي **قيود دفترية**
+   * (`safeId: ''`) — مافيش كاش بيتحرك، لكن من غيرها التقارير بتبان أرباحها أعلى
+   * من الحقيقة لأن تكلفة البضاعة الخارجة مش متسجلة في أي مكان.
+   */
+  type: 'sale' | 'purchase' | 'maintenance' | 'maintenance_cost' | 'expense' | 'income' | 'transfer' | 'return' | 'waste' | 'inventory_adjustment' | 'customer_payment' | 'wallet_deposit' | 'wallet_withdrawal' | 'capital' | 'side_account';
   amount: number;
   description: string;
   referenceId: string;
@@ -246,6 +272,8 @@ export interface PurchaseItem {
   quantity: number;
   unitCost: number;
   total: number;
+  /** معرّفات وحدات IMEI اللي اتولدت من البند ده (للمنتجات اللي بسيريال) */
+  imeiUnitIds?: string[];
 }
 
 export interface Purchase {
@@ -256,8 +284,10 @@ export interface Purchase {
   total: number;
   paid: number;
   remaining: number;
+  /** الخزنة اللي اتدفع منها المبلغ المدفوع ('' لو الفاتورة آجل بالكامل) */
   safeId: string;
   userId: string;
+  notes: string;
   createdAt: string;
 }
 
@@ -317,4 +347,10 @@ export interface AppSettings {
   accentColor?: string;
   /** Overall visual theme style, on top of light/dark mode */
   themeStyle?: 'default' | 'midnightGold';
+  /**
+   * إظهار أسعار قطع الغيار في إيصال الصيانة الخاص بالعميل.
+   * افتراضياً `false` — أسعار القطع دي تكلفة المحل (سر تجاري)، وإظهارها
+   * بيخلي العميل يقدر يحسب المصنعية بالطرح من الإجمالي.
+   */
+  maintenanceReceiptShowPartPrices?: boolean;
 }

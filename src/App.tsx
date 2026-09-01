@@ -20,12 +20,13 @@ import SideAccounts from './components/SideAccounts';
 import Sales from './components/Sales';
 import Safes from './components/Safes';
 import Suppliers from './components/Suppliers';
+import Purchases from './components/Purchases';
 import Users from './components/Users';
 import Finance from './components/Finance';
 import Settings from './components/Settings';
 import ReportPreview from './components/ReportPreview';
 
-type PageType = 'dashboard' | 'pos' | 'inventory' | 'inventoryAudit' | 'imei' | 'maintenance' | 'customers' | 'sales' | 'safes' | 'finance' | 'sideAccounts' | 'suppliers' | 'users' | 'settings';
+type PageType = 'dashboard' | 'pos' | 'inventory' | 'inventoryAudit' | 'imei' | 'maintenance' | 'customers' | 'sales' | 'safes' | 'finance' | 'sideAccounts' | 'suppliers' | 'purchases' | 'users' | 'settings';
 type AppScreen = 'license' | 'expired' | 'device' | 'app';
 
 export default function App() {
@@ -440,6 +441,19 @@ export default function App() {
           <Suppliers
             suppliers={store.suppliers}
             onUpdate={store.updateSuppliers}
+          />
+        );
+      case 'purchases':
+        return (
+          <Purchases
+            purchases={store.purchases}
+            suppliers={store.suppliers}
+            inventory={store.inventory}
+            safes={store.safes}
+            users={store.users}
+            shopName={store.appSettings.shopName || license?.shopName || 'MOBPOS'}
+            onCreatePurchase={store.createPurchase}
+            onPaySupplier={store.recordSupplierPayment}
           />
         );
       case 'users':

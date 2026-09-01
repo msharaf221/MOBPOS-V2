@@ -50,7 +50,7 @@ export interface PlanFeatures {
   price: string;
 }
 
-const FULL_MODULES = ['dashboard', 'pos', 'inventory', 'inventoryAudit', 'imei', 'maintenance', 'customers', 'sales', 'safes', 'finance', 'sideAccounts', 'suppliers', 'users', 'settings'];
+const FULL_MODULES = ['dashboard', 'pos', 'inventory', 'inventoryAudit', 'imei', 'maintenance', 'customers', 'sales', 'safes', 'finance', 'sideAccounts', 'suppliers', 'purchases', 'users', 'settings'];
 
 export const PLAN_FEATURES: Record<PlanType, PlanFeatures> = {
   basic: {

@@ -7,6 +7,7 @@ import { Search, Eye, Printer, X, Filter, RotateCcw, FileSpreadsheet } from 'luc
 import { Sale, SaleReturn, Customer, InventoryItem, IMEIUnit, User } from '../types';
 import { downloadExcel, fmtDate } from '../utils/reports';
 import { printReceipt } from '../utils/print';
+import { returnedQuantityOf, saleNetTotals } from '../utils/returns';
 
 interface SalesProps {
   sales: Sale[];
@@ -92,11 +93,21 @@ export default function Sales({ sales, saleReturns, customers, inventory, imeiUn
   const totalRevenue = filteredSales.reduce((sum, s) => sum + s.total, 0);
   const totalProfit = filteredSales.reduce((sum, s) => sum + s.profit, 0);
 
-  const getReturnedQuantity = (saleId: string, saleItemId: string) => {
-    return saleReturns
-      .filter(returnRecord => returnRecord.saleId === saleId && returnRecord.saleItemId === saleItemId)
-      .reduce((sum, returnRecord) => sum + returnRecord.quantity, 0);
-  };
+  // سجلات المرتجعات هي مصدر الحقيقة للكمية المرتجعة — الفاتورة مابتتعدلش بعد
+  // إصدارها، و`item.returnedQuantity` بقى مجرد أثر تاريخي للسجلات القديمة.
+  const getReturnedQuantity = (saleId: string, saleItem: Sale['items'][number]) =>
+    returnedQuantityOf(saleReturns, saleId, saleItem.id, saleItem.returnedQuantity || 0);
+
+  const getReturnableQuantity = (saleId: string, saleItem: Sale['items'][number]) =>
+    Math.max(0, saleItem.quantity - getReturnedQuantity(saleId, saleItem));
+
+  /** أرقام الفاتورة المفتوحة بعد طرح مرتجعاتها (الفاتورة نفسها ثابتة). */
+  const selectedSaleNet = useMemo(
+    () => selectedSale
+      ? saleNetTotals(selectedSale, saleReturns)
+      : { returnedValue: 0, netTotal: 0, netProfit: 0, netRemaining: 0, cashRefunded: 0, hasReturns: false },
+    [selectedSale, saleReturns]
+  );
 
   const openReturnModal = (saleItem: Sale['items'][number]) => {
     if (!selectedSale) return;
@@ -109,7 +120,7 @@ export default function Sales({ sales, saleReturns, customers, inventory, imeiUn
   const handleProcessReturn = () => {
     if (!selectedSale || !selectedSaleItem) return;
 
-    const remaining = selectedSaleItem.quantity - (selectedSaleItem.returnedQuantity || 0);
+    const remaining = getReturnableQuantity(selectedSale.id, selectedSaleItem);
     if (returnQuantity <= 0 || returnQuantity > remaining) {
       alert('الكمية غير صحيحة');
       return;
@@ -340,8 +351,8 @@ export default function Sales({ sales, saleReturns, customers, inventory, imeiUn
                   {selectedSale.items.map(item => {
                     const product = inventory.find(i => i.id === item.inventoryId);
                     const imei = item.imeiUnitId ? imeiUnits.find(u => u.id === item.imeiUnitId) : null;
-                    const returnedQuantity = getReturnedQuantity(selectedSale.id, item.id) || item.returnedQuantity || 0;
-                    const returnableQuantity = item.quantity - returnedQuantity;
+                    const returnedQuantity = getReturnedQuantity(selectedSale.id, item);
+                    const returnableQuantity = Math.max(0, item.quantity - returnedQuantity);
                     
                     return (
                       <div key={item.id} className="flex items-center justify-between gap-4 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
@@ -397,9 +408,33 @@ export default function Sales({ sales, saleReturns, customers, inventory, imeiUn
                   <span>الإجمالي:</span>
                   <span className="text-blue-600">{formatCurrency(selectedSale.total)}</span>
                 </div>
+                {selectedSaleNet.hasReturns && (
+                  <>
+                    <div className="flex justify-between text-orange-600">
+                      <span>مرتجعات:</span>
+                      <span>- {formatCurrency(selectedSaleNet.returnedValue)}</span>
+                    </div>
+                    <div className="flex justify-between text-lg font-bold text-gray-800 dark:text-white">
+                      <span>الصافي بعد المرتجعات:</span>
+                      <span className="text-blue-600">{formatCurrency(selectedSaleNet.netTotal)}</span>
+                    </div>
+                    {selectedSaleNet.cashRefunded > 0 && (
+                      <div className="flex justify-between text-sm text-gray-500 dark:text-gray-400">
+                        <span>مبلغ مرتجع للعميل:</span>
+                        <span>{formatCurrency(selectedSaleNet.cashRefunded)}</span>
+                      </div>
+                    )}
+                    {selectedSaleNet.netRemaining > 0 && (
+                      <div className="flex justify-between text-red-600 dark:text-red-400 font-medium">
+                        <span>المتبقي على العميل:</span>
+                        <span>{formatCurrency(selectedSaleNet.netRemaining)}</span>
+                      </div>
+                    )}
+                  </>
+                )}
                 <div className="flex justify-between text-green-600 font-medium no-print">
                   <span>الربح:</span>
-                  <span>{formatCurrency(selectedSale.profit)}</span>
+                  <span>{formatCurrency(selectedSaleNet.netProfit)}</span>
                 </div>
               </div>
             </div>
@@ -473,6 +508,18 @@ export default function Sales({ sales, saleReturns, customers, inventory, imeiUn
                   <span className="text-gray-800 dark:text-white">الإجمالي:</span>
                   <span className="text-gray-800 dark:text-white">{formatCurrency(selectedSale.total)}</span>
                 </div>
+                {selectedSaleNet.hasReturns && (
+                  <>
+                    <div className="flex justify-between text-sm mb-2">
+                      <span className="text-gray-600 dark:text-gray-400">مرتجعات:</span>
+                      <span className="text-gray-800 dark:text-white">- {formatCurrency(selectedSaleNet.returnedValue)}</span>
+                    </div>
+                    <div className="flex justify-between font-bold text-lg mb-4">
+                      <span className="text-gray-800 dark:text-white">الصافي:</span>
+                      <span className="text-gray-800 dark:text-white">{formatCurrency(selectedSaleNet.netTotal)}</span>
+                    </div>
+                  </>
+                )}
                 <div className="flex justify-between text-sm mb-2">
                   <span className="text-gray-600 dark:text-gray-400">طريقة الدفع:</span>
                   <span className="text-gray-800 dark:text-white">
@@ -488,7 +535,7 @@ export default function Sales({ sales, saleReturns, customers, inventory, imeiUn
                     </div>
                     <div className="flex justify-between text-sm mb-2">
                       <span className="text-red-600 dark:text-red-400">المتبقي:</span>
-                      <span className="text-red-600 dark:text-red-400 font-bold">{formatCurrency(selectedSale.remaining || 0)}</span>
+                      <span className="text-red-600 dark:text-red-400 font-bold">{formatCurrency(selectedSaleNet.netRemaining)}</span>
                     </div>
                   </>
                 )}
@@ -528,7 +575,7 @@ export default function Sales({ sales, saleReturns, customers, inventory, imeiUn
               <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-3">
                 <p className="font-medium text-gray-800 dark:text-white">{inventory.find(i => i.id === selectedSaleItem.inventoryId)?.name}</p>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
-                  يمكن إرجاع {selectedSaleItem.quantity - (selectedSaleItem.returnedQuantity || 0)} قطعة متبقية
+                  يمكن إرجاع {selectedSale ? getReturnableQuantity(selectedSale.id, selectedSaleItem) : 0} قطعة متبقية
                 </p>
               </div>
 
@@ -537,7 +584,7 @@ export default function Sales({ sales, saleReturns, customers, inventory, imeiUn
                 <input
                   type="number"
                   min={1}
-                  max={selectedSaleItem.quantity - (selectedSaleItem.returnedQuantity || 0)}
+                  max={selectedSale ? getReturnableQuantity(selectedSale.id, selectedSaleItem) : 1}
                   value={returnQuantity}
                   onChange={e => setReturnQuantity(Number(e.target.value))}
                   className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white"

@@ -273,7 +273,7 @@ export const fmtDate = (iso: string): string => {
 
 export interface DailyCloseInput {
   sales: { invoiceNumber: string; total: number; profit: number; paid: number; paymentMethod: string; createdAt: string }[];
-  saleReturns: { refundAmount: number; reason: string; createdAt: string }[];
+  saleReturns: { refundAmount: number; netValue?: number; reason: string; createdAt: string }[];
   transactions: { type: string; amount: number; description: string; createdAt: string }[];
   safes: { name: string; balance: number }[];
   dateStr?: string; // YYYY-MM-DD local; defaults to today
@@ -297,7 +297,10 @@ export function buildDailyCloseReport(input: DailyCloseInput): ReportSection[] {
   const profit = sales.reduce((s, x) => s + x.profit, 0);
   const collected = sales.reduce((s, x) => s + x.paid, 0);
   const credit = revenue - collected;
+  // كاش خرج للعميل + قيمة البضاعة اللي رجعت (السجلات القديمة مالهاش قيمة صافية).
   const returnsTotal = returns.reduce((s, x) => s + x.refundAmount, 0);
+  const returnsValue = returns.reduce((s, x) => s + (typeof x.netValue === 'number' ? x.netValue : 0), 0);
+  const netRevenue = revenue - returnsValue;
 
   const sum = (type: string) =>
     tx.filter(t => t.type === type).reduce((s, t) => s + t.amount, 0);
@@ -306,6 +309,13 @@ export function buildDailyCloseReport(input: DailyCloseInput): ReportSection[] {
   const income = sum('income');
   const customerPayments = sum('customer_payment');
   const maintenanceIncome = sum('maintenance');
+  // المشتريات وسداد الموردين كانت غايبة تمامًا من تقفيل اليوم، فالصافي كان
+  // بيطلع أعلى من الفلوس اللي في الدرج فعلاً.
+  const purchases = -sum('purchase');
+  // قيود دفترية (مش كاش) — للعلم بس، مش داخلة في صافي حركة الكاش.
+  const maintenancePartsCost = -sum('maintenance_cost');
+  const wasteCost = -sum('waste');
+  const inventoryAdjustment = sum('inventory_adjustment');
 
   return [
     {
@@ -314,18 +324,23 @@ export function buildDailyCloseReport(input: DailyCloseInput): ReportSection[] {
       rows: [
         ['عدد فواتير البيع', sales.length],
         ['إجمالي المبيعات', fmtNum(revenue)],
+        ['صافي المبيعات بعد المرتجعات', fmtNum(netRevenue)],
         ['المحصّل نقدياً من المبيعات', fmtNum(collected)],
         ['بيع آجل (متبقي على العملاء)', fmtNum(credit)],
         ['ربح المبيعات', fmtNum(profit)],
         ['مرتجعات (عدد / قيمة)', `${returns.length} / ${fmtNum(returnsTotal)}`],
+        ['مشتريات وسداد موردين', fmtNum(purchases)],
         ['مصروفات', fmtNum(expenses)],
         ['إيرادات أخرى', fmtNum(income)],
         ['دفعات من العملاء', fmtNum(customerPayments)],
         ['إيراد الصيانة المسلّمة', fmtNum(maintenanceIncome)],
+        ['تكلفة قطع الصيانة (قيد دفتري)', fmtNum(maintenancePartsCost)],
+        ['هالك (قيد دفتري)', fmtNum(wasteCost)],
+        ['تسوية جرد (قيد دفتري)', fmtNum(inventoryAdjustment)],
       ],
       footer: [
         'صافي حركة اليوم',
-        fmtNum(collected + income + customerPayments + maintenanceIncome - expenses - returnsTotal),
+        fmtNum(collected + income + customerPayments + maintenanceIncome - expenses - returnsTotal - purchases),
       ],
     },
     {

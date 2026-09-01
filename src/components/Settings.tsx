@@ -59,10 +59,12 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
   const [activeTab, setActiveTab] = useState<'general' | 'license' | 'appearance' | 'security' | 'data' | 'about'>('general');
   const [shopName, setShopName] = useState(settings.shopName);
   const [currency, setCurrency] = useState(localStorage.getItem("app_currency") || "EGP");
+  const [currencyDecimals, setCurrencyDecimals] = useState(localStorage.getItem("app_currency_decimals") || "auto");
   const [shopPhone, setShopPhone] = useState(settings.shopPhone);
   const [shopAddress, setShopAddress] = useState(settings.shopAddress);
   const [receiptFooter, setReceiptFooter] = useState(settings.receiptFooter);
   const [notifSound, setNotifSound] = useState(settings.notifSound);
+  const [showPartPrices, setShowPartPrices] = useState(settings.maintenanceReceiptShowPartPrices === true);
   const [autoRefresh, setAutoRefresh] = useState(settings.autoRefresh);
   const [shopLogo, setShopLogo] = useState<string | undefined>(settings.shopLogo);
   const [accentColor, setAccentColor] = useState<string>(settings.accentColor || '#3b82f6');
@@ -293,6 +295,7 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
     setShopAddress(settings.shopAddress);
     setReceiptFooter(settings.receiptFooter);
     setNotifSound(settings.notifSound);
+    setShowPartPrices(settings.maintenanceReceiptShowPartPrices === true);
     setAutoRefresh(settings.autoRefresh);
     setShopLogo(settings.shopLogo);
     setAccentColor(settings.accentColor || '#3b82f6');
@@ -324,11 +327,12 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
       shopLogo,
       accentColor,
       themeStyle,
+      maintenanceReceiptShowPartPrices: showPartPrices,
       ...overrides,
     };
     onSaveSettings(updated);
     window.dispatchEvent(new CustomEvent(BRANDING_UPDATED_EVENT, { detail: updated }));
-  }, [shopName, shopPhone, shopAddress, receiptFooter, notifSound, autoRefresh, shopLogo, accentColor, themeStyle, onSaveSettings]);
+  }, [shopName, shopPhone, shopAddress, receiptFooter, notifSound, autoRefresh, shopLogo, accentColor, themeStyle, showPartPrices, onSaveSettings]);
 
   const handleLogoFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files && e.target.files[0];
@@ -372,7 +376,9 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
     
     // Save currency to localStorage
     const oldCurr = localStorage.getItem('app_currency');
+    const oldDecimals = localStorage.getItem('app_currency_decimals') || 'auto';
     localStorage.setItem('app_currency', currency);
+    localStorage.setItem('app_currency_decimals', currencyDecimals);
     
     // Always force Arabic
     localStorage.setItem('app_language', 'ar');
@@ -384,7 +390,7 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
         localStorage.setItem('app_locale', 'ar-EG');
     }
     
-    if (oldCurr !== currency) {
+    if (oldCurr !== currency || oldDecimals !== currencyDecimals) {
       window.location.reload();
     } else {
       showSaved();
@@ -525,6 +531,24 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                     rows={2}
                     className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
                   />
+                </div>
+
+                {/* خصوصية إيصال الصيانة: أسعار قطع الغيار = تكلفة المحل */}
+                <div className="mt-5 flex items-start justify-between gap-4 p-4 rounded-xl bg-gray-50 dark:bg-gray-700/40">
+                  <div>
+                    <p className="font-medium text-gray-800 dark:text-white">إظهار أسعار قطع الغيار في إيصال الصيانة</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      مقفول افتراضياً — الأسعار دي تكلفة الشراء بتاعتك، ولو ظهرت للعميل هيقدر يطرحها من الإجمالي ويعرف المصنعية.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { const next = !showPartPrices; setShowPartPrices(next); persistBranding({ maintenanceReceiptShowPartPrices: next }); showSaved(); }}
+                    className={`shrink-0 w-14 h-8 rounded-full transition relative ${showPartPrices ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'}`}
+                    aria-pressed={showPartPrices}
+                  >
+                    <span className={`absolute top-1 w-6 h-6 bg-white rounded-full transition-all ${showPartPrices ? 'right-1' : 'right-7'}`} />
+                  </button>
                 </div>
               </div>
 
@@ -802,6 +826,22 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                       <option value="AED">درهم إماراتي (AED)</option>
                       <option value="USD">دولار أمريكي (USD)</option>
                     </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">عرض القروش</label>
+                    <select
+                      value={currencyDecimals}
+                      onChange={(e) => setCurrencyDecimals(e.target.value)}
+                      className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-800 dark:text-white"
+                    >
+                      <option value="auto">تلقائي (تظهر لما تكون موجودة)</option>
+                      <option value="on">دايمًا منزلتين (0.00)</option>
+                      <option value="off">تقريب لأقرب جنيه</option>
+                    </select>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1.5">
+                      التقريب لأقرب جنيه بيخلّي مجموع السطور مختلف عن الإجمالي المعروض.
+                    </p>
                   </div>
                 </div>
               </div>

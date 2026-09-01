@@ -246,6 +246,8 @@ const LEGACY_KEY_ALIASES: Record<string, string> = {
   transactions: 'transactions',
   vendors: 'suppliers',
   suppliers: 'suppliers',
+  purchases: 'purchases',
+  purchaseinvoices: 'purchases',
   wastes: 'stockWastes',
   damages: 'stockWastes',
   stockwastes: 'stockWastes',

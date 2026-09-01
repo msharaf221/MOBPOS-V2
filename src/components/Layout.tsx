@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Package, Users, Wrench, ShoppingCart,
   Wallet, Settings, LogOut, Menu, Bell, Moon, Sun,
   ChevronLeft, Smartphone, Tags, Truck, UserCog, BarChart3,
-  Lock, Crown, ClipboardCheck, BookOpenText,
+  Lock, Crown, ClipboardCheck, BookOpenText, ShoppingBag,
   CheckCheck, Trash2, X, BellOff, CalendarClock, Banknote, Info, PackageX
 } from 'lucide-react';
 import { User, Notification, NotificationType, AppSettings } from '../types';
@@ -49,6 +49,7 @@ const menuItems = [
   { id: 'finance', label: 'المالية', icon: BarChart3 },
   { id: 'sideAccounts', label: 'الحسابات الجانبية', icon: BookOpenText },
   { id: 'suppliers', label: 'الموردين', icon: Truck },
+  { id: 'purchases', label: 'المشتريات', icon: ShoppingBag },
   { id: 'users', label: 'الموظفين', icon: UserCog },
   { id: 'settings', label: 'الإعدادات', icon: Settings },
 ];
@@ -216,7 +217,7 @@ export default function Layout({
               
               // Check role permissions
               const staffOnly = ['dashboard', 'pos', 'maintenance', 'customers'];
-              const managerOnly = [...staffOnly, 'inventory', 'inventoryAudit', 'imei', 'sales', 'safes', 'finance', 'sideAccounts', 'suppliers'];
+              const managerOnly = [...staffOnly, 'inventory', 'inventoryAudit', 'imei', 'sales', 'safes', 'finance', 'sideAccounts', 'suppliers', 'purchases'];
               
               if (currentUser.role === 'staff' && !staffOnly.includes(item.id)) return null;
               if (currentUser.role === 'manager' && !managerOnly.includes(item.id)) return null;

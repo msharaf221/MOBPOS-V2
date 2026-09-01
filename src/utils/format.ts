@@ -37,6 +37,27 @@ export function getAppCurrency(): string {
   return storedSetting('app_currency', 'EGP');
 }
 
+/**
+ * عرض القروش/الهللات.
+ *   • `auto` (الافتراضي): يعرض الكسور **لما تكون موجودة بس** — 250 تفضل «٢٥٠ ج.م.»
+ *     و250.75 تبان «٢٥٠٫٧٥ ج.م.». قبل كده كان التقريب لأقرب جنيه بيخفي القروش
+ *     ويخلّي مجموع السطور مش مطابق للإجمالي على الشاشة.
+ *   • `off`: تقريب لأقرب وحدة (السلوك القديم).
+ *   • `on`: منزلتين دايمًا.
+ */
+export type CurrencyDecimalsMode = 'auto' | 'on' | 'off';
+
+export function getCurrencyDecimalsMode(): CurrencyDecimalsMode {
+  const raw = storedSetting('app_currency_decimals', 'auto');
+  return raw === 'on' || raw === 'off' ? raw : 'auto';
+}
+
+function fractionDigitsFor(mode: CurrencyDecimalsMode): { minimumFractionDigits: number; maximumFractionDigits: number } {
+  if (mode === 'off') return { minimumFractionDigits: 0, maximumFractionDigits: 0 };
+  if (mode === 'on') return { minimumFractionDigits: 2, maximumFractionDigits: 2 };
+  return { minimumFractionDigits: 0, maximumFractionDigits: 2 };
+}
+
 /** الكاش محدود الحجم حتى لا يكبر بلا نهاية لو غيّرت اللغة/العملة مرات كثيرة. */
 function remember<K, V>(cache: Map<K, V>, key: K, value: V): V {
   if (cache.size >= MAX_CACHED_FORMATTERS) cache.clear();
@@ -47,16 +68,17 @@ function remember<K, V>(cache: Map<K, V>, key: K, value: V): V {
 const safeValue = (value: number | undefined | null): number =>
   typeof value === 'number' && Number.isFinite(value) ? value : 0;
 
-/** تنسيق المبالغ بنفس ما كانت عليه الصفحات: ج.م. بصفر كسور عشرية. */
+/** تنسيق المبالغ بالعملة المختارة، مع احترام إعداد عرض القروش. */
 export function formatCurrency(value: number | undefined | null): string {
   const locale = getAppLocale();
   const currency = getAppCurrency();
-  const key = `${locale}|${currency}`;
+  const mode = getCurrencyDecimalsMode();
+  const key = `${locale}|${currency}|${mode}`;
   const cached = currencyCache.get(key);
   const formatter = cached ?? remember(
     currencyCache,
     key,
-    new Intl.NumberFormat(locale, { style: 'currency', currency, maximumFractionDigits: 0 })
+    new Intl.NumberFormat(locale, { style: 'currency', currency, ...fractionDigitsFor(mode) })
   );
   return formatter.format(safeValue(value));
 }

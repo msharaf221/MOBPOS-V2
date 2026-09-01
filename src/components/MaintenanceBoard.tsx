@@ -4,8 +4,10 @@ import {
   Plus, Clock, Wrench, CheckCircle, Truck, X, Phone,
   Smartphone, DollarSign, Package, Printer
 } from 'lucide-react';
-import { Maintenance, MaintenancePart, InventoryItem, Safe, Customer, Category } from '../types';
+import { Maintenance, MaintenancePart, InventoryItem, Safe, Customer, Category, AppSettings } from '../types';
 import { printReceipt } from '../utils/print';
+import { useIndexedDBSetting } from '../hooks/useIndexedDB';
+import { defaultAppSettings } from '../hooks/useStore';
 
 interface MaintenanceBoardProps {
   maintenance: Maintenance[];
@@ -15,9 +17,9 @@ interface MaintenanceBoardProps {
   customers: Customer[];
   onCreateMaintenance: (data: Omit<Maintenance, 'id' | 'ticketNumber' | 'status' | 'finalCost' | 'collectedAmount' | 'parts' | 'additionalExpenses' | 'profit' | 'completedAt' | 'deliveredAt'>) => void;
   onUpdateMaintenance: (id: string, updates: Partial<Maintenance>) => void;
-  onAddPart: (maintenanceId: string, part: Omit<MaintenancePart, 'id'>) => void;
+  onAddPart: (maintenanceId: string, part: Omit<MaintenancePart, 'id'>) => MaintenancePart | null;
   onRemovePart: (maintenanceId: string, partId: string) => void;
-  onDeliverMaintenance: (id: string, collectedAmount: number, safeId: string) => void;
+  onDeliverMaintenance: (id: string, collectedAmount: number, safeId: string) => { ok: true } | { ok: false; error: string };
 }
 
 type MaintenanceStatus = 'received' | 'in_progress' | 'completed' | 'delivered';
@@ -40,12 +42,17 @@ export default function MaintenanceBoard({
   onRemovePart,
   onDeliverMaintenance
 }: MaintenanceBoardProps) {
+  // إعدادات المحل (بتتقري مباشرة زي Layout) — محتاجينها عشان نعرف
+  // هل المدير سامح بإظهار أسعار قطع الغيار في إيصال العميل ولا لأ.
+  const [appSettings] = useIndexedDBSetting<AppSettings>('shopSettings', defaultAppSettings);
+  const showPartPrices = appSettings.maintenanceReceiptShowPartPrices === true;
+
   const [showNewModal, setShowNewModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [selectedMaintenanceId, setSelectedMaintenanceId] = useState<string | null>(null);
   const [showDeliverModal, setShowDeliverModal] = useState(false);
   const [deliverAmount, setDeliverAmount] = useState(0);
-  const [deliverSafe, setDeliverSafe] = useState(safes.find(s => s.isDefault)?.id || '');
+  const [deliverSafe, setDeliverSafe] = useState(safes.find(s => s.isDefault)?.id || safes[0]?.id || '');
   const [showAddPartModal, setShowAddPartModal] = useState(false);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
 
@@ -176,13 +183,17 @@ export default function MaintenanceBoard({
         return;
       }
 
-      onAddPart(selectedMaintenance.id, {
+      const added = onAddPart(selectedMaintenance.id, {
         inventoryId: `manual-${Date.now()}`,
         name: newPart.manualName,
         quantity: newPart.quantity,
         unitCost: newPart.manualCost,
         total: newPart.manualCost * newPart.quantity
       });
+      if (!added) {
+        alert('تعذر إضافة القطعة — راجع الاسم والكمية والتكلفة');
+        return;
+      }
     } else {
       // From inventory
       if (!newPart.inventoryId) return;
@@ -195,13 +206,17 @@ export default function MaintenanceBoard({
         return;
       }
 
-      onAddPart(selectedMaintenance.id, {
+      const added = onAddPart(selectedMaintenance.id, {
         inventoryId: part.id,
         name: part.name,
         quantity: newPart.quantity,
         unitCost: part.costPrice,
         total: part.costPrice * newPart.quantity
       });
+      if (!added) {
+        alert('تعذر إضافة القطعة — الكمية غير متاحة في المخزون أو حالة التذكرة لا تسمح');
+        return;
+      }
     }
 
     setShowAddPartModal(false);
@@ -210,8 +225,16 @@ export default function MaintenanceBoard({
 
   const handleDeliver = () => {
     if (!selectedMaintenance) return;
-    
-    onDeliverMaintenance(selectedMaintenance.id, deliverAmount, deliverSafe);
+
+    // كان بيقفل المودال على طول من غير ما يبص على النتيجة: لو التذكرة مش
+    // «مكتمل» أو الخزنة مش مختارة، العملية كانت بترجع فاضية والفني يفتكر
+    // إنه سلّم وحصّل — والفلوس أصلاً مادخلتش الخزنة.
+    const result = onDeliverMaintenance(selectedMaintenance.id, deliverAmount, deliverSafe);
+    if (!result.ok) {
+      alert(result.error);
+      return;
+    }
+
     setShowDeliverModal(false);
     setShowDetailModal(false);
     setSelectedMaintenanceId(null);
@@ -549,7 +572,9 @@ export default function MaintenanceBoard({
                     );
                   })}
                 </div>
-                {selectedMaintenance.status !== 'delivered' && selectedMaintenance.status !== 'cancelled' && (
+                {/* التسليم متاح للحالة «مكتمل» فقط — الزرار كان بيظهر لأي حالة
+                    والعملية بترفض بصمت، فالتذكرة تفضل مفتوحة والفلوس ماتدخلش. */}
+                {selectedMaintenance.status === 'completed' && (
                   <button
                     onClick={() => {
                       setDeliverAmount(selectedMaintenance.collectedAmount || selectedMaintenance.estimatedCost);
@@ -560,6 +585,11 @@ export default function MaintenanceBoard({
                     <Truck size={18} />
                     تسليم وحفظ
                   </button>
+                )}
+                {(selectedMaintenance.status === 'received' || selectedMaintenance.status === 'in_progress') && (
+                  <span className="text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 px-3 py-2 rounded-lg">
+                    حوّل التذكرة لـ «مكتمل» عشان تقدر تسلّم وتحصّل
+                  </span>
                 )}
               </div>
 
@@ -940,6 +970,21 @@ export default function MaintenanceBoard({
                 </select>
               </div>
 
+              {selectedMaintenance.additionalExpenses > 0 && (
+                <div className="bg-orange-50 dark:bg-orange-900/20 p-4 rounded-lg space-y-1">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600 dark:text-gray-300">مصاريف إضافية (هتتصرف من الخزنة)</span>
+                    <span className="font-bold text-orange-600">- {formatCurrency(selectedMaintenance.additionalExpenses)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600 dark:text-gray-300">صافي الداخل للخزنة</span>
+                    <span className="font-bold text-gray-800 dark:text-white">
+                      {formatCurrency(deliverAmount - selectedMaintenance.additionalExpenses)}
+                    </span>
+                  </div>
+                </div>
+              )}
+
               <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg">
                 <p className="text-sm text-gray-500 dark:text-gray-400">الربح المتوقع</p>
                 <p className="text-xl font-bold text-green-600">
@@ -1014,11 +1059,16 @@ export default function MaintenanceBoard({
 
               {selectedMaintenance.parts.length > 0 && (
                 <div className="mb-4">
-                  <p className="text-gray-600 mb-2">قطع الغيار:</p>
+                  <p className="text-gray-600 mb-2">قطع الغيار المستخدمة:</p>
                   {selectedMaintenance.parts.map(part => (
                     <div key={part.id} className="flex justify-between text-sm">
                       <span>{part.name} × {part.quantity}</span>
-                      <span>{formatCurrency(part.total)}</span>
+                      {/*
+                        أسعار القطع دي تكلفة الشراء بتاعة المحل (سر تجاري):
+                        لو ظهرت للعميل يقدر يطرحها من الإجمالي ويعرف المصنعية.
+                        بتتعرض بس لو المدير فعّل الخيار من الإعدادات.
+                      */}
+                      {showPartPrices && <span>{formatCurrency(part.total)}</span>}
                     </div>
                   ))}
                 </div>

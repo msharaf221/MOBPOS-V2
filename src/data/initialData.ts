@@ -1,7 +1,7 @@
 import { 
   User, Customer, Category, InventoryItem, IMEIUnit, 
   Sale, SaleReturn, Maintenance, Safe, Transaction, Supplier, Notification, StockWaste,
-  InventoryAudit, SideAccountEntry
+  InventoryAudit, SideAccountEntry, Purchase
 } from '../types';
 
 // ============================================================
@@ -86,6 +86,9 @@ export const initialSideAccountEntries: SideAccountEntry[] = [];
 
 // ============ TRANSACTIONS ============
 export const initialTransactions: Transaction[] = [];
+
+// ============ PURCHASES ============
+export const initialPurchases: Purchase[] = [];
 
 // ============ NOTIFICATIONS ============
 export const initialNotifications: Notification[] = [];
