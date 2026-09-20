@@ -25,6 +25,12 @@ import Users from './components/Users';
 import Finance from './components/Finance';
 import Settings from './components/Settings';
 import ReportPreview from './components/ReportPreview';
+import { demoAppSettings, getDemoShowcaseData } from './data/demoShowcase';
+
+const isDevDemo =
+  import.meta.env.DEV &&
+  typeof window !== 'undefined' &&
+  new URLSearchParams(window.location.search).has('demo');
 
 type PageType = 'dashboard' | 'pos' | 'inventory' | 'inventoryAudit' | 'imei' | 'maintenance' | 'customers' | 'sales' | 'safes' | 'finance' | 'sideAccounts' | 'suppliers' | 'purchases' | 'users' | 'settings';
 type AppScreen = 'license' | 'expired' | 'device' | 'app';
@@ -72,6 +78,23 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      // Dev-only marketing capture: `?demo=1` skips license so we can
+      // screenshot the real UI. Never compiled into production builds.
+      if (isDevDemo) {
+        setLicense({
+          keyId: 'demo',
+          key: 'demo',
+          plan: 'lifetime',
+          shopName: 'موبايل ستور',
+          activatedAt: new Date().toISOString(),
+          expiresAt: '',
+          lifetime: true,
+          maxUsers: 8,
+          deviceId: 'demo',
+        });
+        setScreen('app');
+        return;
+      }
       const check = await verifyStoredActivation();
       if (cancelled) return;
 
@@ -133,6 +156,33 @@ export default function App() {
       clearInterval(interval);
     };
   }, [backupReady]);
+
+  // Dev-only: seed a realistic shop so marketing screenshots use the real UI.
+  useEffect(() => {
+    if (!isDevDemo || store.isLoading) return;
+    if (sessionStorage.getItem('mobpos-demo-seeded') === '1') return;
+    const data = getDemoShowcaseData();
+    store.setUsers(data.users);
+    store.setCustomers(data.customers);
+    store.setCategories(data.categories);
+    store.setInventory(data.inventory);
+    store.setImeiUnits(data.imeiUnits);
+    store.setSales(data.sales);
+    store.setSaleReturns(data.saleReturns);
+    store.setMaintenance(data.maintenance);
+    store.setSafes(data.safes);
+    store.setTransactions(data.transactions);
+    store.setSuppliers(data.suppliers);
+    store.setPurchases(data.purchases);
+    store.setStockWastes(data.stockWastes);
+    store.setInventoryAudits(data.inventoryAudits);
+    store.setSideAccountEntries(data.sideAccountEntries);
+    store.setNotifications(data.notifications);
+    store.setAppSettings(demoAppSettings);
+    store.setIsDarkMode(false);
+    store.setCurrentUser(data.users[0]);
+    sessionStorage.setItem('mobpos-demo-seeded', '1');
+  }, [store.isLoading]);
 
   // Handle license activation
   const handleLicenseActivated = (activeLicense: ActiveLicense) => {
