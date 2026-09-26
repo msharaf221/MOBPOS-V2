@@ -105,43 +105,44 @@ export function useStore() {
     const cleanUsername = rawUsername.trim().toLowerCase();
     const cleanPassword = typeof password === 'string' ? password : '';
 
-    let user = users.find(u => (u.username || '').trim().toLowerCase() === cleanUsername);
-    let ok = user ? await verifyLoginPassword(cleanPassword, user.password) : false;
+    // ======================================================
+    // إعادة هيكلة كاملة لمسار تسجيل الدخول:
+    //
+    // الجهاز الرئيسي (localhost): يتحقق محلياً من IndexedDB
+    // الجهاز الفرعي (LAN client): يتحقق دايماً من السيرفر
+    //   → يضمن إن كلمة المرور المشفّرة بالبراوزر تتحقق
+    //     بنفس الطريقة — لأن السيرفر عنده نفس الهاش
+    //     ويعمل التحقق بـ Node crypto اللي ينتج نفس النتيجة.
+    // ======================================================
 
-    // لو المستخدمين فاضيين تماماً (لسه ما اتزامنوش من السيرفر)، روح للسيرفر مباشرة
-    // لكن لو عندنا مستخدمين محلياً وكلمة المرور غلط، مفيش داعي لسؤال السيرفر
-    if (!ok && typeof window !== 'undefined' && users.length === 0) {
+    const isClient = typeof window !== 'undefined' &&
+      window.location.hostname !== 'localhost' &&
+      window.location.hostname !== '127.0.0.1';
+
+    let user: User | null = null;
+    let ok = false;
+
+    if (isClient) {
+      // ── مسار الجهاز الفرعي: السيرفر هو المرجع الوحيد للـ auth ──
       try {
         const lanAuth = await authenticateLanUser(cleanUsername, cleanPassword);
         if (lanAuth.ok && lanAuth.user) {
-          user = lanAuth.user;
+          user = lanAuth.user as User;
           ok = true;
-          // تحديث قائمة المستخدمين محلياً بالبيانات الحية من السيرفر
+          // تحديث المستخدمين المحليين بقائمة السيرفر الحية
           if (Array.isArray(lanAuth.users) && lanAuth.users.length > 0) {
-            setUsers(lanAuth.users);
-          } else if (user) {
-            setUsers(prev => {
-              const exists = prev.some(u => u.id === user!.id);
-              return exists ? prev.map(u => u.id === user!.id ? user! : u) : [...prev, user!];
-            });
+            setUsers(lanAuth.users as User[]);
           }
         }
       } catch {
-        // الاستمرار لمسار الفشل
+        // شبكة منقطعة — سيفشل الدخول بعدما
       }
-    } else if (!ok && typeof window !== 'undefined' && !user && users.length > 0) {
-      // المستخدم مش موجود محلياً بس عندنا قائمة — جرب السيرفر كـ fallback
-      try {
-        const lanAuth = await authenticateLanUser(cleanUsername, cleanPassword);
-        if (lanAuth.ok && lanAuth.user) {
-          user = lanAuth.user;
-          ok = true;
-          if (Array.isArray(lanAuth.users) && lanAuth.users.length > 0) {
-            setUsers(lanAuth.users);
-          }
-        }
-      } catch {
-        // الاستمرار لمسار الفشل
+    } else {
+      // ── مسار الجهاز الرئيسي: التحقق المحلي من IndexedDB ──
+      const found = users.find(u => (u.username || '').trim().toLowerCase() === cleanUsername);
+      if (found) {
+        ok = await verifyLoginPassword(cleanPassword, found.password);
+        if (ok) user = found;
       }
     }
 
@@ -154,14 +155,12 @@ export function useStore() {
     const isDefaultAdminPw = user.password === 'admin123';
     if (user.mustChangePassword || isDefaultAdminPw) {
       sessionUser = { ...user, mustChangePassword: true };
-    } else if (needsRehash(user.password)) {
-      // ترقية الحساب القديم (نص عادي أو تجزئة قديمة) إلى تجزئة PBKDF2 مملّحة
+    } else if (!isClient && needsRehash(user.password)) {
+      // ترقية الحساب القديم على الجهاز الرئيسي فقط
       const hash = await hashPasswordForStorage(cleanPassword);
       sessionUser = { ...user, password: hash, mustChangePassword: false };
       setUsers(prev => prev.map(u => (u.id === user!.id ? sessionUser : u)));
-      if (typeof window !== 'undefined') {
-        pushDelta('users', [sessionUser], 'upsert').catch(() => undefined);
-      }
+      pushDelta('users', [sessionUser], 'upsert').catch(() => undefined);
     }
     setCurrentUser(sessionUser);
     addAuditLog(auditEvents.authLogin(sessionUser, cleanUsername, true));
