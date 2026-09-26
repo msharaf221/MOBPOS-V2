@@ -1,5 +1,26 @@
-// @ts-nocheck
-import { useCallback, useEffect, useState } from 'react';
+import re
+
+with open("src/hooks/useStore.ts", "r", encoding="utf-8") as f:
+    original = f.read()
+
+# Grab everything up to `// Auth functions`
+header_end = original.find("  // Auth functions")
+header_code = original[:header_end]
+
+slices = [
+  "useAuthSlice", "useCustomersSlice", "useCategoriesSlice", "useInventorySlice",
+  "useIMEISlice", "useSalesSlice", "usePurchasesSlice", "useWasteSlice",
+  "useAuditsSlice", "useSideAccountsSlice", "useMaintenanceSlice", "useSafesSlice",
+  "useTransactionsSlice", "useNotificationsSlice", "useStatsSlice", "useUtilsSlice"
+]
+
+imports = "".join(f"import {{ {s} }} from './store/{s}';\n" for s in slices)
+imports += "import { StoreState } from './store/types';\n"
+
+# Replace the top imports if we want, but it's easier to just inject after `// Main store hook`
+# Let's write the whole file.
+
+content = """import { useCallback, useEffect, useState } from 'react';
 import { useIndexedDB, useIndexedDBSetting, indexedDBUtils } from './useIndexedDB';
 import { defaultAppSettings } from './store/helpers';
 import { StoreState } from './store/types';
@@ -17,23 +38,7 @@ import {
   initialSideAccountEntries, initialNotifications, initialAuditLogs
 } from '../data/initialData';
 
-import { useAuthSlice } from './store/useAuthSlice';
-import { useCustomersSlice } from './store/useCustomersSlice';
-import { useCategoriesSlice } from './store/useCategoriesSlice';
-import { useInventorySlice } from './store/useInventorySlice';
-import { useIMEISlice } from './store/useIMEISlice';
-import { useSalesSlice } from './store/useSalesSlice';
-import { usePurchasesSlice } from './store/usePurchasesSlice';
-import { useWasteSlice } from './store/useWasteSlice';
-import { useAuditsSlice } from './store/useAuditsSlice';
-import { useSideAccountsSlice } from './store/useSideAccountsSlice';
-import { useMaintenanceSlice } from './store/useMaintenanceSlice';
-import { useSafesSlice } from './store/useSafesSlice';
-import { useTransactionsSlice } from './store/useTransactionsSlice';
-import { useNotificationsSlice } from './store/useNotificationsSlice';
-import { useStatsSlice } from './store/useStatsSlice';
-import { useUtilsSlice } from './store/useUtilsSlice';
-
+""" + "".join(f"import {{ {s} }} from './store/{s}';\n" for s in slices) + """
 
 export { defaultAppSettings } from './store/helpers';
 
@@ -140,3 +145,9 @@ export function useStore() {
     auditLogsLoading
   };
 }
+"""
+
+with open("src/hooks/useStore.ts", "w", encoding="utf-8") as f:
+    f.write(content)
+
+print("Generated new useStore.ts")

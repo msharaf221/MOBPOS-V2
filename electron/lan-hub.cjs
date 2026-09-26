@@ -310,11 +310,31 @@ async function handleLanRequest(req, res, currentPort = 8420) {
         } else if (deltaType === 'delete') {
           const deleteIds = new Set(items.map((it) => it.id));
           centralStore[storeName] = centralStore[storeName].filter((it) => !deleteIds.has(it.id));
-        } else {
-          // Upsert / Merge
+        } else if (deltaType === 'increment') {
           const itemMap = new Map(centralStore[storeName].map((it) => [it.id, it]));
           for (const it of items) {
-            itemMap.set(it.id, it);
+            const existing = itemMap.get(it.id);
+            if (existing) {
+              const updated = { ...existing };
+              for (const [key, value] of Object.entries(it)) {
+                if (key !== 'id' && typeof value === 'number') {
+                  updated[key] = (updated[key] || 0) + value;
+                }
+              }
+              itemMap.set(it.id, updated);
+            }
+          }
+          centralStore[storeName] = Array.from(itemMap.values());
+        } else {
+          // Upsert / Merge (Deep merge fields)
+          const itemMap = new Map(centralStore[storeName].map((it) => [it.id, it]));
+          for (const it of items) {
+            const existing = itemMap.get(it.id);
+            if (existing) {
+              itemMap.set(it.id, { ...existing, ...it });
+            } else {
+              itemMap.set(it.id, it);
+            }
           }
           centralStore[storeName] = Array.from(itemMap.values());
         }

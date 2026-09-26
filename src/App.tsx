@@ -233,12 +233,34 @@ export default function App() {
         } else if (deltaType === 'delete') {
           const deleteIds = new Set((items as any[]).map((it) => it.id));
           setter((prev: any[]) => prev.filter((it) => !deleteIds.has(it.id)));
-        } else {
-          // Upsert
+        } else if (deltaType === 'increment') {
           setter((prev: any[]) => {
             const map = new Map(prev.map((it) => [it.id, it]));
             for (const it of items as any[]) {
-              map.set(it.id, it);
+              const existing = map.get(it.id);
+              if (existing) {
+                const updated = { ...existing };
+                for (const [key, val] of Object.entries(it)) {
+                  if (key !== 'id' && typeof val === 'number') {
+                    updated[key] = (updated[key] || 0) + val;
+                  }
+                }
+                map.set(it.id, updated);
+              }
+            }
+            return Array.from(map.values());
+          });
+        } else {
+          // Upsert (Deep merge)
+          setter((prev: any[]) => {
+            const map = new Map(prev.map((it) => [it.id, it]));
+            for (const it of items as any[]) {
+              const existing = map.get(it.id);
+              if (existing) {
+                map.set(it.id, { ...existing, ...it });
+              } else {
+                map.set(it.id, it);
+              }
             }
             return Array.from(map.values());
           });
