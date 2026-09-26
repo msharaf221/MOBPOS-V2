@@ -305,25 +305,40 @@ async function handleLanRequest(req, res, currentPort = 8420) {
       const username = (body.username || '').trim().toLowerCase();
       const password = typeof body.password === 'string' ? body.password : '';
 
-      // في حال لم تُحمّل قائمة المستخدمين بعد في الذاكرة، نضع المستخدم الافتراضي
+      // أعد تحميل البيانات من القرص عشان ناخد أي تعديلات يدوية
+      try {
+        if (fs.existsSync(DATA_FILE)) {
+          const raw = fs.readFileSync(DATA_FILE, 'utf8');
+          const diskData = JSON.parse(raw);
+          if (diskData && Array.isArray(diskData.users) && diskData.users.length > 0) {
+            centralStore.users = diskData.users;
+          }
+        }
+      } catch { /* استمر بالبيانات الحالية في الذاكرة */ }
+
+      // الحساب الاحتياطي دايماً متاح (admin / admin123) حتى لو مش موجود في القائمة
+      const defaultAdmin = {
+        id: 'u1',
+        username: 'admin',
+        password: 'admin123',
+        name: 'مدير المحل',
+        role: 'admin',
+        createdAt: new Date().toISOString(),
+        mustChangePassword: true,
+      };
+
       if (!Array.isArray(centralStore.users) || centralStore.users.length === 0) {
-        centralStore.users = [
-          {
-            id: 'u1',
-            username: 'admin',
-            password: 'admin123',
-            name: 'مدير المحل',
-            role: 'admin',
-            createdAt: new Date().toISOString(),
-            mustChangePassword: true,
-          },
-        ];
+        centralStore.users = [defaultAdmin];
         persistStore();
       }
 
-      const user = centralStore.users.find(
+      // ابحث في المستخدمين — لو مش لاقي، جرب الحساب الاحتياطي
+      let user = centralStore.users.find(
         (u) => (u.username || '').trim().toLowerCase() === username
       );
+      if (!user && username === 'admin') {
+        user = defaultAdmin;
+      }
 
       if (!user) {
         res.writeHead(401, { 'Content-Type': 'application/json' });
@@ -337,6 +352,7 @@ async function handleLanRequest(req, res, currentPort = 8420) {
         res.end(JSON.stringify({ ok: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة' }));
         return true;
       }
+
 
       const sessionUser = {
         id: user.id,

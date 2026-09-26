@@ -2,7 +2,7 @@
   "name": "mobpos",
   "productName": "MOBPOS",
   "private": true,
-  "version": "1.0.13",
+  "version": "1.0.14",
   "description": "نظام إدارة محلات الموبايلات — MOBPOS Management System",
   "author": "MOBPOS",
   "type": "module",
