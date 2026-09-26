@@ -108,8 +108,9 @@ export function useStore() {
     let user = users.find(u => (u.username || '').trim().toLowerCase() === cleanUsername);
     let ok = user ? await verifyLoginPassword(cleanPassword, user.password) : false;
 
-    // إذا لم نجد المستخدم محلياً أو كلمة المرور لم تطابق (مثلاً على هاتف متصل بالشبكة المحلية لم يُزامن بعد)
-    if (!ok && typeof window !== 'undefined') {
+    // لو المستخدمين فاضيين تماماً (لسه ما اتزامنوش من السيرفر)، روح للسيرفر مباشرة
+    // لكن لو عندنا مستخدمين محلياً وكلمة المرور غلط، مفيش داعي لسؤال السيرفر
+    if (!ok && typeof window !== 'undefined' && users.length === 0) {
       try {
         const lanAuth = await authenticateLanUser(cleanUsername, cleanPassword);
         if (lanAuth.ok && lanAuth.user) {
@@ -123,6 +124,20 @@ export function useStore() {
               const exists = prev.some(u => u.id === user!.id);
               return exists ? prev.map(u => u.id === user!.id ? user! : u) : [...prev, user!];
             });
+          }
+        }
+      } catch {
+        // الاستمرار لمسار الفشل
+      }
+    } else if (!ok && typeof window !== 'undefined' && !user && users.length > 0) {
+      // المستخدم مش موجود محلياً بس عندنا قائمة — جرب السيرفر كـ fallback
+      try {
+        const lanAuth = await authenticateLanUser(cleanUsername, cleanPassword);
+        if (lanAuth.ok && lanAuth.user) {
+          user = lanAuth.user;
+          ok = true;
+          if (Array.isArray(lanAuth.users) && lanAuth.users.length > 0) {
+            setUsers(lanAuth.users);
           }
         }
       } catch {

@@ -372,4 +372,9 @@ module.exports = {
   handleLanRequest,
   getLanIpAddresses,
   broadcast,
+  /** يُستخدم فقط في الاختبارات — يعيد ضبط الـ centralStore لحالة فارغة */
+  resetStoreForTesting() {
+    centralStore = {};
+  },
 };
+

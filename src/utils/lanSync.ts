@@ -90,15 +90,20 @@ export async function authenticateLanUser(
   username: string,
   password: string
 ): Promise<{ ok: boolean; user?: any; users?: any[]; error?: string }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5000); // 5 ثوان كحد أقصى
   try {
     const res = await fetch('/api/lan/auth', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
+      signal: controller.signal,
     });
+    clearTimeout(timer);
     const data = await res.json();
     return data;
   } catch (err: any) {
+    clearTimeout(timer);
     return { ok: false, error: err?.message || 'تعذر الاتصال بالخادم الرئيسي' };
   }
 }

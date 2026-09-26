@@ -262,10 +262,11 @@ export default function App() {
   }, [screen, store.isLoading]);
 
   // مزامنة تلقائية فورية للمستخدمين من الجهاز الرئيسي للشبكة المركزية
+  // يعمل فور ما تتحمّل قاعدة البيانات المحلية (مش بس بعد الدخول)
   useEffect(() => {
-    if (isLanClient() || store.isLoading || screen !== 'app' || !Array.isArray(store.users) || store.users.length === 0) return;
+    if (isLanClient() || store.isLoading || !Array.isArray(store.users) || store.users.length === 0) return;
     pushDelta('users', store.users, 'replace').catch(() => undefined);
-  }, [store.users, store.isLoading, screen]);
+  }, [store.users, store.isLoading]);
 
   // Apply dark mode
   useEffect(() => {

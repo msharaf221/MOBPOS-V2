@@ -62,6 +62,9 @@ test('lanHub ignores non-lan endpoints', async () => {
 });
 
 test('lanHub handleLanRequest authenticates valid admin credentials over /api/lan/auth', async () => {
+  // نظّف الـ store أولاً عشان ما نتأثرش ببيانات حقيقية مخزنة على القرص
+  lanHub.resetStoreForTesting();
+
   const { EventEmitter } = await import('events');
   const req: any = new EventEmitter();
   req.url = '/api/lan/auth';
