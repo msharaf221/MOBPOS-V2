@@ -25,14 +25,16 @@ import Users from './components/Users';
 import Finance from './components/Finance';
 import Settings from './components/Settings';
 import ReportPreview from './components/ReportPreview';
+import AuditLog from './components/AuditLog';
 import { demoAppSettings, getDemoShowcaseData } from './data/demoShowcase';
+import { isLanClient, fetchLanServerInfo, fetchCentralData, pushCentralData, connectLanStream } from './utils/lanSync';
 
 const isDevDemo =
   import.meta.env.DEV &&
   typeof window !== 'undefined' &&
   new URLSearchParams(window.location.search).has('demo');
 
-type PageType = 'dashboard' | 'pos' | 'inventory' | 'inventoryAudit' | 'imei' | 'maintenance' | 'customers' | 'sales' | 'safes' | 'finance' | 'sideAccounts' | 'suppliers' | 'purchases' | 'users' | 'settings';
+type PageType = 'dashboard' | 'pos' | 'inventory' | 'inventoryAudit' | 'imei' | 'maintenance' | 'customers' | 'sales' | 'safes' | 'finance' | 'sideAccounts' | 'suppliers' | 'purchases' | 'users' | 'settings' | 'audit';
 type AppScreen = 'license' | 'expired' | 'device' | 'app';
 
 export default function App() {
@@ -95,6 +97,31 @@ export default function App() {
         setScreen('app');
         return;
       }
+
+      // Check if this device is connecting as a LAN client (phone/tablet/PC)
+      if (isLanClient()) {
+        try {
+          const lanInfo = await fetchLanServerInfo();
+          if (lanInfo && lanInfo.status === 'online') {
+            setLicense({
+              keyId: 'lan-client',
+              key: 'lan-client',
+              plan: 'lifetime',
+              shopName: lanInfo.shopName || 'MOBPOS',
+              activatedAt: new Date().toISOString(),
+              expiresAt: '',
+              lifetime: true,
+              maxUsers: 99,
+              deviceId: 'lan-client',
+            });
+            setScreen('app');
+            return;
+          }
+        } catch {
+          // If LAN server check fails, fall through to regular activation
+        }
+      }
+
       const check = await verifyStoredActivation();
       if (cancelled) return;
 
@@ -119,6 +146,120 @@ export default function App() {
     })();
     return () => { cancelled = true; };
   }, []);
+
+  // ===== LAN DATA SYNC (HOST & CLIENTS) =====
+  useEffect(() => {
+    if (screen !== 'app' || store.isLoading) return;
+
+    let cleanupStream: (() => void) | null = null;
+
+    if (isLanClient()) {
+      // 1. Client Mode: Pull fresh central data from the host
+      fetchCentralData().then((centralData) => {
+        if (!centralData) return;
+        if (Array.isArray(centralData.users) && centralData.users.length > 0) store.setUsers(centralData.users as any);
+        if (Array.isArray(centralData.customers)) store.setCustomers(centralData.customers as any);
+        if (Array.isArray(centralData.categories)) store.setCategories(centralData.categories as any);
+        if (Array.isArray(centralData.inventory)) store.setInventory(centralData.inventory as any);
+        if (Array.isArray(centralData.imeiUnits)) store.setImeiUnits(centralData.imeiUnits as any);
+        if (Array.isArray(centralData.sales)) store.setSales(centralData.sales as any);
+        if (Array.isArray(centralData.saleReturns)) store.setSaleReturns(centralData.saleReturns as any);
+        if (Array.isArray(centralData.maintenance)) store.setMaintenance(centralData.maintenance as any);
+        if (Array.isArray(centralData.safes)) store.setSafes(centralData.safes as any);
+        if (Array.isArray(centralData.transactions)) store.setTransactions(centralData.transactions as any);
+        if (Array.isArray(centralData.suppliers)) store.setSuppliers(centralData.suppliers as any);
+        if (Array.isArray(centralData.purchases)) store.setPurchases(centralData.purchases as any);
+        if (Array.isArray(centralData.stockWastes)) store.setStockWastes(centralData.stockWastes as any);
+        if (Array.isArray(centralData.inventoryAudits)) store.setInventoryAudits(centralData.inventoryAudits as any);
+        if (Array.isArray(centralData.sideAccountEntries)) store.setSideAccountEntries(centralData.sideAccountEntries as any);
+        if (Array.isArray(centralData.notifications)) store.setNotifications(centralData.notifications as any);
+        if (Array.isArray(centralData.auditLogs)) store.setAuditLogs(centralData.auditLogs as any);
+        if (centralData.appSettings && typeof centralData.appSettings === 'object') {
+          store.setAppSettings(centralData.appSettings as any);
+        }
+      }).catch((e) => console.warn('[App] fetchCentralData error:', e));
+    } else {
+      // 2. Host Mode: Push current database snapshot to LAN Hub so clients receive it
+      pushCentralData({
+        users: store.users,
+        customers: store.customers,
+        categories: store.categories,
+        inventory: store.inventory,
+        imeiUnits: store.imeiUnits,
+        sales: store.sales,
+        saleReturns: store.saleReturns,
+        maintenance: store.maintenance,
+        safes: store.safes,
+        transactions: store.transactions,
+        suppliers: store.suppliers,
+        purchases: store.purchases,
+        stockWastes: store.stockWastes,
+        inventoryAudits: store.inventoryAudits,
+        sideAccountEntries: store.sideAccountEntries,
+        notifications: store.notifications,
+        auditLogs: store.auditLogs,
+        appSettings: store.appSettings,
+      }).catch((e) => console.warn('[App] pushCentralData error:', e));
+    }
+
+    // 3. Both listen to live SSE events from LAN Hub
+    cleanupStream = connectLanStream({
+      onSync: ({ storeName, items, deltaType }) => {
+        const storeSetters: Record<string, (val: any) => void> = {
+          users: store.setUsers,
+          customers: store.setCustomers,
+          categories: store.setCategories,
+          inventory: store.setInventory,
+          imeiUnits: store.setImeiUnits,
+          sales: store.setSales,
+          saleReturns: store.setSaleReturns,
+          maintenance: store.setMaintenance,
+          safes: store.setSafes,
+          transactions: store.setTransactions,
+          suppliers: store.setSuppliers,
+          purchases: store.setPurchases,
+          stockWastes: store.setStockWastes,
+          inventoryAudits: store.setInventoryAudits,
+          sideAccountEntries: store.setSideAccountEntries,
+          notifications: store.setNotifications,
+          auditLogs: store.setAuditLogs,
+        };
+
+        const setter = storeSetters[storeName];
+        if (!setter) return;
+
+        if (deltaType === 'replace') {
+          setter(items);
+        } else if (deltaType === 'delete') {
+          const deleteIds = new Set((items as any[]).map((it) => it.id));
+          setter((prev: any[]) => prev.filter((it) => !deleteIds.has(it.id)));
+        } else {
+          // Upsert
+          setter((prev: any[]) => {
+            const map = new Map(prev.map((it) => [it.id, it]));
+            for (const it of items as any[]) {
+              map.set(it.id, it);
+            }
+            return Array.from(map.values());
+          });
+        }
+      },
+      onFullDataReplaced: () => {
+        fetchCentralData().then((centralData) => {
+          if (!centralData) return;
+          if (Array.isArray(centralData.sales)) store.setSales(centralData.sales as any);
+          if (Array.isArray(centralData.inventory)) store.setInventory(centralData.inventory as any);
+          if (Array.isArray(centralData.maintenance)) store.setMaintenance(centralData.maintenance as any);
+          if (Array.isArray(centralData.safes)) store.setSafes(centralData.safes as any);
+          if (Array.isArray(centralData.auditLogs)) store.setAuditLogs(centralData.auditLogs as any);
+        }).catch((e) => console.warn('[App] onFullDataReplaced error:', e));
+      },
+    });
+
+    return () => {
+      if (cleanupStream) cleanupStream();
+    };
+  }, [screen, store.isLoading]);
 
   // Apply dark mode
   useEffect(() => {
@@ -515,6 +656,18 @@ export default function App() {
             users={store.users}
             currentUser={store.currentUser!}
             onUpdate={store.updateUsers}
+          />
+        );
+      case 'audit':
+        if (store.currentUser?.role !== 'admin') {
+          return renderAccessDenied();
+        }
+        return (
+          <AuditLog
+            auditLogs={store.auditLogs}
+            users={store.users}
+            currentUser={store.currentUser}
+            onClearLogs={store.clearAuditLogs}
           />
         );
       case 'settings':

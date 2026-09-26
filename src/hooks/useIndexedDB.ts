@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 
 const DB_NAME = 'MobileShopDB';
-const DB_VERSION = 6;
+const DB_VERSION = 7;
 
 // Store names
 const STORES = {
@@ -21,6 +21,7 @@ const STORES = {
   inventoryAudits: 'inventoryAudits',
   sideAccountEntries: 'sideAccountEntries',
   notifications: 'notifications',
+  auditLogs: 'auditLogs',
   settings: 'settings',
   backups: 'backups', // local backup snapshots (excluded from backup payloads)
 };

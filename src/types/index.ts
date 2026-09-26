@@ -353,4 +353,50 @@ export interface AppSettings {
    * بيخلي العميل يقدر يحسب المصنعية بالطرح من الإجمالي.
    */
   maintenanceReceiptShowPartPrices?: boolean;
+  /** مشاركة النظام عبر الشبكة المحلية (Wi-Fi) */
+  lanEnabled?: boolean;
+  /** رمز حماية الدخول من أجهزة الشبكة */
+  lanPin?: string;
+}
+
+// ============ AUDIT LOG TYPES ============
+export type AuditCategory =
+  | 'sales'        // مبيعات
+  | 'returns'      // مرتجعات
+  | 'maintenance'  // صيانة
+  | 'inventory'    // مخزون
+  | 'finance'      // مالية وخزن
+  | 'purchases'    // مشتريات وتوريد
+  | 'customers'    // عملاء
+  | 'suppliers'    // موردين
+  | 'users'        // مستخدمين وصلاحيات
+  | 'auth'         // دخول وخروج
+  | 'settings';    // إعدادات ونظام
+
+export type AuditSeverity = 'info' | 'success' | 'warning' | 'danger';
+
+export interface AuditLogEntry {
+  id: string;
+  timestamp: string;          // ISO Date
+  userId: string;
+  userName: string;
+  userRole: 'admin' | 'manager' | 'staff';
+  category: AuditCategory;
+  action: string;             // e.g. "فاتورة بيع" أو "حذف صنف"
+  description: string;        // نص عربي واضح وبسيط: "قام أحمد ببيع فاتورة رقم..."
+  details?: Record<string, unknown>;
+  severity: AuditSeverity;    // لتلوين الكارت (أخضر/أزرق/أصفر/أحمر)
+  entityId?: string;          // رقم الفاتورة أو التذكرة أو الصنف
+  deviceName?: string;        // "الجهاز الرئيسي" أو "هاتف محمول (Wi-Fi)"
+}
+
+// ============ LAN NETWORK TYPES ============
+export interface LanServerInfo {
+  status: 'online' | 'offline';
+  hostName: string;
+  ipAddresses: string[];
+  port: number;
+  activeClients: number;
+  shopName: string;
+  requiresPin: boolean;
 }

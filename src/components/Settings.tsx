@@ -4,12 +4,13 @@ import {
   Globe, Palette, Bell, Lock, ChevronLeft, Store,
   Printer, Download, AlertTriangle, Info, CheckCircle,
   Monitor, Smartphone, Upload, Cloud, CloudUpload, Clock,
-  History, Trash2, Loader2, KeyRound, XCircle, Crown, ImagePlus, X
+  History, Trash2, Loader2, KeyRound, XCircle, Crown, ImagePlus, X, Wifi
 } from 'lucide-react';
 import { User, AppSettings } from '../types';
 import { ActiveLicense } from '../license/types';
 import LicenseManager from './LicenseManager';
 import UpdateChecker from './UpdateChecker';
+import LANSettingsTab from './LANSettingsTab';
 
 // Curated accent color presets shown as clickable swatches in the
 // "Branding" section of the appearance tab.
@@ -56,7 +57,7 @@ interface SettingsProps {
 export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, onResetData, settings, onSaveSettings, onChangePassword, onOpenMaster, license, onLicenseUpdated, onLicenseDeactivated }: SettingsProps) {
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [activeTab, setActiveTab] = useState<'general' | 'license' | 'appearance' | 'security' | 'data' | 'about'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'lan' | 'license' | 'appearance' | 'security' | 'data' | 'about'>('general');
   const [shopName, setShopName] = useState(settings.shopName);
   const [currency, setCurrency] = useState(localStorage.getItem("app_currency") || "EGP");
   const [currencyDecimals, setCurrencyDecimals] = useState(localStorage.getItem("app_currency_decimals") || "auto");
@@ -407,6 +408,7 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
 
   const tabs = [
     { id: 'general' as const, label: 'عام', icon: Store },
+    { id: 'lan' as const, label: 'الشبكة والواي فاي', icon: Wifi },
     { id: 'license' as const, label: 'الترخيص والتحديثات', icon: KeyRound },
     { id: 'appearance' as const, label: 'المظهر', icon: Palette },
     { id: 'security' as const, label: 'الأمان', icon: Lock },
@@ -582,6 +584,11 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                 💾 حفظ الإعدادات
               </button>
             </div>
+          )}
+
+          {/* ===== TAB: LAN Network & Wi-Fi ===== */}
+          {activeTab === 'lan' && (
+            <LANSettingsTab settings={settings} onSaveSettings={onSaveSettings} />
           )}
 
           {/* ===== TAB: License & Updates ===== */}

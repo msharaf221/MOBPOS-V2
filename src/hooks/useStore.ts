@@ -7,13 +7,13 @@ import {
   Sale, SaleItem, SaleReturn, Maintenance, MaintenancePart, Safe, Transaction, Supplier, Notification,
   Purchase, PurchaseItem,
   StockWaste, InventoryAudit, InventoryAuditItem, SideAccountEntry, SideAccountEntryType,
-  SideAccountImpact, AppSettings
+  SideAccountImpact, AppSettings, AuditLogEntry
 } from '../types';
 import {
   initialUsers, initialCustomers, initialCategories, initialInventory,
   initialIMEIUnits, initialSales, initialSaleReturns, initialMaintenance, initialSafes,
   initialTransactions, initialSuppliers, initialPurchases, initialStockWastes, initialInventoryAudits,
-  initialSideAccountEntries, initialNotifications
+  initialSideAccountEntries, initialNotifications, initialAuditLogs
 } from '../data/initialData';
 import { buildAutoNotifications, mergeAutoNotifications } from '../utils/alerts';
 import { planSettlementReversal, settledThroughSafes } from '../utils/sideAccounts';
@@ -21,6 +21,7 @@ import { summarizeReturns, returnsInPeriod } from '../utils/returns';
 import { buildImeiStockIndex, isSellableUnit } from '../utils/stockCounts';
 import { formatDate } from '../utils/format';
 import { nextDocumentNumber } from '../utils/sequence';
+import { auditEvents } from '../utils/auditLogger';
 
 const MAX_TEXT_LENGTH = 2_000;
 /** نافذة تنبيه الضمان — نفس قيمة محرك التنبيهات (alerts.ts). */
@@ -63,6 +64,11 @@ export function useStore() {
   const [inventoryAudits, setInventoryAudits, inventoryAuditsLoading] = useIndexedDB<InventoryAudit>('inventoryAudits', initialInventoryAudits);
   const [sideAccountEntries, setSideAccountEntries, sideAccountEntriesLoading] = useIndexedDB<SideAccountEntry>('sideAccountEntries', initialSideAccountEntries);
   const [notifications, setNotifications, notificationsLoading] = useIndexedDB<Notification>('notifications', initialNotifications);
+  const [auditLogs, setAuditLogs, auditLogsLoading] = useIndexedDB<AuditLogEntry>('auditLogs', initialAuditLogs);
+
+  const addAuditLog = useCallback((entry: AuditLogEntry) => {
+    setAuditLogs(prev => [entry, ...prev.slice(0, 4999)]);
+  }, [setAuditLogs]);
   
   // Settings
   // ⚠️  الجلسة (المستخدم الحالي) محفوظة في الذاكرة فقط — عمداً مش مخزنة في
@@ -87,7 +93,7 @@ export function useStore() {
   const isLoading = usersLoading || customersLoading || categoriesLoading || 
     inventoryLoading || imeiLoading || salesLoading || maintenanceLoading ||
     saleReturnsLoading || safesLoading || transactionsLoading || suppliersLoading || purchasesLoading || stockWastesLoading ||
-    inventoryAuditsLoading || sideAccountEntriesLoading || notificationsLoading ||
+    inventoryAuditsLoading || sideAccountEntriesLoading || notificationsLoading || auditLogsLoading ||
     userLoading || darkModeLoading || appSettingsLoading;
 
   // Auth functions
@@ -95,9 +101,15 @@ export function useStore() {
   // للهاشات القديمة (SHA-256/نص عادي) وإجبار تغيير كلمة المرور الافتراضية.
   const login = useCallback(async (username: string, password: string): Promise<User | null> => {
     const user = users.find(u => u.username === username);
-    if (!user) return null;
+    if (!user) {
+      addAuditLog(auditEvents.authLogin(null, username, false));
+      return null;
+    }
     const ok = await verifyLoginPassword(password, user.password);
-    if (!ok) return null;
+    if (!ok) {
+      addAuditLog(auditEvents.authLogin(null, username, false));
+      return null;
+    }
 
     let sessionUser = user;
     const isDefaultAdminPw = user.password === 'admin123';
@@ -110,12 +122,16 @@ export function useStore() {
       setUsers(prev => prev.map(u => (u.id === user.id ? sessionUser : u)));
     }
     setCurrentUser(sessionUser);
+    addAuditLog(auditEvents.authLogin(sessionUser, username, true));
     return sessionUser;
-  }, [users, setUsers, setCurrentUser]);
+  }, [users, setUsers, setCurrentUser, addAuditLog]);
 
   const logout = useCallback(() => {
+    if (currentUser) {
+      addAuditLog(auditEvents.authLogin(currentUser, currentUser.username, true));
+    }
     setCurrentUser(null);
-  }, [setCurrentUser]);
+  }, [currentUser, setCurrentUser, addAuditLog]);
 
   // Components receive validated collection updates rather than the raw
   // IndexedDB setters. This keeps identity, roles, balances, and references
@@ -392,8 +408,9 @@ export function useStore() {
       createdAt: new Date().toISOString()
     };
     setInventory(prev => [...prev, newItem]);
+    addAuditLog(auditEvents.inventoryAdded(currentUser, newItem.name, newItem.quantity, newItem.sellPrice));
     return newItem;
-  }, [categories, generateProductCode, inventory, setInventory]);
+  }, [categories, generateProductCode, inventory, setInventory, currentUser, addAuditLog]);
 
   // كانت الترجّع undefined في كل حالات الرفض، فالتعديل كان «مابيحفظش» من غير
   // أي سبب واضح. بترجع دلوقتي ok/error نفس شكل deleteInventoryItem.
@@ -432,13 +449,16 @@ export function useStore() {
   }, [categories, inventory, setInventory]);
 
   const deleteInventoryItem = useCallback((id: string): { ok: boolean; error?: string } => {
+    const existing = inventory.find(i => i.id === id);
+    if (!existing) return { ok: false, error: 'المنتج غير موجود' };
     if (imeiUnits.some(u => u.inventoryId === id) || sales.some(s => s.items.some(i => i.inventoryId === id)) ||
         maintenance.some(m => m.parts.some(p => p.inventoryId === id))) {
       return { ok: false, error: 'لا يمكن حذف منتج مرتبط بفواتير أو أجهزة IMEI أو صيانة' };
     }
     setInventory(prev => prev.filter(i => i.id !== id));
+    addAuditLog(auditEvents.inventoryDeleted(currentUser, existing.name));
     return { ok: true };
-  }, [imeiUnits, sales, maintenance, setInventory]);
+  }, [imeiUnits, sales, maintenance, setInventory, inventory, currentUser, addAuditLog]);
 
   // IMEI functions
   const addIMEIUnit = useCallback((unit: Omit<IMEIUnit, 'id' | 'createdAt'>) => {
@@ -632,8 +652,9 @@ export function useStore() {
       setTransactions(prev => [...prev, transaction]);
     }
     setSales(prev => [...prev, newSale]);
+    addAuditLog(auditEvents.saleCreated(currentUser, newSale.invoiceNumber, newSale.total, newSale.paid, customer?.name, safe.name));
     return newSale;
-  }, [currentUser, customers, generateInvoiceNumber, imeiUnits, inventory, safes, setCustomers, setInventory, setImeiUnits, setSafes, setSales, setTransactions]);
+  }, [currentUser, customers, generateInvoiceNumber, imeiUnits, inventory, safes, setCustomers, setInventory, setImeiUnits, setSafes, setSales, setTransactions, addAuditLog]);
 
   /**
    * تسجيل مرتجع على فاتورة بيع.
@@ -730,8 +751,10 @@ export function useStore() {
       setCustomers(prev => prev.map(c => c.id === sale.customerId
         ? { ...c, balance: roundMoney(Math.max(0, c.balance - debtForgiven)) } : c));
     }
+    const safeObj = safes.find(s => s.id === sale.safeId);
+    addAuditLog(auditEvents.saleReturnProcessed(currentUser, sale.invoiceNumber, cashRefund, reason, safeObj?.name));
     return returnRecord;
-  }, [currentUser, safes, saleReturns, sales, setCustomers, setInventory, setImeiUnits, setSaleReturns, setSafes, setTransactions]);
+  }, [currentUser, safes, saleReturns, sales, setCustomers, setInventory, setImeiUnits, setSaleReturns, setSafes, setTransactions, addAuditLog]);
 
   // ============================================================
   //  فواتير المشتريات (توريد من المورد)
@@ -907,9 +930,10 @@ export function useStore() {
     }
 
     setPurchases(prev => [...prev, purchase]);
+    addAuditLog(auditEvents.purchaseCreated(currentUser, purchase.invoiceNumber, supplier.name, purchase.total, purchase.paid, safe?.name));
     return { ok: true, purchase };
   }, [currentUser, generatePurchaseNumber, imeiUnits, inventory, safes, setImeiUnits, setInventory,
-      setPurchases, setSafes, setSuppliers, setTransactions, suppliers]);
+      setPurchases, setSafes, setSuppliers, setTransactions, suppliers, addAuditLog]);
 
   /** سداد دفعة لمورد: بتخصم من الخزنة وتقلّل رصيد المورد (المديونية). */
   const recordSupplierPayment = useCallback((
@@ -1620,8 +1644,9 @@ export function useStore() {
       setTransactions(prev => [...prev, ...newTransactions]);
     }
 
+    addAuditLog(auditEvents.maintenanceDelivered(currentUser, maint.ticketNumber, maint.customerName, finalAmount, safe.name));
     return { ok: true };
-  }, [currentUser, maintenance, setMaintenance, safes, setSafes, setTransactions]);
+  }, [currentUser, maintenance, setMaintenance, safes, setSafes, setTransactions, addAuditLog]);
 
   // Safe functions
   // خزنة جديدة برصيد افتتاحي كانت بتضيف فلوس للنظام من غير أي قيد: إجمالي
@@ -1956,6 +1981,7 @@ export function useStore() {
     setInventoryAudits,
     setSideAccountEntries,
     setNotifications,
+    setAuditLogs,
     setIsDarkMode,
     setAppSettings,
 
@@ -2033,6 +2059,12 @@ export function useStore() {
     markAllNotificationsAsRead,
     dismissNotification,
     clearAllNotifications,
+
+    // Audit Log
+    auditLogs,
+    auditLogsLoading,
+    addAuditLog,
+    clearAuditLogs: () => setAuditLogs([]),
 
     // Stats
     getStatistics,

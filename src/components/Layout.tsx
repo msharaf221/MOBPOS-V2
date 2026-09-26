@@ -4,7 +4,7 @@ import {
   Wallet, Settings, LogOut, Menu, Bell, Moon, Sun,
   ChevronLeft, Smartphone, Tags, Truck, UserCog, BarChart3,
   Lock, Crown, ClipboardCheck, BookOpenText, ShoppingBag,
-  CheckCheck, Trash2, X, BellOff, CalendarClock, Banknote, Info, PackageX
+  CheckCheck, Trash2, X, BellOff, CalendarClock, Banknote, Info, PackageX, ShieldAlert
 } from 'lucide-react';
 import { User, Notification, NotificationType, AppSettings } from '../types';
 import { ActiveLicense, PLAN_FEATURES } from '../license/types';
@@ -51,6 +51,7 @@ const menuItems = [
   { id: 'suppliers', label: 'الموردين', icon: Truck },
   { id: 'purchases', label: 'المشتريات', icon: ShoppingBag },
   { id: 'users', label: 'الموظفين', icon: UserCog },
+  { id: 'audit', label: 'سجل الرقابة', icon: ShieldAlert },
   { id: 'settings', label: 'الإعدادات', icon: Settings },
 ];
 

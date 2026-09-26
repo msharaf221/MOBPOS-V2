@@ -6,6 +6,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { handleLanRequest } = require('./lan-hub.cjs');
 
 const DIST_DIR = path.join(__dirname, '..', 'dist');
 const PREFERRED_PORT = 8420;   // سجّله في Google OAuth origins: http://127.0.0.1:8420
@@ -27,8 +28,12 @@ const MIME = {
 };
 
 function createServer() {
-  return http.createServer((req, res) => {
+  return http.createServer(async (req, res) => {
     try {
+      // التعامل مع طلبات الشبكة المحلية ومزامنة الأجهزة
+      const isLan = await handleLanRequest(req, res, PREFERRED_PORT);
+      if (isLan) return;
+
       if (req.method !== 'GET' && req.method !== 'HEAD') {
         res.writeHead(405, { Allow: 'GET, HEAD' });
         res.end('Method Not Allowed');
@@ -98,7 +103,7 @@ function startServer(preferredPort = PREFERRED_PORT) {
           reject(err);
         }
       });
-      server.listen(port, '127.0.0.1', () => resolve({ server, port }));
+      server.listen(port, '0.0.0.0', () => resolve({ server, port }));
     };
 
     tryListen();

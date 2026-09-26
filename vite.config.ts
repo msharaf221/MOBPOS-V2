@@ -15,10 +15,31 @@ const pkg = JSON.parse(
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const isElectronDev = process.env.MOBPOS_ELECTRON_DEV === '1';
+import { createRequire } from "module";
+
+const require = createRequire(import.meta.url);
+const lanHub = require("./electron/lan-hub.cjs");
+
+const lanPlugin = {
+  name: "mobpos-lan-api",
+  configureServer(server: any) {
+    server.middlewares.use(async (req: any, res: any, next: any) => {
+      try {
+        if (req.url && req.url.startsWith("/api/lan/")) {
+          const handled = await lanHub.handleLanRequest(req, res, 8420);
+          if (handled) return;
+        }
+      } catch (e) {
+        console.error("[lan-plugin error]", e);
+      }
+      next();
+    });
+  },
+};
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), tailwindcss(), viteSingleFile()],
+  plugins: [react(), tailwindcss(), viteSingleFile(), lanPlugin],
   server: {
     host: '0.0.0.0', // bind 0.0.0.0 so the preview proxy can reach it
     port: 8420, // Electron dev must keep the stable OAuth/IndexedDB origin

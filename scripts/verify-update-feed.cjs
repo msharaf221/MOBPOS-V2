@@ -108,6 +108,10 @@ function parseLatestYml(text) {
       inFiles = true;
       continue;
     }
+    if (inFiles && !line.startsWith(' ')) {
+      inFiles = false;
+      current = null;
+    }
     if (inFiles) {
       const item = line.match(/^\s*-\s+url:\s*(\S+)/);
       if (item) {
@@ -128,7 +132,7 @@ function parseLatestYml(text) {
         }
       }
     }
-    if (!inFiles || !line.startsWith(' ')) {
+    if (!inFiles) {
       const m = line.match(/^(\w+):\s*(.+?)\s*$/);
       if (m) {
         const [, key, val] = m;
@@ -137,6 +141,9 @@ function parseLatestYml(text) {
       }
     }
   }
+  if (!data.size && data.files[0]?.size) data.size = data.files[0].size;
+  if (!data.sha512 && data.files[0]?.sha512) data.sha512 = data.files[0].sha512;
+  if (!data.path && data.files[0]?.url) data.path = data.files[0].url;
   return data;
 }
 
