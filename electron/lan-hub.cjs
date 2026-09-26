@@ -9,6 +9,35 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
+// ============================================================
+// طابور المهام (Mutex) لمعالجة التحديثات بالتسلسل وتجنب تعارض الكتابة
+// ============================================================
+class AsyncMutex {
+  constructor() {
+    this.queue = [];
+    this.locked = false;
+  }
+  async acquire() {
+    if (!this.locked) {
+      this.locked = true;
+      return () => this.release();
+    }
+    return new Promise(resolve => {
+      this.queue.push(resolve);
+    }).then(() => () => this.release());
+  }
+  release() {
+    if (this.queue.length > 0) {
+      const nextResolve = this.queue.shift();
+      nextResolve();
+    } else {
+      this.locked = false;
+    }
+  }
+}
+const dbMutex = new AsyncMutex();
+
+
 // مسار حفظ بيانات الشبكة المركزية
 const DATA_DIR = path.join(os.homedir(), '.mobpos');
 const DATA_FILE = path.join(DATA_DIR, 'lan-store.json');
@@ -242,8 +271,13 @@ async function handleLanRequest(req, res, currentPort = 8420) {
       try {
         const body = await readJsonBody(req);
         if (body && typeof body === 'object') {
-          centralStore = { ...centralStore, ...body };
-          persistStore();
+          const release = await dbMutex.acquire();
+          try {
+            centralStore = { ...centralStore, ...body };
+            persistStore();
+          } finally {
+            release();
+          }
           const senderId = req.headers['x-client-id'] || null;
           broadcast('data-replaced', { stores: Object.keys(body) }, senderId);
           res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -265,7 +299,9 @@ async function handleLanRequest(req, res, currentPort = 8420) {
       const { storeName, items, deltaType } = payload; // deltaType: 'upsert' | 'delete' | 'replace'
 
       if (storeName && Array.isArray(items)) {
-        if (!centralStore[storeName]) {
+        const release = await dbMutex.acquire();
+        try {
+          if (!centralStore[storeName]) {
           centralStore[storeName] = [];
         }
 
@@ -284,6 +320,9 @@ async function handleLanRequest(req, res, currentPort = 8420) {
         }
 
         persistStore();
+        } finally {
+          release();
+        }
         const senderId = req.headers['x-client-id'] || null;
         broadcast('sync', { storeName, items, deltaType }, senderId);
 
