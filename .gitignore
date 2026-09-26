@@ -29,3 +29,6 @@ Thumbs.db
 
 # Activation server runtime data (contains license bindings / machine tokens)
 activation-server/data/
+
+# Packaging outputs
+release/
