@@ -27,7 +27,7 @@ import Settings from './components/Settings';
 import ReportPreview from './components/ReportPreview';
 import AuditLog from './components/AuditLog';
 import { demoAppSettings, getDemoShowcaseData } from './data/demoShowcase';
-import { isLanClient, fetchLanServerInfo, fetchCentralData, pushCentralData, connectLanStream } from './utils/lanSync';
+import { isLanClient, fetchLanServerInfo, fetchCentralData, pushCentralData, pushDelta, connectLanStream } from './utils/lanSync';
 
 const isDevDemo =
   import.meta.env.DEV &&
@@ -260,6 +260,12 @@ export default function App() {
       if (cleanupStream) cleanupStream();
     };
   }, [screen, store.isLoading]);
+
+  // مزامنة تلقائية فورية للمستخدمين من الجهاز الرئيسي للشبكة المركزية
+  useEffect(() => {
+    if (isLanClient() || store.isLoading || screen !== 'app' || !Array.isArray(store.users) || store.users.length === 0) return;
+    pushDelta('users', store.users, 'replace').catch(() => undefined);
+  }, [store.users, store.isLoading, screen]);
 
   // Apply dark mode
   useEffect(() => {

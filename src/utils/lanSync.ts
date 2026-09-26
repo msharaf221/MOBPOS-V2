@@ -85,6 +85,24 @@ export async function pushDelta(
   }
 }
 
+/** التحقق من تسجيل دخول المستخدم مباشرة عبر خادم الشبكة المحلية */
+export async function authenticateLanUser(
+  username: string,
+  password: string
+): Promise<{ ok: boolean; user?: any; users?: any[]; error?: string }> {
+  try {
+    const res = await fetch('/api/lan/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    const data = await res.json();
+    return data;
+  } catch (err: any) {
+    return { ok: false, error: err?.message || 'تعذر الاتصال بالخادم الرئيسي' };
+  }
+}
+
 /** الاستماع للأحداث الحية من الخادم عبر Server-Sent Events (SSE) */
 export function connectLanStream(callbacks: {
   onSync: (data: { storeName: string; items: unknown[]; deltaType: string }) => void;

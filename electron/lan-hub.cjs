@@ -7,6 +7,7 @@
 const os = require('os');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 // مسار حفظ بيانات الشبكة المركزية
 const DATA_DIR = path.join(os.homedir(), '.mobpos');
@@ -121,6 +122,41 @@ function setCorsHeaders(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Client-Id');
+}
+
+/**
+ * التحقق من كلمة المرور بدعم كامل لصيغة PBKDF2 والهاش القديم والنص العادي
+ */
+function verifyPassword(plain, stored) {
+  if (typeof plain !== 'string' || typeof stored !== 'string') return false;
+  if (!plain || !stored) return false;
+
+  // صيغة PBKDF2 القياسية: pbkdf2$<iterations>$<salt>$<hash>
+  if (stored.startsWith('pbkdf2$')) {
+    const parts = stored.split('$');
+    if (parts.length !== 4) return false;
+    const iters = Number(parts[1]);
+    const salt = parts[2];
+    const hash = parts[3];
+    if (!Number.isInteger(iters) || iters < 1000 || !salt || !hash) return false;
+    try {
+      const computed = crypto.pbkdf2Sync(plain, Buffer.from(salt, 'base64url'), iters, 32, 'sha256').toString('hex');
+      const bufA = Buffer.from(computed);
+      const bufB = Buffer.from(hash);
+      return bufA.length === bufB.length && crypto.timingSafeEqual(bufA, bufB);
+    } catch {
+      return false;
+    }
+  }
+
+  // صيغة SHA-256 القديمة (64 خانة)
+  if (/^[a-f0-9]{64}$/i.test(stored)) {
+    const legacy = crypto.createHash('sha256').update('mobpos-pw::' + plain).digest('hex');
+    return legacy.toLowerCase() === stored.toLowerCase();
+  }
+
+  // كلمة المرور الافتراضية أو غير المشفرة (مثل الحساب الافتراضي admin123)
+  return plain === stored;
 }
 
 /**
@@ -257,6 +293,71 @@ async function handleLanRequest(req, res, currentPort = 8420) {
       }
     } catch (err) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: err.message }));
+      return true;
+    }
+  }
+
+  // 5. التحقق من صحة تسجيل الدخول من أجهزة الشبكة (LAN Client Authentication)
+  if (pathname === '/api/lan/auth' && req.method === 'POST') {
+    try {
+      const body = await readJsonBody(req);
+      const username = (body.username || '').trim().toLowerCase();
+      const password = typeof body.password === 'string' ? body.password : '';
+
+      // في حال لم تُحمّل قائمة المستخدمين بعد في الذاكرة، نضع المستخدم الافتراضي
+      if (!Array.isArray(centralStore.users) || centralStore.users.length === 0) {
+        centralStore.users = [
+          {
+            id: 'u1',
+            username: 'admin',
+            password: 'admin123',
+            name: 'مدير المحل',
+            role: 'admin',
+            createdAt: new Date().toISOString(),
+            mustChangePassword: true,
+          },
+        ];
+        persistStore();
+      }
+
+      const user = centralStore.users.find(
+        (u) => (u.username || '').trim().toLowerCase() === username
+      );
+
+      if (!user) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة' }));
+        return true;
+      }
+
+      const isValid = verifyPassword(password, user.password);
+      if (!isValid) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة' }));
+        return true;
+      }
+
+      const sessionUser = {
+        id: user.id,
+        username: user.username,
+        name: user.name,
+        role: user.role,
+        createdAt: user.createdAt,
+        mustChangePassword: !!(user.mustChangePassword || user.password === 'admin123'),
+      };
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          ok: true,
+          user: sessionUser,
+          users: centralStore.users,
+        })
+      );
+      return true;
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: false, error: err.message }));
       return true;
     }

@@ -22,6 +22,7 @@ import { buildImeiStockIndex, isSellableUnit } from '../utils/stockCounts';
 import { formatDate } from '../utils/format';
 import { nextDocumentNumber } from '../utils/sequence';
 import { auditEvents } from '../utils/auditLogger';
+import { authenticateLanUser, pushDelta } from '../utils/lanSync';
 
 const MAX_TEXT_LENGTH = 2_000;
 /** نافذة تنبيه الضمان — نفس قيمة محرك التنبيهات (alerts.ts). */
@@ -100,14 +101,37 @@ export function useStore() {
   // كلمات السر مخزنة مجزأة (PBKDF2-HMAC-SHA-256 بملح فريد) مع توافق رجعي
   // للهاشات القديمة (SHA-256/نص عادي) وإجبار تغيير كلمة المرور الافتراضية.
   const login = useCallback(async (username: string, password: string): Promise<User | null> => {
-    const user = users.find(u => u.username === username);
-    if (!user) {
-      addAuditLog(auditEvents.authLogin(null, username, false));
-      return null;
+    const rawUsername = typeof username === 'string' ? username : '';
+    const cleanUsername = rawUsername.trim().toLowerCase();
+    const cleanPassword = typeof password === 'string' ? password : '';
+
+    let user = users.find(u => (u.username || '').trim().toLowerCase() === cleanUsername);
+    let ok = user ? await verifyLoginPassword(cleanPassword, user.password) : false;
+
+    // إذا لم نجد المستخدم محلياً أو كلمة المرور لم تطابق (مثلاً على هاتف متصل بالشبكة المحلية لم يُزامن بعد)
+    if (!ok && typeof window !== 'undefined') {
+      try {
+        const lanAuth = await authenticateLanUser(cleanUsername, cleanPassword);
+        if (lanAuth.ok && lanAuth.user) {
+          user = lanAuth.user;
+          ok = true;
+          // تحديث قائمة المستخدمين محلياً بالبيانات الحية من السيرفر
+          if (Array.isArray(lanAuth.users) && lanAuth.users.length > 0) {
+            setUsers(lanAuth.users);
+          } else if (user) {
+            setUsers(prev => {
+              const exists = prev.some(u => u.id === user!.id);
+              return exists ? prev.map(u => u.id === user!.id ? user! : u) : [...prev, user!];
+            });
+          }
+        }
+      } catch {
+        // الاستمرار لمسار الفشل
+      }
     }
-    const ok = await verifyLoginPassword(password, user.password);
-    if (!ok) {
-      addAuditLog(auditEvents.authLogin(null, username, false));
+
+    if (!user || !ok) {
+      addAuditLog(auditEvents.authLogin(null, cleanUsername || rawUsername, false));
       return null;
     }
 
@@ -117,12 +141,15 @@ export function useStore() {
       sessionUser = { ...user, mustChangePassword: true };
     } else if (needsRehash(user.password)) {
       // ترقية الحساب القديم (نص عادي أو تجزئة قديمة) إلى تجزئة PBKDF2 مملّحة
-      const hash = await hashPasswordForStorage(password);
+      const hash = await hashPasswordForStorage(cleanPassword);
       sessionUser = { ...user, password: hash, mustChangePassword: false };
-      setUsers(prev => prev.map(u => (u.id === user.id ? sessionUser : u)));
+      setUsers(prev => prev.map(u => (u.id === user!.id ? sessionUser : u)));
+      if (typeof window !== 'undefined') {
+        pushDelta('users', [sessionUser], 'upsert').catch(() => undefined);
+      }
     }
     setCurrentUser(sessionUser);
-    addAuditLog(auditEvents.authLogin(sessionUser, username, true));
+    addAuditLog(auditEvents.authLogin(sessionUser, cleanUsername, true));
     return sessionUser;
   }, [users, setUsers, setCurrentUser, addAuditLog]);
 
@@ -154,6 +181,9 @@ export function useStore() {
       setCurrentUser(updatedCurrent);
     }
     setUsers(nextUsers);
+    if (typeof window !== 'undefined') {
+      pushDelta('users', nextUsers, 'replace').catch(() => undefined);
+    }
   }, [currentUser, setCurrentUser, setUsers]);
 
   const updateSuppliers = useCallback((nextSuppliers: Supplier[]) => {
@@ -201,10 +231,14 @@ export function useStore() {
 
     const hash = await hashPasswordForStorage(newPassword);
     const updated: User = { ...user, password: hash, mustChangePassword: false };
-    setUsers(prev => prev.map(u => (u.id === userId ? updated : u)));
+    const nextUsers = users.map(u => (u.id === userId ? updated : u));
+    setUsers(nextUsers);
     // Keep the active session in sync
     if (currentUser?.id === userId) {
       setCurrentUser(updated);
+    }
+    if (typeof window !== 'undefined') {
+      pushDelta('users', nextUsers, 'replace').catch(() => undefined);
     }
     return { ok: true };
   }, [users, currentUser, setUsers, setCurrentUser]);

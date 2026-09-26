@@ -60,3 +60,74 @@ test('lanHub ignores non-lan endpoints', async () => {
   const handled = await lanHub.handleLanRequest(req, res, 8420);
   assert.equal(handled, false);
 });
+
+test('lanHub handleLanRequest authenticates valid admin credentials over /api/lan/auth', async () => {
+  const { EventEmitter } = await import('events');
+  const req: any = new EventEmitter();
+  req.url = '/api/lan/auth';
+  req.method = 'POST';
+  req.headers = { host: 'localhost:8420', 'content-type': 'application/json' };
+  req.socket = { remoteAddress: '192.168.1.50' };
+
+  let statusCode = 0;
+  let responseData = '';
+  const res = {
+    setHeader: () => {},
+    writeHead: (code: number) => {
+      statusCode = code;
+    },
+    end: (chunk: string) => {
+      responseData = chunk;
+    },
+  };
+
+  const promise = lanHub.handleLanRequest(req, res, 8420);
+
+  // Send request body (with leading/trailing space and capitalized "Admin " to verify normalization)
+  const body = JSON.stringify({ username: '  Admin ', password: 'admin123' });
+  req.emit('data', Buffer.from(body));
+  req.emit('end');
+
+  const handled = await promise;
+  assert.equal(handled, true);
+  assert.equal(statusCode, 200);
+
+  const result = JSON.parse(responseData);
+  assert.equal(result.ok, true);
+  assert.equal(result.user.username, 'admin');
+  assert.equal(result.user.role, 'admin');
+});
+
+test('lanHub handleLanRequest rejects wrong password over /api/lan/auth', async () => {
+  const { EventEmitter } = await import('events');
+  const req: any = new EventEmitter();
+  req.url = '/api/lan/auth';
+  req.method = 'POST';
+  req.headers = { host: 'localhost:8420', 'content-type': 'application/json' };
+  req.socket = { remoteAddress: '192.168.1.50' };
+
+  let statusCode = 0;
+  let responseData = '';
+  const res = {
+    setHeader: () => {},
+    writeHead: (code: number) => {
+      statusCode = code;
+    },
+    end: (chunk: string) => {
+      responseData = chunk;
+    },
+  };
+
+  const promise = lanHub.handleLanRequest(req, res, 8420);
+
+  const body = JSON.stringify({ username: 'admin', password: 'wrongPassword!' });
+  req.emit('data', Buffer.from(body));
+  req.emit('end');
+
+  const handled = await promise;
+  assert.equal(handled, true);
+  assert.equal(statusCode, 401);
+
+  const result = JSON.parse(responseData);
+  assert.equal(result.ok, false);
+});
