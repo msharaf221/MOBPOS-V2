@@ -84,7 +84,7 @@ async function main() {
   console.log(`Release created successfully! URL: ${release.html_url}`);
 
   // Upload Asset
-  const assetPath = path.join(REPO_ROOT, 'release', 'MOBPOS-v1.0.11-Windows-x64.zip');
+  const assetPath = path.join(REPO_ROOT, 'release', `MOBPOS-v${version}-Windows-x64.zip`);
   if (fs.existsSync(assetPath)) {
     const stat = fs.statSync(assetPath);
     console.log(`Uploading asset ${path.basename(assetPath)} (${Math.round(stat.size / 1024 / 1024)} MB)...`);
