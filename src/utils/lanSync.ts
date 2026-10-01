@@ -77,7 +77,7 @@ export async function pushCentralData(allData: Record<string, unknown>): Promise
 export async function pushDelta(
   storeName: string,
   items: unknown[],
-  deltaType: 'upsert' | 'delete' | 'replace' = 'upsert'
+  deltaType: 'upsert' | 'delete' | 'replace' | 'increment' = 'upsert'
 ): Promise<boolean> {
   try {
     const res = await fetch('/api/lan/sync', {

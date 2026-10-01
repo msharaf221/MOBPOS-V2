@@ -1,8 +1,8 @@
 import { v4 as uuidv4 } from 'uuid';
 import { StoreState } from '../hooks/store/types';
 import { StoreUpdates } from './types';
-import { validText, isFiniteNumber, roundMoney } from '../hooks/store/helpers';
-import { Safe, Transaction } from '../types';
+import { isFiniteNumber, roundMoney } from '../hooks/store/helpers';
+import { Transaction } from '../types';
 
 export class SafesService {
   static transferBetweenSafes(
