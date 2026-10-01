@@ -5,6 +5,7 @@ import "@fontsource/cairo/400.css";
 import "@fontsource/cairo/700.css";
 import "./index.css";
 import App from "./App";
+import ErrorBoundary from "./components/ErrorBoundary";
 
 // Prevent scrolling on number inputs from changing their value
 document.addEventListener('wheel', () => {
@@ -33,6 +34,8 @@ window.addEventListener('drop', (e) => e.preventDefault());
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </StrictMode>
 );

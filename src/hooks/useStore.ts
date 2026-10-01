@@ -1,14 +1,12 @@
-// @ts-nocheck
 import { useCallback, useEffect, useState } from 'react';
 import { useIndexedDB, useIndexedDBSetting, indexedDBUtils } from './useIndexedDB';
 import { defaultAppSettings } from './store/helpers';
 import { StoreState } from './store/types';
 import {
   User, Customer, Category, InventoryItem, IMEIUnit,
-  Sale, SaleItem, SaleReturn, Maintenance, MaintenancePart, Safe, Transaction, Supplier, Notification,
-  Purchase, PurchaseItem,
-  StockWaste, InventoryAudit, InventoryAuditItem, SideAccountEntry, SideAccountEntryType,
-  SideAccountImpact, AppSettings, AuditLogEntry
+  Sale, SaleReturn, Maintenance, Safe, Transaction, Supplier, Notification,
+  Purchase, StockWaste, InventoryAudit, SideAccountEntry,
+  AppSettings, AuditLogEntry
 } from '../types';
 import {
   initialUsers, initialCustomers, initialCategories, initialInventory,

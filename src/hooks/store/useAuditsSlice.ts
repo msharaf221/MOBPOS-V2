@@ -1,12 +1,12 @@
-// @ts-nocheck
-import { useCallback, useMemo } from 'react';
+import { useCallback } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { StoreState, StoreUpdates } from './types';
+import { StoreState } from './types';
+import { StoreUpdates } from '../../services/types';
 import { useStoreDispatcher } from './useStoreDispatcher';
 import { validText, MAX_TEXT_LENGTH } from './helpers';
 import { formatDate } from '../../utils/format';
 import { nextDocumentNumber } from '../../utils/sequence';
-import { InventoryAudit, InventoryAuditItem, Transaction, InventoryItem } from '../../types';
+import { InventoryAudit, InventoryAuditItem, InventoryItem } from '../../types';
 
 export function useAuditsSlice(state: StoreState) {
     const { categories, inventory, inventoryAudits, currentUser } = state;
@@ -14,7 +14,6 @@ export function useAuditsSlice(state: StoreState) {
 
     const generateAuditNumber = useCallback(() => nextDocumentNumber(inventoryAudits.map(a => a.auditNumber), 'AUD', 4), [inventoryAudits]);
     const getInventoryAuditQuantity = (item: InventoryItem) => item.quantity || 0;
-    const buildAuditAdjustmentTransaction = (audit: InventoryAudit, adjustedInventoryIds: Set<string>, dateStr: string): Transaction | null => null;
 
     const createInventoryAudit = useCallback((
       title: string,

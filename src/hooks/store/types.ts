@@ -1,11 +1,9 @@
-// @ts-nocheck
 import { Dispatch, SetStateAction } from 'react';
 import {
   User, Customer, Category, InventoryItem, IMEIUnit,
-  Sale, SaleItem, SaleReturn, Maintenance, MaintenancePart, Safe, Transaction, Supplier, Notification,
-  Purchase, PurchaseItem,
-  StockWaste, InventoryAudit, InventoryAuditItem, SideAccountEntry, SideAccountEntryType,
-  SideAccountImpact, AppSettings, AuditLogEntry
+  Sale, SaleReturn, Maintenance, Safe, Transaction, Supplier, Notification,
+  Purchase, StockWaste, InventoryAudit, SideAccountEntry,
+  AppSettings, AuditLogEntry
 } from '../../types';
 
 export interface StoreState {

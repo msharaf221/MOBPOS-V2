@@ -41,6 +41,21 @@ type AuditStep = 'setup' | 'count' | 'review';
 type TypeFilter = 'all' | 'regular' | 'imei';
 type StatusFilter = 'all' | 'counted' | 'notCounted' | 'difference';
 
+interface AuditDraft {
+  step?: AuditStep;
+  title?: string;
+  notes?: string;
+  categoryFilter?: string;
+  typeFilter?: TypeFilter;
+  statusFilter?: StatusFilter;
+  searchTerm?: string;
+  pageSize?: number;
+  preselectAll?: boolean;
+  counts?: Record<string, { countedQuantity: number; notes: string }>;
+  includedIds?: string[];
+  savedAt?: string;
+}
+
 const STORAGE_KEY = 'mobpos_inventory_audit_draft_v1';
 const PAGE_SIZES = [
   { value: 10, label: '10 صنف' },
@@ -82,10 +97,10 @@ export default function InventoryAudit({
   const categoryById = useMemo(() => new Map(categories.map(c => [c.id, c])), [categories]);
 
   // ===== Local draft helpers (so a big count can be resumed page by page) =====
-  const loadDraft = (): any | null => {
+  const loadDraft = (): AuditDraft | null => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : null;
+      return raw ? (JSON.parse(raw) as AuditDraft) : null;
     } catch {
       return null;
     }

@@ -8,28 +8,35 @@ export function useStoreDispatcher(state: StoreState) {
     // 1. Apply locally
     for (const delta of updates.deltas) {
       const { type, storeName, items } = delta;
+      type Identifiable = { id: string; [key: string]: unknown };
       const setterName = `set${storeName.charAt(0).toUpperCase() + storeName.slice(1)}`;
-      const setter = (state as any)[setterName];
-      if (!setter) {
+      const typedSetter = (state as unknown as Record<string, (val: unknown) => void>)[setterName];
+      if (!typedSetter) {
         console.warn(`Setter ${setterName} not found`);
         continue;
       }
 
       if (type === 'replace') {
-        setter(items);
+        typedSetter(items);
       } else if (type === 'delete') {
-        const deleteIds = new Set(items.map((it: any) => it.id));
-        setter((prev: any[]) => prev.filter((it: any) => !deleteIds.has(it.id)));
+        const deleteIds = new Set((items as Identifiable[]).map(it => it.id));
+        typedSetter((prev: Identifiable[]) => prev.filter(it => !deleteIds.has(it.id)));
       } else if (type === 'increment') {
-        setter((prev: any[]) => {
-          const map = new Map(prev.map((it: any) => [it.id, it]));
-          for (const it of items) {
+        typedSetter((prev: Identifiable[]) => {
+          const map = new Map(prev.map(it => [it.id, it]));
+          for (const it of items as Identifiable[]) {
             const existing = map.get(it.id);
             if (existing) {
               const updated = { ...existing };
               for (const [key, val] of Object.entries(it)) {
                 if (key !== 'id' && typeof val === 'number') {
-                  updated[key] = (updated[key] || 0) + val;
+                  const currentVal = typeof updated[key] === 'number' ? (updated[key] as number) : 0;
+                  const newVal = currentVal + val;
+                  if (storeName === 'inventory' && key === 'quantity') {
+                    updated[key] = Math.max(0, newVal);
+                  } else {
+                    updated[key] = newVal;
+                  }
                 }
               }
               map.set(it.id, updated);
@@ -39,9 +46,9 @@ export function useStoreDispatcher(state: StoreState) {
         });
       } else {
         // upsert
-        setter((prev: any[]) => {
-          const map = new Map(prev.map((it: any) => [it.id, it]));
-          for (const it of items) {
+        typedSetter((prev: Identifiable[]) => {
+          const map = new Map(prev.map(it => [it.id, it]));
+          for (const it of items as Identifiable[]) {
             const existing = map.get(it.id);
             if (existing) {
               map.set(it.id, { ...existing, ...it });

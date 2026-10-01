@@ -65,8 +65,10 @@ function remember<K, V>(cache: Map<K, V>, key: K, value: V): V {
   return value;
 }
 
+import { roundMoney } from '../hooks/store/helpers.ts';
+
 const safeValue = (value: number | undefined | null): number =>
-  typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  typeof value === 'number' && Number.isFinite(value) ? roundMoney(value) : 0;
 
 /** تنسيق المبالغ بالعملة المختارة، مع احترام إعداد عرض القروش. */
 export function formatCurrency(value: number | undefined | null): string {

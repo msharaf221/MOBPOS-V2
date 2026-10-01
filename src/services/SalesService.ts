@@ -1,10 +1,10 @@
 import { v4 as uuidv4 } from 'uuid';
-import { StoreState } from '../hooks/store/types';
-import { StoreUpdates } from './types';
-import { roundMoney, isFiniteNumber, isPositiveInteger, MAX_TEXT_LENGTH } from '../hooks/store/helpers';
-import { nextDocumentNumber } from '../utils/sequence';
-import { isSellableUnit } from '../utils/stockCounts';
-import { SaleItem, Sale, Transaction, IMEIUnit, SaleReturn } from '../types';
+import type { StoreState } from '../hooks/store/types.ts';
+import type { StoreUpdates } from './types.ts';
+import { roundMoney, isFiniteNumber, isPositiveInteger, MAX_TEXT_LENGTH } from '../hooks/store/helpers.ts';
+import { nextDocumentNumber } from '../utils/sequence.ts';
+import { isSellableUnit } from '../utils/stockCounts.ts';
+import type { SaleItem, Sale, Transaction, IMEIUnit, SaleReturn, User } from '../types/index.ts';
 
 export class SalesService {
   static createSale(
@@ -16,7 +16,7 @@ export class SalesService {
     paymentMethod: 'cash' | 'card' | 'installment',
     safeId: string,
     notes: string,
-    currentUser: any
+    currentUser: User | null
   ): { sale: Sale | null; updates: StoreUpdates } {
     const { customers, inventory, imeiUnits, sales, safes } = state;
 
@@ -166,7 +166,7 @@ export class SalesService {
     saleItemId: string,
     quantity: number,
     reason: string,
-    currentUser: any
+    currentUser: User | null
   ): { returnRecord: SaleReturn | null; updates: StoreUpdates } {
     const { sales, saleReturns, safes, imeiUnits } = state;
 

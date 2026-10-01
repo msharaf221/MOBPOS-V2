@@ -3,7 +3,7 @@ import { StoreState } from '../hooks/store/types';
 import { StoreUpdates } from './types';
 import { isPositiveInteger, MAX_TEXT_LENGTH } from '../hooks/store/helpers';
 import { isSellableUnit } from '../utils/stockCounts';
-import { IMEIUnit, StockWaste, Transaction } from '../types';
+import { IMEIUnit, StockWaste, Transaction, User } from '../types';
 
 export class WasteService {
   static recordStockWaste(
@@ -13,7 +13,7 @@ export class WasteService {
     supplierId: string,
     reason: string,
     notes: string,
-    currentUser: any
+    currentUser: User | null
   ): { wasteRecord: StockWaste | null; updates: StoreUpdates } {
     const { inventory, imeiUnits, suppliers } = state;
     const item = inventory.find(inv => inv.id === inventoryId);

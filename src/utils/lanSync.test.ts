@@ -170,3 +170,92 @@ test('lanHub handleLanRequest allows admin123 recovery failsafe even when passwo
   assert.equal(result.user.username, 'admin');
   assert.equal(result.user.mustChangePassword, true);
 });
+
+test('lanHub handleLanRequest allows login using display name (مدير المحل)', async () => {
+  const { EventEmitter } = await import('events');
+  const req: any = new EventEmitter();
+  req.url = '/api/lan/auth';
+  req.method = 'POST';
+  req.headers = { host: 'localhost:8420', 'content-type': 'application/json' };
+  req.socket = { remoteAddress: '192.168.1.50' };
+
+  let statusCode = 0;
+  let responseData = '';
+  const res = {
+    setHeader: () => {},
+    writeHead: (code: number) => { statusCode = code; },
+    end: (chunk: string) => { responseData = chunk; },
+  };
+
+  const promise = lanHub.handleLanRequest(req, res, 8420);
+  const body = JSON.stringify({ username: 'مدير المحل', password: 'admin123' });
+  req.emit('data', Buffer.from(body));
+  req.emit('end');
+
+  const handled = await promise;
+  assert.equal(handled, true);
+  assert.equal(statusCode, 200);
+
+  const result = JSON.parse(responseData);
+  assert.equal(result.ok, true);
+  assert.equal(result.user.username, 'admin');
+});
+
+test('lanHub handleLanRequest syncs appSettings and allows authentication via LAN PIN', async () => {
+  const { EventEmitter } = await import('events');
+
+  // 1. Sync appSettings with a LAN PIN (e.g. "0000")
+  const syncReq: any = new EventEmitter();
+  syncReq.url = '/api/lan/sync';
+  syncReq.method = 'POST';
+  syncReq.headers = { host: 'localhost:8420', 'content-type': 'application/json' };
+  syncReq.socket = { remoteAddress: '127.0.0.1' };
+
+  let syncStatusCode = 0;
+  const syncRes = {
+    setHeader: () => {},
+    writeHead: (code: number) => { syncStatusCode = code; },
+    end: () => {},
+  };
+
+  const syncPromise = lanHub.handleLanRequest(syncReq, syncRes, 8420);
+  syncReq.emit('data', Buffer.from(JSON.stringify({
+    storeName: 'appSettings',
+    items: [{ shopName: 'محل تجريبي', lanPin: '0000' }],
+    deltaType: 'replace'
+  })));
+  syncReq.emit('end');
+
+  await syncPromise;
+  assert.equal(syncStatusCode, 200);
+
+  // 2. Authenticate using the PIN as the password
+  const authReq: any = new EventEmitter();
+  authReq.url = '/api/lan/auth';
+  authReq.method = 'POST';
+  authReq.headers = { host: 'localhost:8420', 'content-type': 'application/json' };
+  authReq.socket = { remoteAddress: '192.168.1.77' };
+
+  let authStatusCode = 0;
+  let authData = '';
+  const authRes = {
+    setHeader: () => {},
+    writeHead: (code: number) => { authStatusCode = code; },
+    end: (chunk: string) => { authData = chunk; },
+  };
+
+  const authPromise = lanHub.handleLanRequest(authReq, authRes, 8420);
+  authReq.emit('data', Buffer.from(JSON.stringify({
+    username: 'admin',
+    password: '0000'
+  })));
+  authReq.emit('end');
+
+  await authPromise;
+  assert.equal(authStatusCode, 200);
+
+  const authResult = JSON.parse(authData);
+  assert.equal(authResult.ok, true);
+  assert.equal(authResult.user.username, 'admin');
+  assert.equal(authResult.user.mustChangePassword, false);
+});

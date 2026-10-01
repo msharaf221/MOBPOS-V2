@@ -4,10 +4,10 @@
 //  بالاتصال اللحظي بالسيرفر الرئيسي وسحب وتحديث البيانات
 // ============================================================
 
-import type { LanServerInfo } from '../types/index.ts';
+import type { LanServerInfo, User } from '../types/index.ts';
 
 let eventSource: EventSource | null = null;
-let reconnectTimer: any = null;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
 export async function fetchLanServerInfo(): Promise<LanServerInfo | null> {
   try {
@@ -23,7 +23,7 @@ export async function fetchLanServerInfo(): Promise<LanServerInfo | null> {
       port: data.port || 8420,
       activeClients: data.activeClients || 0,
       shopName: data.shopName || 'MOBPOS',
-      requiresPin: false,
+      requiresPin: !!data.requiresPin,
     };
   } catch {
     return null;
@@ -38,10 +38,8 @@ export function isLanClient(): boolean {
   const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
   if (isLocalhost) return false;
   
-  // استبعاد النسخ المرفوعة على الويب (Vercel/Netlify)
-  // عادة ما تكون الشبكة المحلية عبر HTTP، أو يكون الـ hostname عبارة عن IP Address
+  // استبعاد النسخ المرفوعة على الويب ببروتوكول HTTPS
   if (window.location.protocol === 'https:') return false;
-  if (!/^\d+\.\d+\.\d+\.\d+$/.test(hostname) && !hostname.endsWith('.local')) return false;
 
   return true;
 }
@@ -96,7 +94,7 @@ export async function pushDelta(
 export async function authenticateLanUser(
   username: string,
   password: string
-): Promise<{ ok: boolean; user?: any; users?: any[]; error?: string }> {
+): Promise<{ ok: boolean; user?: User; users?: User[]; error?: string }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 5000); // 5 ثوان كحد أقصى
   try {
@@ -109,9 +107,10 @@ export async function authenticateLanUser(
     clearTimeout(timer);
     const data = await res.json();
     return data;
-  } catch (err: any) {
+  } catch (err: unknown) {
     clearTimeout(timer);
-    return { ok: false, error: err?.message || 'تعذر الاتصال بالخادم الرئيسي' };
+    const message = err instanceof Error ? err.message : 'تعذر الاتصال بالخادم الرئيسي';
+    return { ok: false, error: message };
   }
 }
 

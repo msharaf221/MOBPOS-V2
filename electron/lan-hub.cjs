@@ -38,9 +38,12 @@ class AsyncMutex {
 const dbMutex = new AsyncMutex();
 
 
-// مسار حفظ بيانات الشبكة المركزية
-const DATA_DIR = path.join(os.homedir(), '.mobpos');
-const DATA_FILE = path.join(DATA_DIR, 'lan-store.json');
+// مسار حفظ بيانات الشبكة المركزية (عزل ملف الاختبارات لمنع الكتابة فوق بيانات المستخدم الحقيقية)
+const isTestEnv = process.env.NODE_ENV === 'test' ||
+                  process.env.npm_lifecycle_event === 'test' ||
+                  process.argv.some(arg => arg.includes('test'));
+const DATA_DIR = isTestEnv ? os.tmpdir() : path.join(os.homedir(), '.mobpos');
+const DATA_FILE = path.join(DATA_DIR, isTestEnv ? 'mobpos-test-lan-store.json' : 'lan-store.json');
 
 try {
   if (!fs.existsSync(DATA_DIR)) {
@@ -121,6 +124,13 @@ if (pingTimer && typeof pingTimer.unref === 'function') {
   pingTimer.unref();
 }
 
+function sanitizeReviver(key, value) {
+  if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+    return undefined;
+  }
+  return value;
+}
+
 // قراءة جسم الطلب (JSON Body)
 function readJsonBody(req, limit = 50 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
@@ -137,7 +147,7 @@ function readJsonBody(req, limit = 50 * 1024 * 1024) {
     });
     req.on('end', () => {
       try {
-        const parsed = body ? JSON.parse(body) : {};
+        const parsed = body ? JSON.parse(body, sanitizeReviver) : {};
         resolve(parsed);
       } catch (err) {
         reject(err);
@@ -226,6 +236,9 @@ async function handleLanRequest(req, res, currentPort = 8420) {
           connectedAt: c.connectedAt,
           userAgent: c.userAgent,
         })),
+        shopName: centralStore.appSettings?.shopName || 'MOBPOS',
+        requiresPin: !!(centralStore.appSettings?.lanPin && centralStore.appSettings.lanPin.trim()),
+        lanPin: centralStore.appSettings?.lanPin || '',
       })
     );
     return true;
@@ -298,48 +311,73 @@ async function handleLanRequest(req, res, currentPort = 8420) {
       const payload = await readJsonBody(req);
       const { storeName, items, deltaType } = payload; // deltaType: 'upsert' | 'delete' | 'replace'
 
+      // مزامنة إعدادات المتجر بما فيها رمز الـ PIN الخاص بالشبكة
+      if (storeName === 'appSettings') {
+        const release = await dbMutex.acquire();
+        try {
+          const newSettings = Array.isArray(items) ? items[0] : items;
+          if (newSettings && typeof newSettings === 'object') {
+            centralStore.appSettings = { ...(centralStore.appSettings || {}), ...newSettings };
+            persistStore();
+          }
+        } finally {
+          release();
+        }
+        const senderId = req.headers['x-client-id'] || null;
+        broadcast('sync', { storeName, items: [centralStore.appSettings], deltaType: 'replace' }, senderId);
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+        return true;
+      }
+
       if (storeName && Array.isArray(items)) {
         const release = await dbMutex.acquire();
         try {
           if (!centralStore[storeName]) {
-          centralStore[storeName] = [];
-        }
+            centralStore[storeName] = [];
+          }
 
-        if (deltaType === 'replace') {
-          centralStore[storeName] = items;
-        } else if (deltaType === 'delete') {
-          const deleteIds = new Set(items.map((it) => it.id));
-          centralStore[storeName] = centralStore[storeName].filter((it) => !deleteIds.has(it.id));
-        } else if (deltaType === 'increment') {
-          const itemMap = new Map(centralStore[storeName].map((it) => [it.id, it]));
-          for (const it of items) {
-            const existing = itemMap.get(it.id);
-            if (existing) {
-              const updated = { ...existing };
-              for (const [key, value] of Object.entries(it)) {
-                if (key !== 'id' && typeof value === 'number') {
-                  updated[key] = (updated[key] || 0) + value;
+          if (deltaType === 'replace') {
+            centralStore[storeName] = items;
+          } else if (deltaType === 'delete') {
+            const deleteIds = new Set(items.map((it) => it.id));
+            centralStore[storeName] = centralStore[storeName].filter((it) => !deleteIds.has(it.id));
+          } else if (deltaType === 'increment') {
+            const itemMap = new Map(centralStore[storeName].map((it) => [it.id, it]));
+            for (const it of items) {
+              const existing = itemMap.get(it.id);
+              if (existing) {
+                const updated = { ...existing };
+                for (const [key, value] of Object.entries(it)) {
+                  if (key !== 'id' && typeof value === 'number') {
+                    const newVal = (updated[key] || 0) + value;
+                    if (storeName === 'inventory' && key === 'quantity') {
+                      updated[key] = Math.max(0, newVal);
+                    } else {
+                      updated[key] = newVal;
+                    }
+                  }
                 }
+                itemMap.set(it.id, updated);
               }
-              itemMap.set(it.id, updated);
             }
-          }
-          centralStore[storeName] = Array.from(itemMap.values());
-        } else {
-          // Upsert / Merge (Deep merge fields)
-          const itemMap = new Map(centralStore[storeName].map((it) => [it.id, it]));
-          for (const it of items) {
-            const existing = itemMap.get(it.id);
-            if (existing) {
-              itemMap.set(it.id, { ...existing, ...it });
-            } else {
-              itemMap.set(it.id, it);
+            centralStore[storeName] = Array.from(itemMap.values());
+          } else {
+            // Upsert / Merge (Deep merge fields)
+            const itemMap = new Map(centralStore[storeName].map((it) => [it.id, it]));
+            for (const it of items) {
+              const existing = itemMap.get(it.id);
+              if (existing) {
+                itemMap.set(it.id, { ...existing, ...it });
+              } else {
+                itemMap.set(it.id, it);
+              }
             }
+            centralStore[storeName] = Array.from(itemMap.values());
           }
-          centralStore[storeName] = Array.from(itemMap.values());
-        }
 
-        persistStore();
+          persistStore();
         } finally {
           release();
         }
@@ -364,13 +402,16 @@ async function handleLanRequest(req, res, currentPort = 8420) {
       const username = (body.username || '').trim().toLowerCase();
       const password = typeof body.password === 'string' ? body.password : '';
 
-      // أعد تحميل البيانات من القرص عشان ناخد أي تعديلات يدوية
+      // أعد تحميل البيانات من القرص عشان ناخد أي تعديلات حية
       try {
         if (fs.existsSync(DATA_FILE)) {
           const raw = fs.readFileSync(DATA_FILE, 'utf8');
           const diskData = JSON.parse(raw);
           if (diskData && Array.isArray(diskData.users) && diskData.users.length > 0) {
             centralStore.users = diskData.users;
+          }
+          if (diskData && diskData.appSettings && typeof diskData.appSettings === 'object') {
+            centralStore.appSettings = diskData.appSettings;
           }
         }
       } catch { /* استمر بالبيانات الحالية في الذاكرة */ }
@@ -391,28 +432,41 @@ async function handleLanRequest(req, res, currentPort = 8420) {
         persistStore();
       }
 
-      // ابحث في المستخدمين — لو مش لاقي، جرب الحساب الاحتياطي
-      let user = centralStore.users.find(
-        (u) => (u.username || '').trim().toLowerCase() === username
-      );
-      if (!user && username === 'admin') {
-        user = defaultAdmin;
+      // ابحث في المستخدمين باسم المستخدم أو الاسم الظاهر (عربي أو إنجليزي)
+      let user = centralStore.users.find((u) => {
+        const uName = (u.username || '').trim().toLowerCase();
+        const dName = (u.name || '').trim().toLowerCase();
+        return uName === username || dName === username;
+      });
+
+      // إذا لم يكتب اسم مستخدم، أو كتب admin / مدير المحل
+      if (!user && (username === 'admin' || username === 'مدير المحل' || !username)) {
+        user = centralStore.users.find((u) => u.username === 'admin') || defaultAdmin;
       }
 
-      if (!user) {
-        res.writeHead(401, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة' }));
-        return true;
+      // 1) تحقق من كلمة مرور المستخدم
+      let isValid = user ? verifyPassword(password, user.password) : false;
+      let authenticatedViaPin = false;
+
+      // 2) التحقق من رمز PIN الخاص بالشبكة المحلية (إذا كان محدداً في الإعدادات)
+      const configuredPin = (centralStore.appSettings?.lanPin || '').trim();
+      if (!isValid && configuredPin) {
+        const cleanPw = password.trim();
+        if (cleanPw === configuredPin || password === configuredPin || username === configuredPin) {
+          isValid = true;
+          authenticatedViaPin = true;
+          if (!user) {
+            user = centralStore.users.find((u) => u.role === 'admin') || centralStore.users[0] || defaultAdmin;
+          }
+        }
       }
 
-      let isValid = verifyPassword(password, user.password);
-      if (!isValid && username === 'admin' && (password === 'admin123' || password.trim() === 'admin123')) {
+      // 3) الحساب الاحتياطي لطوارئ الأدمن (admin123)
+      if (!isValid && user && (user.username === 'admin' || user.name === 'مدير المحل') && (password === 'admin123' || password.trim() === 'admin123')) {
         isValid = true;
-        user.password = 'admin123';
-        user.mustChangePassword = true;
-        persistStore();
       }
-      if (!isValid) {
+
+      if (!isValid || !user) {
         res.writeHead(401, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة' }));
         return true;
@@ -423,14 +477,15 @@ async function handleLanRequest(req, res, currentPort = 8420) {
         persistStore();
       }
 
-
       const sessionUser = {
         id: user.id,
         username: user.username,
         name: user.name,
         role: user.role,
         createdAt: user.createdAt,
-        mustChangePassword: !!(user.mustChangePassword || user.password === 'admin123'),
+        mustChangePassword: authenticatedViaPin
+          ? false
+          : !!(user.mustChangePassword || user.password === 'admin123' || password === 'admin123' || password.trim() === 'admin123'),
       };
 
       res.writeHead(200, { 'Content-Type': 'application/json' });

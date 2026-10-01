@@ -59,6 +59,10 @@ export default function Login({ onLogin, shopName }: LoginProps) {
     if (!success && cleanPassword !== cleanPassword.trim()) {
       success = await onLogin(cleanUsername, cleanPassword.trim());
     }
+    // تجربة رمز PIN كبديل تلقائي في حال كتب المستخدم الـ PIN
+    if (!success && cleanPassword) {
+      success = await onLogin('admin', cleanPassword.trim());
+    }
     if (!success) {
       setError('اسم المستخدم أو كلمة المرور غير صحيحة. يرجى التأكد من كتابة الأحرف بدقة وبدون مسافات إضافية.');
       setFailedAttempts(prev => prev + 1);
@@ -110,7 +114,7 @@ export default function Login({ onLogin, shopName }: LoginProps) {
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   className="w-full bg-white/10 border border-white/20 rounded-lg py-3 px-10 text-white placeholder-blue-300 focus:outline-none focus:border-white/50 transition font-sans text-right"
-                  placeholder="أدخل اسم المستخدم (مثلاً admin)"
+                  placeholder="أدخل اسم المستخدم (مثلاً admin أو اسمك)"
                   autoCapitalize="none"
                   autoCorrect="off"
                   spellCheck={false}
@@ -129,7 +133,7 @@ export default function Login({ onLogin, shopName }: LoginProps) {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full bg-white/10 border border-white/20 rounded-lg py-3 pr-10 pl-11 text-white placeholder-blue-300 focus:outline-none focus:border-white/50 transition font-sans text-right"
-                  placeholder="أدخل كلمة المرور"
+                  placeholder="أدخل كلمة المرور (أو رمز PIN)"
                   autoCapitalize="none"
                   autoCorrect="off"
                   spellCheck={false}
@@ -147,6 +151,12 @@ export default function Login({ onLogin, shopName }: LoginProps) {
                 </button>
               </div>
             </div>
+
+            {branding.lanPin && (
+              <p className="text-[11px] text-blue-200/90 text-center bg-white/5 py-1.5 px-3 rounded-lg border border-white/10 mt-2">
+                💡 يمكنك الدخول ببيانات حسابك أو برمز PIN الشبكة (<span className="font-mono font-bold text-amber-300">{branding.lanPin}</span>)
+              </p>
+            )}
           </div>
 
           <button

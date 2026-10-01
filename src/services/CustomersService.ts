@@ -2,7 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { StoreState } from '../hooks/store/types';
 import { StoreUpdates } from './types';
 import { validText, isFiniteNumber, roundMoney, MAX_TEXT_LENGTH } from '../hooks/store/helpers';
-import { Customer, Transaction } from '../types';
+import { Customer, Transaction, User } from '../types';
 
 export class CustomersService {
   static addCustomer(
@@ -85,7 +85,7 @@ export class CustomersService {
     amount: number,
     safeId: string,
     notes: string,
-    currentUser: any
+    currentUser: User | null
   ): { transaction: Transaction | null; updates: StoreUpdates } {
     const { customers, safes } = state;
     const customer = customers.find(c => c.id === customerId);
@@ -123,7 +123,7 @@ export class CustomersService {
     walletId: string,
     cashSafeId: string,
     notes: string,
-    currentUser: any
+    currentUser: User | null
   ): { transactions: Transaction[] | null; updates: StoreUpdates } {
     const { safes } = state;
     const wallet = safes.find(s => s.id === walletId);

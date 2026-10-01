@@ -17,6 +17,26 @@ export function calculateEAN13Checksum(code12: string): string {
 }
 
 /**
+ * التحقق من صحة باركود EAN-13
+ */
+export function isValidEAN13(barcode: string | undefined | null): boolean {
+  if (typeof barcode !== 'string') return false;
+  const clean = barcode.trim();
+  if (!/^\d{13}$/.test(clean)) return false;
+  return calculateEAN13Checksum(clean.slice(0, 12)) === clean[12];
+}
+
+/**
+ * التحقق من صلاحية أي باركود مستخدم في النظام (EAN-13 أو باركود مخصص)
+ */
+export function isValidBarcode(barcode: string | undefined | null): boolean {
+  if (typeof barcode !== 'string') return false;
+  const clean = barcode.trim();
+  if (clean.length < 3 || clean.length > 48) return false;
+  return /^[A-Za-z0-9_-]+$/.test(clean);
+}
+
+/**
  * Generates a unique 13-digit barcode with the Egypt (622) prefix.
  *
  *  ملاحظتين على النسخة القديمة:

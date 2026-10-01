@@ -6,8 +6,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import type { IMEIUnit, InventoryItem } from '../types';
-import { calculateEAN13Checksum, generateBarcode } from './barcode.ts';
+import type { IMEIUnit, InventoryItem } from '../types/index.ts';
+import { calculateEAN13Checksum, generateBarcode, isValidEAN13, isValidBarcode } from './barcode.ts';
 import { buildImeiStockIndex, groupCountsBy } from './stockCounts.ts';
 
 /** التحقق من خانة المراجعة (check digit) بطريقة EAN-13 القياسية. */
@@ -52,6 +52,40 @@ test('calculateEAN13Checksum matches the published EAN-13 check digits', () => {
   assert.equal(calculateEAN13Checksum('400638133393'), '1'); // 4006381333931
   assert.equal(calculateEAN13Checksum('590123412345'), '7'); // 5901234123457
   assert.equal(calculateEAN13Checksum('622123456789'), '1'); // 6221234567891
+});
+
+test('negative testing: invalid EAN-13 barcodes are rejected', () => {
+  // Wrong check digit
+  assert.equal(isValidEAN13('6221234567890'), false); // correct is 1
+  assert.equal(isValidEAN13('4006381333932'), false); // correct is 1
+  // Non-numeric characters
+  assert.equal(isValidEAN13('622123456789X'), false);
+  assert.equal(isValidEAN13('ABC1234567891'), false);
+  // Incorrect length
+  assert.equal(isValidEAN13('62212345678'), false); // 11 digits
+  assert.equal(isValidEAN13('62212345678912'), false); // 14 digits
+  assert.equal(isValidEAN13(''), false);
+  assert.equal(isValidEAN13(null), false);
+  assert.equal(isValidEAN13(undefined), false);
+
+  // Correct barcodes pass
+  assert.equal(isValidEAN13('4006381333931'), true);
+  assert.equal(isValidEAN13('6221234567891'), true);
+});
+
+test('negative testing: general barcode validation rejects dangerous and invalid input', () => {
+  assert.equal(isValidBarcode(''), false);
+  assert.equal(isValidBarcode('  '), false);
+  assert.equal(isValidBarcode('ab'), false); // too short (<3)
+  assert.equal(isValidBarcode('a'.repeat(50)), false); // too long (>48)
+  assert.equal(isValidBarcode('barcode<script>'), false);
+  assert.equal(isValidBarcode('barcode; DROP TABLE;'), false);
+  assert.equal(isValidBarcode('item name with spaces'), false);
+
+  // Valid alphanumeric / standard barcode IDs
+  assert.equal(isValidBarcode('ITEM-001'), true);
+  assert.equal(isValidBarcode('6221234567891'), true);
+  assert.equal(isValidBarcode('SKU_CASE_RED_12'), true);
 });
 
 // ────────────────────────── stock indexes ──────────────────────────

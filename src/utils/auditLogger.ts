@@ -58,9 +58,9 @@ export function createAuditEntry(params: {
   entityId?: string;
   details?: Record<string, unknown>;
   deviceName?: string;
-}): AuditLogEntry {
+}): Readonly<AuditLogEntry> {
   const user = params.user;
-  return {
+  const entry: AuditLogEntry = {
     id: uuidv4(),
     timestamp: new Date().toISOString(),
     userId: user?.id || 'system',
@@ -71,9 +71,10 @@ export function createAuditEntry(params: {
     description: params.description,
     severity: params.severity || 'info',
     entityId: params.entityId,
-    details: params.details,
+    details: params.details ? Object.freeze({ ...params.details }) : undefined,
     deviceName: params.deviceName || (typeof window !== 'undefined' && (window as unknown as { electronAPI?: unknown }).electronAPI ? 'الجهاز الرئيسي' : 'جهاز فرعي (LAN)'),
   };
+  return Object.freeze(entry);
 }
 
 // ===== صانعو الأحداث اليومية بصياغة عربية واضحة ومباشرة =====
@@ -238,6 +239,57 @@ export const auditEvents = {
       description: `قام ${user?.name || 'المدير'} بتعديل إعدادات "${settingSection}".`,
       severity: 'info',
       details: { settingSection },
+    });
+  },
+
+  // تعديل سعر البيع يدوياً (Price Override)
+  priceOverridden: (user: User | null, itemName: string, originalPrice: number, overridePrice: number, context?: string) => {
+    return createAuditEntry({
+      user,
+      category: 'sales',
+      action: 'تجاوز سعر البيع',
+      description: `قام ${user?.name || 'المستخدم'} بتجاوز السعر المحدد للصنف "${itemName}" من ${formatCurrency(originalPrice)} إلى ${formatCurrency(overridePrice)}${context ? ` في (${context})` : ''}.`,
+      severity: 'warning',
+      details: { itemName, originalPrice, overridePrice, context },
+    });
+  },
+
+  // تصفير أو إعادة ضبط المخزون (Stock Reset)
+  stockReset: (user: User | null, itemName: string, previousQty: number, resetTo: number, reason?: string) => {
+    return createAuditEntry({
+      user,
+      category: 'inventory',
+      action: 'إعادة ضبط المخزون',
+      description: `⚠️ إجراء إداري: قام ${user?.name || 'المدير'} بإعادة تعيين رصيد الصنف "${itemName}" من (${previousQty}) إلى (${resetTo})${reason ? ` - السبب: ${reason}` : ''}.`,
+      severity: 'danger',
+      details: { itemName, previousQty, resetTo, reason },
+    });
+  },
+
+  // إلغاء فاتورة بالكامل (Invoice Void)
+  invoiceVoided: (user: User | null, invoiceNumber: string, amount: number, reason?: string) => {
+    return createAuditEntry({
+      user,
+      category: 'sales',
+      action: 'إلغاء فاتورة بيع',
+      description: `⚠️ إجراء حرج: قام ${user?.name || 'المدير'} بإلغاء وإسقاط الفاتورة #${invoiceNumber} بالكامل بقيمة ${formatCurrency(amount)}${reason ? ` (السبب: ${reason})` : ''}.`,
+      severity: 'danger',
+      entityId: invoiceNumber,
+      details: { invoiceNumber, amount, reason },
+    });
+  },
+
+  // حذف كيان رئيسي (عميل أو مورد)
+  entityDeleted: (user: User | null, entityType: 'customer' | 'supplier' | 'category' | 'safe', entityName: string, balance?: number) => {
+    const typeAr = entityType === 'customer' ? 'العميل' : entityType === 'supplier' ? 'المورد' : entityType === 'safe' ? 'الخزنة' : 'التصنيف';
+    const balanceText = typeof balance === 'number' && balance !== 0 ? ` برصيد مالي ${formatCurrency(balance)}` : '';
+    return createAuditEntry({
+      user,
+      category: entityType === 'customer' ? 'customers' : entityType === 'supplier' ? 'suppliers' : entityType === 'safe' ? 'finance' : 'inventory',
+      action: `حذف ${typeAr}`,
+      description: `قام ${user?.name || 'المدير'} بحذف ${typeAr} "${entityName}"${balanceText} نهائياً.`,
+      severity: 'warning',
+      details: { entityType, entityName, balance },
     });
   },
 };

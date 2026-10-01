@@ -67,8 +67,13 @@ function setupCspHeaders() {
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     let appliesToApp = false;
     try {
-      const origin = new URL(details.url).origin;
-      appliesToApp = origin === appOrigin || origin === `http://127.0.0.1:${PREFERRED_PORT}`;
+      const parsed = new URL(details.url);
+      if (parsed.protocol === 'file:') {
+        appliesToApp = true;
+      } else {
+        const origin = parsed.origin;
+        appliesToApp = origin === appOrigin || origin === `http://127.0.0.1:${PREFERRED_PORT}`;
+      }
     } catch {
       appliesToApp = details.url.startsWith('file://');
     }
@@ -326,8 +331,9 @@ function setupIpc() {
 
   // طباعة تقرير HTML كامل — نافذة مخفية + حوار اختيار الطابعة
   ipcMain.handle('mobpos:print-html', async (_e, payload) => {
-    const html = typeof payload?.html === 'string' ? payload.html : '';
-    const silent = !!payload?.silent;
+    if (!payload || typeof payload !== 'object') return false;
+    const html = typeof payload.html === 'string' ? payload.html : '';
+    const silent = Boolean(payload.silent);
     if (!html) return false;
     return withReportWindow(html, (win) => {
       return new Promise((resolve) => {
@@ -341,11 +347,13 @@ function setupIpc() {
 
   // حفظ تقرير كـ PDF حقيقي مع نافذة اختيار مكان الحفظ
   ipcMain.handle('mobpos:save-pdf', async (_e, payload) => {
-    const html = typeof payload?.html === 'string' ? payload.html : '';
-    let fileName = typeof payload?.fileName === 'string' ? payload.fileName : 'report';
+    if (!payload || typeof payload !== 'object') return { ok: false, error: 'بيانات غير صالحة' };
+    const html = typeof payload.html === 'string' ? payload.html : '';
+    const rawFileName = typeof payload.fileName === 'string' ? payload.fileName : 'report';
     if (!html) return { ok: false, error: 'لا يوجد محتوى للتقرير' };
 
-    fileName = fileName.replace(/[[\]:*?/\\"<>|]/g, ' ').trim() || 'report';
+    // Prevent directory traversal and control characters
+    let fileName = path.basename(rawFileName).replace(/[[\]:*?/\\"<>|\x00-\x1f]/g, ' ').trim() || 'report';
     if (!fileName.toLowerCase().endsWith('.pdf')) fileName += '.pdf';
 
     try {
@@ -380,7 +388,8 @@ function setupIpc() {
 
   // أزرار شريط العنوان المخصص
   ipcMain.handle('mobpos:window-control', async (_e, action) => {
-    if (!mainWindow) return;
+    if (!mainWindow || typeof action !== 'string') return;
+    if (!['minimize', 'maximize-toggle', 'close'].includes(action)) return;
     if (action === 'minimize') mainWindow.minimize();
     else if (action === 'maximize-toggle') {
       if (mainWindow.isMaximized()) mainWindow.unmaximize();

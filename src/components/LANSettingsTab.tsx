@@ -201,10 +201,10 @@ export default function LANSettingsTab({ settings, onSaveSettings }: LANSettings
       <div className="bg-white dark:bg-gray-800 p-5 rounded-2xl border border-gray-200 dark:border-gray-700 space-y-3">
         <h3 className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
           <KeyRound className="w-4 h-4 text-amber-500" />
-          حماية أجهزة الشبكة برمز سري (PIN)
+          حماية أجهزة الشبكة ودخول سريع برمز (PIN)
         </h3>
         <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
-          يمكنك تعيين رمز سري قصير (PIN) لحماية النظام حتى لا يستطيع أي شخص على نفس الواي فاي فتح الكاشير دون إذنه.
+          يمكنك تعيين رمز سري قصير (PIN) لحماية النظام، حيث يمكن استخدامه للدخول السريع من الموبايل أو أي جهاز على نفس شبكة الواي فاي مباشرة بالإضافة لحسابات المستخدمين.
         </p>
 
         <div className="flex items-center gap-3 max-w-md pt-1">

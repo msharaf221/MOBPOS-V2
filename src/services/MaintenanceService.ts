@@ -2,7 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { StoreState } from '../hooks/store/types';
 import { StoreUpdates } from './types';
 import { validText, isFiniteNumber, isPositiveInteger, roundMoney } from '../hooks/store/helpers';
-import { MaintenancePart, Transaction, Maintenance } from '../types';
+import { MaintenancePart, Transaction, Maintenance, User } from '../types';
 
 export class MaintenanceService {
   static addMaintenancePart(
@@ -76,7 +76,7 @@ export class MaintenanceService {
     id: string,
     collectedAmount: number,
     safeId: string,
-    currentUser: any
+    currentUser: User | null
   ): { ok: true; updates: StoreUpdates } | { ok: false; error: string } {
     const { maintenance, safes } = state;
     const maint = maintenance.find(m => m.id === id);

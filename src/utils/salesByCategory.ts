@@ -11,7 +11,8 @@
 //  الدوال هنا لا تلمس React ولا IndexedDB — عشان تتختبر بسهولة.
 // ============================================================
 
-import type { Category, InventoryItem, Sale } from '../types';
+import type { Category, InventoryItem, Sale } from '../types/index.ts';
+import { roundMoney } from '../hooks/store/helpers.ts';
 
 /** شريحة واحدة: اسم الفئة + قيمة مبيعاتها. */
 export interface CategorySalesSlice {
@@ -152,12 +153,12 @@ export function aggregateSalesByCategory({
       if (!invItem) continue;
 
       const name = categoryNameById.get(invItem.categoryId) || UNCATEGORIZED_LABEL;
-      totals.set(name, (totals.get(name) ?? 0) + (item.total || 0));
+      totals.set(name, roundMoney((totals.get(name) ?? 0) + (item.total || 0)));
     }
   }
 
   return [...totals.entries()]
-    .map(([name, value]) => ({ name, value }))
+    .map(([name, value]) => ({ name, value: roundMoney(value) }))
     // الأعلى مبيعًا أولًا، والاسم كفاصل ثابت عند تساوي القيم (ترتيب حتمي).
     .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name, 'ar'));
 }
@@ -219,7 +220,7 @@ export function buildCategoryBreakdown(
   const otherLabel = options.otherLabel ?? UNCATEGORIZED_LABEL;
 
   const sorted = [...slices].sort((a, b) => b.value - a.value || a.name.localeCompare(b.name, 'ar'));
-  const total = sorted.reduce((sum, s) => sum + (s.value || 0), 0);
+  const total = roundMoney(sorted.reduce((sum, s) => sum + (s.value || 0), 0));
 
   // التجميع يفيد فقط لو العدد فعلاً أكبر من الحد — غير كده كل فئة تاخد شريحة
   // ولون خاص بها (تجميع فئة واحدة تحت «أخرى» هيبقى مريب).
@@ -243,7 +244,7 @@ export function buildCategoryBreakdown(
     groupedIntoOther: true
   }));
 
-  const otherValue = tailRows.reduce((sum, row) => sum + (row.value || 0), 0);
+  const otherValue = roundMoney(tailRows.reduce((sum, row) => sum + (row.value || 0), 0));
   const otherRow: CategoryBreakdownRow | null = tailRows.length
     ? {
         name: otherLabel,

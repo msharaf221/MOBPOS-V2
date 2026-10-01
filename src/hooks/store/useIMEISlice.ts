@@ -1,21 +1,9 @@
-// @ts-nocheck
-import { useCallback, useMemo } from 'react';
+import { useCallback } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { StoreState } from './types';
 import { useStoreDispatcher } from './useStoreDispatcher';
-import { indexedDBUtils } from '../useIndexedDB';
-import { validText, isFiniteNumber, isPositiveInteger, roundMoney, MAX_TEXT_LENGTH } from './helpers';
-import { hashPasswordForStorage, verifyLoginPassword, needsRehash } from '../../utils/passwords';
-import { authenticateLanUser, pushDelta } from '../../utils/lanSync';
-import { auditEvents } from '../../utils/auditLogger';
-import { buildAutoNotifications, mergeAutoNotifications } from '../../utils/alerts';
-import { planSettlementReversal, settledThroughSafes } from '../../utils/sideAccounts';
-import { summarizeReturns, returnsInPeriod } from '../../utils/returns';
-import { buildImeiStockIndex, isSellableUnit } from '../../utils/stockCounts';
-import { formatDate } from '../../utils/format';
-import { nextDocumentNumber } from '../../utils/sequence';
-import { initialUsers, initialCustomers, initialCategories, initialInventory, initialIMEIUnits, initialSales, initialSaleReturns, initialMaintenance, initialSafes, initialTransactions, initialSuppliers, initialPurchases, initialStockWastes, initialInventoryAudits, initialSideAccountEntries, initialNotifications, initialAuditLogs } from '../../data/initialData';
-import { User, Customer, Category, InventoryItem, IMEIUnit, Sale, SaleItem, SaleReturn, Maintenance, MaintenancePart, Safe, Transaction, Supplier, Notification, Purchase, PurchaseItem, StockWaste, InventoryAudit, InventoryAuditItem, SideAccountEntry, SideAccountEntryType, SideAccountImpact, AppSettings, AuditLogEntry } from '../../types';
+import { validText, isFiniteNumber, roundMoney } from './helpers';
+import { IMEIUnit } from '../../types';
 
 export function useIMEISlice(state: StoreState) {
     const dispatch = useStoreDispatcher(state);
@@ -52,10 +40,10 @@ export function useIMEISlice(state: StoreState) {
       if (updates.purchasePrice !== undefined && (!isFiniteNumber(updates.purchasePrice) || updates.purchasePrice < 0)) return;
       if (updates.imei1 && imeiUnits.some(u => u.id !== id && (u.imei1 === updates.imei1 || u.imei2 === updates.imei1))) return;
       if (updates.imei2 && imeiUnits.some(u => u.id !== id && (u.imei1 === updates.imei2 || u.imei2 === updates.imei2))) return;
-      const safeUpdates = { ...updates, ...(updates.purchasePrice !== undefined ? { purchasePrice: roundMoney(updates.purchasePrice) } : {}) };
+      const safeUpdates: Record<string, unknown> = { ...updates, ...(updates.purchasePrice !== undefined ? { purchasePrice: roundMoney(updates.purchasePrice) } : {}) };
       delete safeUpdates.id;
       delete safeUpdates.createdAt;
-      setImeiUnits(prev => prev.map(u => u.id === id ? { ...u, ...safeUpdates } : u));
+      setImeiUnits(prev => prev.map(u => u.id === id ? { ...u, ...(safeUpdates as Partial<IMEIUnit>) } : u));
     }, [imeiUnits, inventory, setImeiUnits]);
   
 

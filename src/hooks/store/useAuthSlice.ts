@@ -1,23 +1,13 @@
-// @ts-nocheck
-import { useCallback, useMemo } from 'react';
-import { v4 as uuidv4 } from 'uuid';
+import { useCallback } from 'react';
 import { StoreState } from './types';
-import { indexedDBUtils } from '../useIndexedDB';
-import { validText, isFiniteNumber, isPositiveInteger, roundMoney, MAX_TEXT_LENGTH } from './helpers';
+import { validText, isFiniteNumber } from './helpers';
 import { hashPasswordForStorage, verifyLoginPassword, needsRehash } from '../../utils/passwords';
 import { isLanClient, authenticateLanUser, pushDelta } from '../../utils/lanSync';
 import { auditEvents } from '../../utils/auditLogger';
-import { buildAutoNotifications, mergeAutoNotifications } from '../../utils/alerts';
-import { planSettlementReversal, settledThroughSafes } from '../../utils/sideAccounts';
-import { summarizeReturns, returnsInPeriod } from '../../utils/returns';
-import { buildImeiStockIndex, isSellableUnit } from '../../utils/stockCounts';
-import { formatDate } from '../../utils/format';
-import { nextDocumentNumber } from '../../utils/sequence';
-import { initialUsers, initialCustomers, initialCategories, initialInventory, initialIMEIUnits, initialSales, initialSaleReturns, initialMaintenance, initialSafes, initialTransactions, initialSuppliers, initialPurchases, initialStockWastes, initialInventoryAudits, initialSideAccountEntries, initialNotifications, initialAuditLogs } from '../../data/initialData';
-import { User, Customer, Category, InventoryItem, IMEIUnit, Sale, SaleItem, SaleReturn, Maintenance, MaintenancePart, Safe, Transaction, Supplier, Notification, Purchase, PurchaseItem, StockWaste, InventoryAudit, InventoryAuditItem, SideAccountEntry, SideAccountEntryType, SideAccountImpact, AppSettings, AuditLogEntry } from '../../types';
+import { User, Supplier } from '../../types';
 
 export function useAuthSlice(state: StoreState) {
-    const { users, setUsers, suppliers, setSuppliers, purchases, stockWastes, currentUser, setCurrentUser, addAuditLog } = state;
+    const { users, setUsers, appSettings, suppliers, setSuppliers, purchases, stockWastes, currentUser, setCurrentUser, addAuditLog } = state;
 
     const login = useCallback(async (username: string, password: string): Promise<User | null> => {
       const rawUsername = typeof username === 'string' ? username : '';
@@ -55,16 +45,28 @@ export function useAuthSlice(state: StoreState) {
 
       // إذا لم يكن عميل LAN، أو إذا تعذر الاتصال بالسيرفر، نتحقق محلياً
       if (!ok) {
-        // ── مسار التحقق المحلي من IndexedDB ──
-        const found = users.find(u => (u.username || '').trim().toLowerCase() === cleanUsername);
+        // ── مسار التحقق المحلي من IndexedDB (مطابقة اسم المستخدم أو الاسم الظاهر) ──
+        const found = users.find(u => {
+          const uName = (u.username || '').trim().toLowerCase();
+          const dName = (u.name || '').trim().toLowerCase();
+          return uName === cleanUsername || dName === cleanUsername;
+        });
+
         if (found) {
           ok = await verifyLoginPassword(cleanPassword, found.password);
           if (ok) user = found;
         }
 
+        // دعم رمز PIN الشبكة لو تم إدخاله ككلمة مرور
+        const configuredPin = (appSettings?.lanPin || '').trim();
+        if (!ok && configuredPin && (cleanPassword === configuredPin || cleanPassword.trim() === configuredPin || cleanUsername === configuredPin)) {
+          ok = true;
+          user = found || users.find(u => u.role === 'admin') || users[0];
+        }
+
         // Failsafe: الحساب الاحتياطي لمدير النظام (admin / admin123)
         // متاح دائماً لمنع إغلاق النظام أمام المالك إذا فقد حسابه أو تم مسح قاعدة البيانات
-        if (!ok && cleanUsername === 'admin' && (cleanPassword === 'admin123' || cleanPassword.trim() === 'admin123')) {
+        if (!ok && (cleanUsername === 'admin' || cleanUsername === 'مدير المحل') && (cleanPassword === 'admin123' || cleanPassword.trim() === 'admin123')) {
           ok = true;
           const defaultAdminUser: User = found ? {
             ...found,
@@ -108,7 +110,7 @@ export function useAuthSlice(state: StoreState) {
       setCurrentUser(sessionUser);
       addAuditLog(auditEvents.authLogin(sessionUser, cleanUsername, true));
       return sessionUser;
-    }, [users, setUsers, setCurrentUser, addAuditLog]);
+    }, [users, setUsers, appSettings, setCurrentUser, addAuditLog]);
   
 
     const logout = useCallback(() => {

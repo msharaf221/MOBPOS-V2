@@ -2,7 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { StoreState } from '../hooks/store/types';
 import { StoreUpdates } from './types';
 import { isFiniteNumber, roundMoney } from '../hooks/store/helpers';
-import { Transaction } from '../types';
+import { Transaction, User } from '../types';
 
 export class SafesService {
   static transferBetweenSafes(
@@ -10,7 +10,7 @@ export class SafesService {
     fromId: string,
     toId: string,
     amount: number,
-    currentUser: any
+    currentUser: User | null
   ): { ok: boolean; updates: StoreUpdates } {
     const { safes } = state;
     const from = safes.find(s => s.id === fromId);

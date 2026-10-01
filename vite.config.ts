@@ -18,7 +18,6 @@ const isElectronDev = process.env.MOBPOS_ELECTRON_DEV === '1';
 import { createRequire } from "module";
 
 const require = createRequire(import.meta.url);
-const lanHub = require("./electron/lan-hub.cjs");
 
 const lanPlugin = {
   name: "mobpos-lan-api",
@@ -26,7 +25,9 @@ const lanPlugin = {
     server.middlewares.use(async (req: any, res: any, next: any) => {
       try {
         if (req.url && req.url.startsWith("/api/lan/")) {
-          const handled = await lanHub.handleLanRequest(req, res, 8420);
+          delete require.cache[require.resolve("./electron/lan-hub.cjs")];
+          const dynamicLanHub = require("./electron/lan-hub.cjs");
+          const handled = await dynamicLanHub.handleLanRequest(req, res, 8420);
           if (handled) return;
         }
       } catch (e) {

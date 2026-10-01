@@ -51,3 +51,44 @@ test('authLogin generates success and failed login records', () => {
   assert.equal(failure.severity, 'danger');
   assert.match(failure.description, /محاولة دخول فاشلة/);
 });
+
+test('critical mutation events (price overrides, stock resets, invoice voids, entity deletions) log accurately', () => {
+  // Price override
+  const priceEvent = auditEvents.priceOverridden(dummyUser, 'سماعة بلوتوث', 500, 450, 'خصم خاص لكاشير');
+  assert.equal(priceEvent.category, 'sales');
+  assert.equal(priceEvent.severity, 'warning');
+  assert.match(priceEvent.description, /تجاوز السعر/);
+  assert.equal(priceEvent.details?.originalPrice, 500);
+  assert.equal(priceEvent.details?.overridePrice, 450);
+
+  // Stock reset
+  const resetEvent = auditEvents.stockReset(dummyUser, 'جراب سيليكون', 20, 0, 'تلف مخزون بالكامل');
+  assert.equal(resetEvent.category, 'inventory');
+  assert.equal(resetEvent.severity, 'danger');
+  assert.match(resetEvent.description, /إعادة تعيين رصيد/);
+  assert.equal(resetEvent.details?.resetTo, 0);
+
+  // Invoice void
+  const voidEvent = auditEvents.invoiceVoided(dummyUser, 'INV-2026-999', 1200, 'طلب العميل إلغاء المعاملة');
+  assert.equal(voidEvent.category, 'sales');
+  assert.equal(voidEvent.severity, 'danger');
+  assert.match(voidEvent.description, /إلغاء وإسقاط الفاتورة/);
+  assert.equal(voidEvent.details?.amount, 1200);
+
+  // Entity deletion
+  const delCustEvent = auditEvents.entityDeleted(dummyUser, 'customer', 'شركة النصر', 5000);
+  assert.equal(delCustEvent.category, 'customers');
+  assert.equal(delCustEvent.severity, 'warning');
+  assert.match(delCustEvent.description, /حذف العميل "شركة النصر"/);
+});
+
+test('audit log entries are deeply immutable with frozen objects and valid ISO timestamp', () => {
+  const event = auditEvents.saleCreated(dummyUser, 'INV-2026-002', 100, 100);
+  assert.ok(Object.isFrozen(event), 'Audit entry must be frozen');
+  if (event.details) {
+    assert.ok(Object.isFrozen(event.details), 'Audit entry details must be frozen');
+  }
+  // Timestamp must be a valid ISO 8601 string
+  assert.ok(!Number.isNaN(new Date(event.timestamp).getTime()));
+  assert.match(event.timestamp, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+});

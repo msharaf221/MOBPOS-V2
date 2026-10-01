@@ -2,6 +2,11 @@ import { useState, useEffect } from 'react';
 import { useStore } from './hooks/useStore';
 import { ActiveLicense, PLAN_FEATURES } from './license/types';
 import { clearLicense, verifyStoredActivation, isLicenseExpired } from './license/engine';
+import type {
+  User, Customer, Category, InventoryItem, IMEIUnit, Sale, SaleReturn,
+  Maintenance, Safe, Transaction, Supplier, Purchase, StockWaste,
+  InventoryAudit as InventoryAuditModel, SideAccountEntry, Notification, AppSettings, AuditLogEntry
+} from './types';
 import { maybeRunScheduledBackup, requestPersistentStorage } from './utils/backup';
 import LicenseActivation from './components/LicenseActivation';
 import LicenseExpired from './components/LicenseExpired';
@@ -157,25 +162,25 @@ export default function App() {
       // 1. Client Mode: Pull fresh central data from the host
       fetchCentralData().then((centralData) => {
         if (!centralData) return;
-        if (Array.isArray(centralData.users) && centralData.users.length > 0) store.setUsers(centralData.users as any);
-        if (Array.isArray(centralData.customers)) store.setCustomers(centralData.customers as any);
-        if (Array.isArray(centralData.categories)) store.setCategories(centralData.categories as any);
-        if (Array.isArray(centralData.inventory)) store.setInventory(centralData.inventory as any);
-        if (Array.isArray(centralData.imeiUnits)) store.setImeiUnits(centralData.imeiUnits as any);
-        if (Array.isArray(centralData.sales)) store.setSales(centralData.sales as any);
-        if (Array.isArray(centralData.saleReturns)) store.setSaleReturns(centralData.saleReturns as any);
-        if (Array.isArray(centralData.maintenance)) store.setMaintenance(centralData.maintenance as any);
-        if (Array.isArray(centralData.safes)) store.setSafes(centralData.safes as any);
-        if (Array.isArray(centralData.transactions)) store.setTransactions(centralData.transactions as any);
-        if (Array.isArray(centralData.suppliers)) store.setSuppliers(centralData.suppliers as any);
-        if (Array.isArray(centralData.purchases)) store.setPurchases(centralData.purchases as any);
-        if (Array.isArray(centralData.stockWastes)) store.setStockWastes(centralData.stockWastes as any);
-        if (Array.isArray(centralData.inventoryAudits)) store.setInventoryAudits(centralData.inventoryAudits as any);
-        if (Array.isArray(centralData.sideAccountEntries)) store.setSideAccountEntries(centralData.sideAccountEntries as any);
-        if (Array.isArray(centralData.notifications)) store.setNotifications(centralData.notifications as any);
-        if (Array.isArray(centralData.auditLogs)) store.setAuditLogs(centralData.auditLogs as any);
+        if (Array.isArray(centralData.users) && centralData.users.length > 0) store.setUsers(centralData.users as User[]);
+        if (Array.isArray(centralData.customers)) store.setCustomers(centralData.customers as Customer[]);
+        if (Array.isArray(centralData.categories)) store.setCategories(centralData.categories as Category[]);
+        if (Array.isArray(centralData.inventory)) store.setInventory(centralData.inventory as InventoryItem[]);
+        if (Array.isArray(centralData.imeiUnits)) store.setImeiUnits(centralData.imeiUnits as IMEIUnit[]);
+        if (Array.isArray(centralData.sales)) store.setSales(centralData.sales as Sale[]);
+        if (Array.isArray(centralData.saleReturns)) store.setSaleReturns(centralData.saleReturns as SaleReturn[]);
+        if (Array.isArray(centralData.maintenance)) store.setMaintenance(centralData.maintenance as Maintenance[]);
+        if (Array.isArray(centralData.safes)) store.setSafes(centralData.safes as Safe[]);
+        if (Array.isArray(centralData.transactions)) store.setTransactions(centralData.transactions as Transaction[]);
+        if (Array.isArray(centralData.suppliers)) store.setSuppliers(centralData.suppliers as Supplier[]);
+        if (Array.isArray(centralData.purchases)) store.setPurchases(centralData.purchases as Purchase[]);
+        if (Array.isArray(centralData.stockWastes)) store.setStockWastes(centralData.stockWastes as StockWaste[]);
+        if (Array.isArray(centralData.inventoryAudits)) store.setInventoryAudits(centralData.inventoryAudits as InventoryAuditModel[]);
+        if (Array.isArray(centralData.sideAccountEntries)) store.setSideAccountEntries(centralData.sideAccountEntries as SideAccountEntry[]);
+        if (Array.isArray(centralData.notifications)) store.setNotifications(centralData.notifications as Notification[]);
+        if (Array.isArray(centralData.auditLogs)) store.setAuditLogs(centralData.auditLogs as AuditLogEntry[]);
         if (centralData.appSettings && typeof centralData.appSettings === 'object') {
-          store.setAppSettings(centralData.appSettings as any);
+          store.setAppSettings(centralData.appSettings as AppSettings);
         }
       }).catch((e) => console.warn('[App] fetchCentralData error:', e));
     } else {
@@ -205,24 +210,31 @@ export default function App() {
     // 3. Both listen to live SSE events from LAN Hub
     cleanupStream = connectLanStream({
       onSync: ({ storeName, items, deltaType }) => {
-        const storeSetters: Record<string, (val: any) => void> = {
-          users: store.setUsers,
-          customers: store.setCustomers,
-          categories: store.setCategories,
-          inventory: store.setInventory,
-          imeiUnits: store.setImeiUnits,
-          sales: store.setSales,
-          saleReturns: store.setSaleReturns,
-          maintenance: store.setMaintenance,
-          safes: store.setSafes,
-          transactions: store.setTransactions,
-          suppliers: store.setSuppliers,
-          purchases: store.setPurchases,
-          stockWastes: store.setStockWastes,
-          inventoryAudits: store.setInventoryAudits,
-          sideAccountEntries: store.setSideAccountEntries,
-          notifications: store.setNotifications,
-          auditLogs: store.setAuditLogs,
+        type Identifiable = { id: string; [key: string]: unknown };
+        const storeSetters: Record<string, (val: unknown) => void> = {
+          users: store.setUsers as (val: unknown) => void,
+          customers: store.setCustomers as (val: unknown) => void,
+          categories: store.setCategories as (val: unknown) => void,
+          inventory: store.setInventory as (val: unknown) => void,
+          imeiUnits: store.setImeiUnits as (val: unknown) => void,
+          sales: store.setSales as (val: unknown) => void,
+          saleReturns: store.setSaleReturns as (val: unknown) => void,
+          maintenance: store.setMaintenance as (val: unknown) => void,
+          safes: store.setSafes as (val: unknown) => void,
+          transactions: store.setTransactions as (val: unknown) => void,
+          suppliers: store.setSuppliers as (val: unknown) => void,
+          purchases: store.setPurchases as (val: unknown) => void,
+          stockWastes: store.setStockWastes as (val: unknown) => void,
+          inventoryAudits: store.setInventoryAudits as (val: unknown) => void,
+          sideAccountEntries: store.setSideAccountEntries as (val: unknown) => void,
+          notifications: store.setNotifications as (val: unknown) => void,
+          auditLogs: store.setAuditLogs as (val: unknown) => void,
+          appSettings: (items: unknown) => {
+            const val = Array.isArray(items) ? items[0] : items;
+            if (val && typeof val === 'object') {
+              store.setAppSettings(val as AppSettings);
+            }
+          },
         };
 
         const setter = storeSetters[storeName];
@@ -231,18 +243,26 @@ export default function App() {
         if (deltaType === 'replace') {
           setter(items);
         } else if (deltaType === 'delete') {
-          const deleteIds = new Set((items as any[]).map((it) => it.id));
-          setter((prev: any[]) => prev.filter((it) => !deleteIds.has(it.id)));
+          const deleteIds = new Set((items as Identifiable[]).map((it) => it.id));
+          (setter as unknown as (fn: (prev: Identifiable[]) => Identifiable[]) => void)((prev: Identifiable[]) =>
+            prev.filter((it) => !deleteIds.has(it.id))
+          );
         } else if (deltaType === 'increment') {
-          setter((prev: any[]) => {
+          (setter as unknown as (fn: (prev: Identifiable[]) => Identifiable[]) => void)((prev: Identifiable[]) => {
             const map = new Map(prev.map((it) => [it.id, it]));
-            for (const it of items as any[]) {
+            for (const it of items as Identifiable[]) {
               const existing = map.get(it.id);
               if (existing) {
                 const updated = { ...existing };
                 for (const [key, val] of Object.entries(it)) {
                   if (key !== 'id' && typeof val === 'number') {
-                    updated[key] = (updated[key] || 0) + val;
+                    const currentVal = typeof updated[key] === 'number' ? (updated[key] as number) : 0;
+                    const newVal = currentVal + val;
+                    if (storeName === 'inventory' && key === 'quantity') {
+                      updated[key] = Math.max(0, newVal);
+                    } else {
+                      updated[key] = newVal;
+                    }
                   }
                 }
                 map.set(it.id, updated);
@@ -252,9 +272,9 @@ export default function App() {
           });
         } else {
           // Upsert (Deep merge)
-          setter((prev: any[]) => {
+          (setter as unknown as (fn: (prev: Identifiable[]) => Identifiable[]) => void)((prev: Identifiable[]) => {
             const map = new Map(prev.map((it) => [it.id, it]));
-            for (const it of items as any[]) {
+            for (const it of items as Identifiable[]) {
               const existing = map.get(it.id);
               if (existing) {
                 map.set(it.id, { ...existing, ...it });
@@ -289,6 +309,12 @@ export default function App() {
     if (isLanClient() || store.isLoading || !Array.isArray(store.users) || store.users.length === 0) return;
     pushDelta('users', store.users, 'replace').catch(() => undefined);
   }, [store.users, store.isLoading]);
+
+  // مزامنة تلقائية فورية لإعدادات المحل ورمز PIN الشبكة للجهاز المركزي
+  useEffect(() => {
+    if (isLanClient() || store.isLoading || !store.appSettings) return;
+    pushDelta('appSettings', [store.appSettings], 'replace').catch(() => undefined);
+  }, [store.appSettings, store.isLoading]);
 
   // Apply dark mode
   useEffect(() => {

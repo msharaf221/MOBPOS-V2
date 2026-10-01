@@ -3,7 +3,7 @@ import { StoreState } from '../hooks/store/types';
 import { StoreUpdates } from './types';
 import { validText, isFiniteNumber, roundMoney, MAX_TEXT_LENGTH } from '../hooks/store/helpers';
 import { planSettlementReversal, settledThroughSafes } from '../utils/sideAccounts';
-import { SideAccountEntryType, SideAccountImpact, Safe, Transaction, SideAccountEntry } from '../types';
+import { SideAccountEntryType, SideAccountImpact, Safe, Transaction, SideAccountEntry, User } from '../types';
 
 export class SideAccountsService {
   static addSideAccountEntry(
@@ -20,7 +20,7 @@ export class SideAccountsService {
       dueDate: string;
       newSafeName?: string;
     },
-    currentUser: any
+    currentUser: User | null
   ): { entry: SideAccountEntry | null; updates: StoreUpdates } {
     const { safes } = state;
     
@@ -128,7 +128,7 @@ export class SideAccountsService {
     state: StoreState,
     id: string,
     updates: Partial<Pick<SideAccountEntry, 'paidAmount' | 'status' | 'notes' | 'dueDate'>> & { safeId?: string },
-    currentUser: any
+    currentUser: User | null
   ): { entry: SideAccountEntry | null; storeUpdates: StoreUpdates } {
     const { safes, sideAccountEntries, transactions } = state;
     const entry = sideAccountEntries.find(e => e.id === id);

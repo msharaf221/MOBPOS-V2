@@ -12,7 +12,8 @@
 //  الملغي (الكاش المرتجع بيفضل محسوب لأنه حركة خزنة حقيقية ومستقلة).
 // ============================================================
 
-import type { Sale, SaleReturn } from '../types';
+import type { Sale, SaleReturn } from '../types/index.ts';
+import { roundMoney } from '../hooks/store/helpers.ts';
 
 export interface ReturnsSummary {
   /** عدد عمليات المرتجع. */
@@ -42,7 +43,7 @@ const EMPTY: ReturnsSummary = {
 export function summarizeReturns(returns: readonly SaleReturn[]): ReturnsSummary {
   if (!Array.isArray(returns) || returns.length === 0) return { ...EMPTY };
 
-  return returns.reduce<ReturnsSummary>((acc, record) => {
+  const raw = returns.reduce<ReturnsSummary>((acc, record) => {
     // السجلات القديمة (قبل الإصلاح) الفاتورة اتخصمت بيها بالفعل.
     const isLedgerComplete = record.netValue !== undefined;
     acc.count += 1;
@@ -56,6 +57,16 @@ export function summarizeReturns(returns: readonly SaleReturn[]): ReturnsSummary
     }
     return acc;
   }, { ...EMPTY });
+
+  return {
+    count: raw.count,
+    quantity: raw.quantity,
+    cashRefunded: roundMoney(raw.cashRefunded),
+    revenueReversed: roundMoney(raw.revenueReversed),
+    costReturned: roundMoney(raw.costReturned),
+    profitReversed: roundMoney(raw.profitReversed),
+    debtForgiven: roundMoney(raw.debtForgiven),
+  };
 }
 
 /** فلترة المرتجعات على فترة زمنية (بتاريخ المرتجع نفسه، مش تاريخ الفاتورة). */
@@ -87,11 +98,11 @@ export function saleNetTotals(sale: Sale, allReturns: readonly SaleReturn[]): Sa
   const own = allReturns.filter(record => record.saleId === sale.id);
   const summary = summarizeReturns(own);
   return {
-    returnedValue: round(summary.revenueReversed),
-    netTotal: round(Math.max(0, num(sale.total) - summary.revenueReversed)),
-    netProfit: round(num(sale.profit) - summary.profitReversed),
-    netRemaining: round(Math.max(0, num(sale.remaining) - summary.debtForgiven)),
-    cashRefunded: round(summary.cashRefunded),
+    returnedValue: roundMoney(summary.revenueReversed),
+    netTotal: roundMoney(Math.max(0, num(sale.total) - summary.revenueReversed)),
+    netProfit: roundMoney(num(sale.profit) - summary.profitReversed),
+    netRemaining: roundMoney(Math.max(0, num(sale.remaining) - summary.debtForgiven)),
+    cashRefunded: roundMoney(summary.cashRefunded),
     hasReturns: own.length > 0,
   };
 }
@@ -107,8 +118,4 @@ export function returnedQuantityOf(
     .filter(record => record.saleId === saleId && record.saleItemId === saleItemId)
     .reduce((sum, record) => sum + num(record.quantity), 0);
   return Math.max(fromRecords, num(legacyFallback));
-}
-
-function round(value: number): number {
-  return Math.round(value * 100) / 100;
 }

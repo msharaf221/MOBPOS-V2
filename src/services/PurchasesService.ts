@@ -3,7 +3,7 @@ import { StoreState } from '../hooks/store/types';
 import { StoreUpdates } from './types';
 import { roundMoney, isFiniteNumber, isPositiveInteger, validText, MAX_TEXT_LENGTH } from '../hooks/store/helpers';
 import { nextDocumentNumber } from '../utils/sequence';
-import { PurchaseItem, Purchase, Transaction, IMEIUnit } from '../types';
+import { PurchaseItem, Purchase, Transaction, IMEIUnit, User } from '../types';
 
 export class PurchasesService {
   static createPurchase(
@@ -21,7 +21,7 @@ export class PurchasesService {
       notes?: string;
       updateCostPrice?: boolean;
     },
-    currentUser: any
+    currentUser: User | null
   ): { ok: true; purchase: Purchase; updates: StoreUpdates } | { ok: false; error: string } {
     const { suppliers, inventory, imeiUnits, safes, purchases } = state;
     
@@ -124,8 +124,8 @@ export class PurchasesService {
       updates.deltas.push({ type: 'upsert', storeName: 'imeiUnits', items: newUnits });
     }
 
-    const inventoryIncrements: any[] = [];
-    const inventoryCostUpserts: any[] = [];
+    const inventoryIncrements: Array<{ id: string; quantity: number }> = [];
+    const inventoryCostUpserts: Array<{ id: string; costPrice: number }> = [];
     
     data.items.forEach(line => {
       const item = inventory.find(inv => inv.id === line.inventoryId);
@@ -183,7 +183,7 @@ export class PurchasesService {
     amount: number,
     safeId: string,
     notes: string,
-    currentUser: any
+    currentUser: User | null
   ): { ok: true; updates: StoreUpdates } | { ok: false; error: string } {
     const { suppliers, safes } = state;
     const supplier = suppliers.find(s => s.id === supplierId);
