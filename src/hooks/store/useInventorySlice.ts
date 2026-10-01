@@ -27,7 +27,7 @@ export function useInventorySlice(state: StoreState) {
       const trimmedName = typeof item.name === 'string' ? item.name.trim() : '';
       const trimmedCode = typeof item.code === 'string' ? item.code.trim() : '';
       const trimmedBarcode = typeof item.barcode === 'string' ? item.barcode.trim() : '';
-      const finalCode = trimmedCode || generateProductCode();
+      const finalCode = trimmedCode || "PRD-" + Math.random().toString(36).substring(2, 8).toUpperCase();
   
       if (!validText(trimmedName, 200)) return null;
       if (!validText(finalCode, 100) || trimmedBarcode.length > 100) return null;
@@ -55,7 +55,7 @@ export function useInventorySlice(state: StoreState) {
       dispatch({ deltas: [{ type: 'upsert', storeName: 'inventory', items: [newItem] }] });
       addAuditLog(auditEvents.inventoryAdded(currentUser, newItem.name, newItem.quantity, newItem.sellPrice));
       return newItem;
-    }, [categories, generateProductCode, inventory, dispatch, currentUser, addAuditLog]);
+    }, [categories, inventory, dispatch, currentUser, addAuditLog]);
 
   
 

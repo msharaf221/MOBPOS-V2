@@ -19,7 +19,10 @@ import { initialUsers, initialCustomers, initialCategories, initialInventory, in
 import { User, Customer, Category, InventoryItem, IMEIUnit, Sale, SaleItem, SaleReturn, Maintenance, MaintenancePart, Safe, Transaction, Supplier, Notification, Purchase, PurchaseItem, StockWaste, InventoryAudit, InventoryAuditItem, SideAccountEntry, SideAccountEntryType, SideAccountImpact, AppSettings, AuditLogEntry } from '../../types';
 
 export function useSafesSlice(state: StoreState) {
+    const dispatch = useStoreDispatcher(state);
+
     const { safes, setSafes, transactions, setTransactions, sideAccountEntries, currentUser } = state;
+
 
     
     const addSafe = useCallback((safe: Omit<Safe, 'id'>) => {
@@ -80,7 +83,7 @@ export function useSafesSlice(state: StoreState) {
   
 
     
-    const dispatch = useStoreDispatcher(state);
+    
 
     const transferBetweenSafes = useCallback((fromId: string, toId: string, amount: number) => {
       const { ok, updates } = SafesService.transferBetweenSafes(state, fromId, toId, amount, currentUser);

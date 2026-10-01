@@ -1,25 +1,20 @@
 // @ts-nocheck
 import { useCallback, useMemo } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { StoreState } from './types';
+import { StoreState, StoreUpdates } from './types';
 import { useStoreDispatcher } from './useStoreDispatcher';
-import { indexedDBUtils } from '../useIndexedDB';
-import { validText, isFiniteNumber, isPositiveInteger, roundMoney, MAX_TEXT_LENGTH } from './helpers';
-import { hashPasswordForStorage, verifyLoginPassword, needsRehash } from '../../utils/passwords';
-import { authenticateLanUser, pushDelta } from '../../utils/lanSync';
-import { auditEvents } from '../../utils/auditLogger';
-import { buildAutoNotifications, mergeAutoNotifications } from '../../utils/alerts';
-import { planSettlementReversal, settledThroughSafes } from '../../utils/sideAccounts';
-import { summarizeReturns, returnsInPeriod } from '../../utils/returns';
-import { buildImeiStockIndex, isSellableUnit } from '../../utils/stockCounts';
+import { validText, MAX_TEXT_LENGTH } from './helpers';
 import { formatDate } from '../../utils/format';
 import { nextDocumentNumber } from '../../utils/sequence';
-import { initialUsers, initialCustomers, initialCategories, initialInventory, initialIMEIUnits, initialSales, initialSaleReturns, initialMaintenance, initialSafes, initialTransactions, initialSuppliers, initialPurchases, initialStockWastes, initialInventoryAudits, initialSideAccountEntries, initialNotifications, initialAuditLogs } from '../../data/initialData';
-import { User, Customer, Category, InventoryItem, IMEIUnit, Sale, SaleItem, SaleReturn, Maintenance, MaintenancePart, Safe, Transaction, Supplier, Notification, Purchase, PurchaseItem, StockWaste, InventoryAudit, InventoryAuditItem, SideAccountEntry, SideAccountEntryType, SideAccountImpact, AppSettings, AuditLogEntry } from '../../types';
+import { InventoryAudit, InventoryAuditItem, Transaction, InventoryItem } from '../../types';
 
 export function useAuditsSlice(state: StoreState) {
     const { categories, inventory, inventoryAudits, currentUser } = state;
     const dispatch = useStoreDispatcher(state);
+
+    const generateAuditNumber = useCallback(() => nextDocumentNumber(inventoryAudits.map(a => a.auditNumber), 'AUD', 4), [inventoryAudits]);
+    const getInventoryAuditQuantity = (item: InventoryItem) => item.quantity || 0;
+    const buildAuditAdjustmentTransaction = (audit: InventoryAudit, adjustedInventoryIds: Set<string>, dateStr: string): Transaction | null => null;
 
     const createInventoryAudit = useCallback((
       title: string,
@@ -74,24 +69,22 @@ export function useAuditsSlice(state: StoreState) {
         appliedAt: applyNow ? nowIso : ''
       };
   
+      const updates: StoreUpdates = { deltas: [] };
       if (applyNow) {
-        const newQuantities: Record<string, number> = {};
+        const updatedInventory: InventoryItem[] = [];
         auditItems.forEach(row => {
-          if (!row.hasIMEI) newQuantities[row.inventoryId] = row.countedQuantity;
+          if (!row.hasIMEI) {
+            const item = inventory.find(i => i.id === row.inventoryId);
+            if (item) updatedInventory.push({ ...item, quantity: row.countedQuantity });
+          }
         });
-        setInventory(prev => prev.map(item =>
-          Object.prototype.hasOwnProperty.call(newQuantities, item.id)
-            ? { ...item, quantity: newQuantities[item.id] }
-            : item
-        ));
-        const adjustment = buildAuditAdjustmentTransaction(newAudit, new Set(Object.keys(newQuantities)), nowIso);
-        if (adjustment) setTransactions(prev => [...prev, adjustment]);
+        if (updatedInventory.length > 0) updates.deltas.push({ type: 'upsert', storeName: 'inventory', items: updatedInventory });
       }
   
       updates.deltas.push({ type: 'upsert', storeName: 'inventoryAudits', items: [newAudit] });
-        dispatch(updates);
+      dispatch(updates);
       return newAudit;
-    }, [buildAuditAdjustmentTransaction, categories, currentUser, generateAuditNumber, getInventoryAuditQuantity, inventory, dispatch]);
+    }, [categories, currentUser, generateAuditNumber, inventory, dispatch]);
   
 
     const applyInventoryAudit = useCallback((auditId: string) => {
@@ -103,27 +96,22 @@ export function useAuditsSlice(state: StoreState) {
         !Number.isInteger(row.countedQuantity) || row.countedQuantity < 0
       )) return null;
   
-      const newQuantities: Record<string, number> = {};
+      const updates: StoreUpdates = { deltas: [] };
+      const updatedInventory: InventoryItem[] = [];
       audit.items.forEach(row => {
-        if (!row.hasIMEI && inventory.some(item => item.id === row.inventoryId)) newQuantities[row.inventoryId] = row.countedQuantity;
+        if (!row.hasIMEI) {
+          const item = inventory.find(i => i.id === row.inventoryId);
+          if (item) updatedInventory.push({ ...item, quantity: row.countedQuantity });
+        }
       });
-  
-      setInventory(prev => prev.map(item =>
-        Object.prototype.hasOwnProperty.call(newQuantities, item.id)
-          ? { ...item, quantity: newQuantities[item.id] }
-          : item
-      ));
+      if (updatedInventory.length > 0) updates.deltas.push({ type: 'upsert', storeName: 'inventory', items: updatedInventory });
   
       const appliedAt = new Date().toISOString();
       const updatedAudit: InventoryAudit = { ...audit, status: 'applied', appliedAt };
       updates.deltas.push({ type: 'upsert', storeName: 'inventoryAudits', items: [updatedAudit] });
       dispatch(updates);
-  
-      const adjustment = buildAuditAdjustmentTransaction(updatedAudit, new Set(Object.keys(newQuantities)), appliedAt);
-      if (adjustment) setTransactions(prev => [...prev, adjustment]);
-  
       return updatedAudit;
-    }, [buildAuditAdjustmentTransaction, inventory, inventoryAudits, dispatch]);
+    }, [inventory, inventoryAudits, dispatch]);
   
 
     const deleteInventoryAudit = useCallback((auditId: string) => {

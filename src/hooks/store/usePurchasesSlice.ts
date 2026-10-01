@@ -19,6 +19,8 @@ import { initialUsers, initialCustomers, initialCategories, initialInventory, in
 import { User, Customer, Category, InventoryItem, IMEIUnit, Sale, SaleItem, SaleReturn, Maintenance, MaintenancePart, Safe, Transaction, Supplier, Notification, Purchase, PurchaseItem, StockWaste, InventoryAudit, InventoryAuditItem, SideAccountEntry, SideAccountEntryType, SideAccountImpact, AppSettings, AuditLogEntry } from '../../types';
 
 export function usePurchasesSlice(state: StoreState) {
+    const dispatch = useStoreDispatcher(state);
+
     const { inventory, setInventory, imeiUnits, setImeiUnits, safes, setSafes, setTransactions, suppliers, setSuppliers, purchases, setPurchases, currentUser, addAuditLog } = state;
 
     const generatePurchaseNumber = useCallback(

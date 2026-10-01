@@ -18,6 +18,8 @@ import { initialUsers, initialCustomers, initialCategories, initialInventory, in
 import { User, Customer, Category, InventoryItem, IMEIUnit, Sale, SaleItem, SaleReturn, Maintenance, MaintenancePart, Safe, Transaction, Supplier, Notification, Purchase, PurchaseItem, StockWaste, InventoryAudit, InventoryAuditItem, SideAccountEntry, SideAccountEntryType, SideAccountImpact, AppSettings, AuditLogEntry } from '../../types';
 
 export function useIMEISlice(state: StoreState) {
+    const dispatch = useStoreDispatcher(state);
+
     const { inventory, imeiUnits, setImeiUnits, sales, maintenance } = state;
 
     const addIMEIUnit = useCallback((unit: Omit<IMEIUnit, 'id' | 'createdAt'>) => {
