@@ -142,7 +142,6 @@ export class CustomersService {
     const profit = roundMoney(fee - cost);
 
     const updates: StoreUpdates = { deltas: [] };
-    const safeIncrements: Record<string, number> = {};
 
     let walletInc = 0;
     let cashInc = 0;

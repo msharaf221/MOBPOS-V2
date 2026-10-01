@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import { StoreState } from './types';
 import { pushDelta } from '../../utils/lanSync';
-import { DeltaAction, StoreUpdates } from '../../services/types';
+import { StoreUpdates } from '../../services/types';
 
 export function useStoreDispatcher(state: StoreState) {
   const dispatch = useCallback(async (updates: StoreUpdates) => {

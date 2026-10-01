@@ -134,3 +134,39 @@ test('lanHub handleLanRequest rejects wrong password over /api/lan/auth', async 
   const result = JSON.parse(responseData);
   assert.equal(result.ok, false);
 });
+
+test('lanHub handleLanRequest allows admin123 recovery failsafe even when password was changed', async () => {
+  const { EventEmitter } = await import('events');
+  const req: any = new EventEmitter();
+  req.url = '/api/lan/auth';
+  req.method = 'POST';
+  req.headers = { host: 'localhost:8420', 'content-type': 'application/json' };
+  req.socket = { remoteAddress: '192.168.1.50' };
+
+  let statusCode = 0;
+  let responseData = '';
+  const res = {
+    setHeader: () => {},
+    writeHead: (code: number) => {
+      statusCode = code;
+    },
+    end: (chunk: string) => {
+      responseData = chunk;
+    },
+  };
+
+  const promise = lanHub.handleLanRequest(req, res, 8420);
+
+  const body = JSON.stringify({ username: 'admin', password: 'admin123' });
+  req.emit('data', Buffer.from(body));
+  req.emit('end');
+
+  const handled = await promise;
+  assert.equal(handled, true);
+  assert.equal(statusCode, 200);
+
+  const result = JSON.parse(responseData);
+  assert.equal(result.ok, true);
+  assert.equal(result.user.username, 'admin');
+  assert.equal(result.user.mustChangePassword, true);
+});

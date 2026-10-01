@@ -124,8 +124,8 @@ export class PurchasesService {
       updates.deltas.push({ type: 'upsert', storeName: 'imeiUnits', items: newUnits });
     }
 
-    const inventoryIncrements = [];
-    const inventoryCostUpserts = [];
+    const inventoryIncrements: any[] = [];
+    const inventoryCostUpserts: any[] = [];
     
     data.items.forEach(line => {
       const item = inventory.find(inv => inv.id === line.inventoryId);

@@ -18,6 +18,7 @@ export default function Login({ onLogin, shopName }: LoginProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [failedAttempts, setFailedAttempts] = useState(0);
 
   // Branding (logo / accent color / theme) — read directly so the login
   // screen reflects the shop owner's customization without prop-drilling.
@@ -40,6 +41,12 @@ export default function Login({ onLogin, shopName }: LoginProps) {
   const isMidnightGold = branding.themeStyle === 'midnightGold';
   const accentColor = branding.accentColor || '#3b82f6';
 
+  const handleUseDefaultAdmin = () => {
+    setUsername('admin');
+    setPassword('admin123');
+    setError('');
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -48,9 +55,13 @@ export default function Login({ onLogin, shopName }: LoginProps) {
     const cleanUsername = username.trim();
     const cleanPassword = password;
 
-    const success = await onLogin(cleanUsername, cleanPassword);
+    let success = await onLogin(cleanUsername, cleanPassword);
+    if (!success && cleanPassword !== cleanPassword.trim()) {
+      success = await onLogin(cleanUsername, cleanPassword.trim());
+    }
     if (!success) {
       setError('اسم المستخدم أو كلمة المرور غير صحيحة. يرجى التأكد من كتابة الأحرف بدقة وبدون مسافات إضافية.');
+      setFailedAttempts(prev => prev + 1);
     }
     setLoading(false);
   };
@@ -151,9 +162,20 @@ export default function Login({ onLogin, shopName }: LoginProps) {
           </button>
 
           {/* Hint for initial setup */}
-          <div className="mt-5 pt-4 border-t border-white/10 flex items-center justify-center gap-1.5 text-xs text-blue-200/70 text-center">
-            <Info size={13} className="shrink-0" />
-            <span>الحساب الافتراضي: <strong>admin</strong> | كلمة المرور: <strong>admin123</strong></span>
+          <div className="mt-5 pt-4 border-t border-white/10 flex flex-col items-center justify-center gap-2 text-xs text-blue-200/70 text-center">
+            <div className="flex items-center gap-1.5">
+              <Info size={13} className="shrink-0" />
+              <span>الحساب الافتراضي: <strong>admin</strong> | كلمة المرور: <strong>admin123</strong></span>
+            </div>
+            {(failedAttempts > 0 || error) && (
+              <button
+                type="button"
+                onClick={handleUseDefaultAdmin}
+                className="mt-1 text-xs text-amber-300 hover:text-white underline transition cursor-pointer font-medium"
+              >
+                استخدام بيانات الحساب الافتراضي للطوارئ (admin / admin123)
+              </button>
+            )}
           </div>
 
         </form>

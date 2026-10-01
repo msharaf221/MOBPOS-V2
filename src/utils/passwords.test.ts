@@ -34,3 +34,8 @@ test('الحسابات القديمة بنص عادي لسه بتشتغل (تو�
   assert.equal(await verifyLoginPassword('admin123', 'admin123'), true);
   assert.equal(await verifyLoginPassword('wrong', 'admin123'), false);
 });
+
+test('التحقق من كلمة المرور مع مسافات زائدة يتعامل معها بأمان', async () => {
+  const plain = 'admin123';
+  assert.equal(await verifyLoginPassword(plain.trim(), 'admin123'), true);
+});

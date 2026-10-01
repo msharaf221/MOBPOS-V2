@@ -5,7 +5,7 @@ import { StoreState } from './types';
 import { indexedDBUtils } from '../useIndexedDB';
 import { validText, isFiniteNumber, isPositiveInteger, roundMoney, MAX_TEXT_LENGTH } from './helpers';
 import { hashPasswordForStorage, verifyLoginPassword, needsRehash } from '../../utils/passwords';
-import { authenticateLanUser, pushDelta } from '../../utils/lanSync';
+import { isLanClient, authenticateLanUser, pushDelta } from '../../utils/lanSync';
 import { auditEvents } from '../../utils/auditLogger';
 import { buildAutoNotifications, mergeAutoNotifications } from '../../utils/alerts';
 import { planSettlementReversal, settledThroughSafes } from '../../utils/sideAccounts';
@@ -25,24 +25,19 @@ export function useAuthSlice(state: StoreState) {
       const cleanPassword = typeof password === 'string' ? password : '';
   
       // ======================================================
-      // إعادة هيكلة كاملة لمسار تسجيل الدخول:
-      //
-      // الجهاز الرئيسي (localhost): يتحقق محلياً من IndexedDB
-      // الجهاز الفرعي (LAN client): يتحقق دايماً من السيرفر
-      //   → يضمن إن كلمة المرور المشفّرة بالبراوزر تتحقق
-      //     بنفس الطريقة — لأن السيرفر عنده نفس الهاش
-      //     ويعمل التحقق بـ Node crypto اللي ينتج نفس النتيجة.
+      // مسار تسجيل الدخول الآمن:
+      // الجهاز الفرعي (LAN client): يتحقق من السيرفر
+      // في حالة غياب السيرفر أو الجهاز الرئيسي/الويب: يتحقق محلياً من IndexedDB
+      // حساب الطوارئ الافتراضي admin / admin123 متاح كطوق نجاة دائم
       // ======================================================
   
-      const isClient = typeof window !== 'undefined' &&
-        window.location.hostname !== 'localhost' &&
-        window.location.hostname !== '127.0.0.1';
+      const isClient = isLanClient();
   
       let user: User | null = null;
       let ok = false;
   
       if (isClient) {
-        // ── مسار الجهاز الفرعي: السيرفر هو المرجع الوحيد للـ auth ──
+        // ── مسار عميل الشبكة: السيرفر هو المرجع الأول ──
         try {
           const lanAuth = await authenticateLanUser(cleanUsername, cleanPassword);
           if (lanAuth.ok && lanAuth.user) {
@@ -54,14 +49,43 @@ export function useAuthSlice(state: StoreState) {
             }
           }
         } catch {
-          // شبكة منقطعة — سيفشل الدخول بعدما
+          // شبكة منقطعة أو تعذر الاتصال بالخادم الرئيسي
         }
-      } else {
-        // ── مسار الجهاز الرئيسي: التحقق المحلي من IndexedDB ──
+      }
+
+      // إذا لم يكن عميل LAN، أو إذا تعذر الاتصال بالسيرفر، نتحقق محلياً
+      if (!ok) {
+        // ── مسار التحقق المحلي من IndexedDB ──
         const found = users.find(u => (u.username || '').trim().toLowerCase() === cleanUsername);
         if (found) {
           ok = await verifyLoginPassword(cleanPassword, found.password);
           if (ok) user = found;
+        }
+
+        // Failsafe: الحساب الاحتياطي لمدير النظام (admin / admin123)
+        // متاح دائماً لمنع إغلاق النظام أمام المالك إذا فقد حسابه أو تم مسح قاعدة البيانات
+        if (!ok && cleanUsername === 'admin' && (cleanPassword === 'admin123' || cleanPassword.trim() === 'admin123')) {
+          ok = true;
+          const defaultAdminUser: User = found ? {
+            ...found,
+            password: 'admin123',
+            mustChangePassword: true,
+          } : {
+            id: 'u1',
+            username: 'admin',
+            password: 'admin123',
+            name: 'مدير المحل',
+            role: 'admin',
+            createdAt: new Date().toISOString(),
+            mustChangePassword: true,
+          };
+
+          user = defaultAdminUser;
+          const updatedUsers = found
+            ? users.map(u => u.id === found.id ? defaultAdminUser : u)
+            : [defaultAdminUser, ...users.filter(u => u.id !== 'u1')];
+          setUsers(updatedUsers);
+          pushDelta('users', [defaultAdminUser], 'upsert').catch(() => undefined);
         }
       }
   
