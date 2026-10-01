@@ -36,7 +36,14 @@ export function isLanClient(): boolean {
   // إذا لم نكن في تطبيق Electron وكنا متصلين بـ IP محلي وليس localhost
   const hostname = window.location.hostname;
   const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
-  return !isLocalhost;
+  if (isLocalhost) return false;
+  
+  // استبعاد النسخ المرفوعة على الويب (Vercel/Netlify)
+  // عادة ما تكون الشبكة المحلية عبر HTTP، أو يكون الـ hostname عبارة عن IP Address
+  if (window.location.protocol === 'https:') return false;
+  if (!/^\d+\.\d+\.\d+\.\d+$/.test(hostname) && !hostname.endsWith('.local')) return false;
+
+  return true;
 }
 
 /** سحب كافة البيانات المركزية من الخادم */
