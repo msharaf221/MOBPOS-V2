@@ -26,20 +26,8 @@ alter table public.mobpos_stores add column if not exists owner_id uuid;
 alter table public.mobpos_stores alter column owner_id drop not null;
 alter table public.mobpos_stores alter column owner_id set default auth.uid();
 alter table public.mobpos_stores replica identity full;
-alter table public.mobpos_stores enable row level security;
-
--- Policies for mobpos_stores (Allow anon + authenticated access)
-drop policy if exists "Users can read own MOBPOS rows" on public.mobpos_stores;
-drop policy if exists "Users can insert own MOBPOS rows" on public.mobpos_stores;
-drop policy if exists "Users can update own MOBPOS rows" on public.mobpos_stores;
-drop policy if exists "Users can delete own MOBPOS rows" on public.mobpos_stores;
-drop policy if exists "Allow all operations for MOBPOS stores" on public.mobpos_stores;
-
-create policy "Allow all operations for MOBPOS stores"
-  on public.mobpos_stores for all
-  to anon, authenticated
-  using (true)
-  with check (true);
+-- Disable RLS for zero-friction POS sync partitioned by tenant_id
+alter table public.mobpos_stores disable row level security;
 
 create index if not exists mobpos_stores_tenant_idx
   on public.mobpos_stores (tenant_id);
@@ -65,20 +53,8 @@ alter table public.mobpos_records add column if not exists owner_id uuid;
 alter table public.mobpos_records alter column owner_id drop not null;
 alter table public.mobpos_records alter column owner_id set default auth.uid();
 alter table public.mobpos_records replica identity full;
-alter table public.mobpos_records enable row level security;
-
--- Policies for mobpos_records (Allow anon + authenticated access)
-drop policy if exists "Users can read own MOBPOS records" on public.mobpos_records;
-drop policy if exists "Users can insert own MOBPOS records" on public.mobpos_records;
-drop policy if exists "Users can update own MOBPOS records" on public.mobpos_records;
-drop policy if exists "Users can delete own MOBPOS records" on public.mobpos_records;
-drop policy if exists "Allow all operations for MOBPOS records" on public.mobpos_records;
-
-create policy "Allow all operations for MOBPOS records"
-  on public.mobpos_records for all
-  to anon, authenticated
-  using (true)
-  with check (true);
+-- Disable RLS for zero-friction POS sync partitioned by tenant_id
+alter table public.mobpos_records disable row level security;
 
 -- High-performance indexes for fast queries, realtime catch-up, and soft-delete lookups
 create index if not exists mobpos_records_lookup_idx
