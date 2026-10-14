@@ -4,7 +4,8 @@ import {
   Globe, Palette, Bell, Lock, ChevronLeft, Store,
   Printer, Download, AlertTriangle, Info, CheckCircle,
   Monitor, Smartphone, Upload, Cloud, CloudUpload, Clock,
-  History, Trash2, Loader2, KeyRound, XCircle, Crown, ImagePlus, X, Wifi
+  History, Trash2, Loader2, KeyRound, XCircle, Crown, ImagePlus, X, Wifi,
+  Zap, CheckCircle2
 } from 'lucide-react';
 import { User, AppSettings } from '../types';
 import { ActiveLicense } from '../license/types';
@@ -38,7 +39,8 @@ import {
   downloadDriveBackup, deleteDriveBackup, clearTokenCache,
   DriveBackupFile,
 } from '../utils/googleDrive';
-import { getSyncConfig, saveSyncConfig, pushAll, pullAll } from '../utils/sync';
+import { useSyncEngine } from '../hooks/useSyncEngine';
+import { syncEngine } from '../services/SyncEngine';
 
 interface SettingsProps {
   currentUser: User;
@@ -76,10 +78,14 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
   const [resetting, setResetting] = useState(false);
 
   // ===== Sync state =====
-  const [syncUrl, setSyncUrl] = useState(() => getSyncConfig().url);
-  const [syncKey, setSyncKey] = useState(() => getSyncConfig().anonKey);
-  const [syncAccessToken, setSyncAccessToken] = useState(() => getSyncConfig().accessToken);
-  const [syncTenant, setSyncTenant] = useState(() => getSyncConfig().tenantId || '');
+  const sync = useSyncEngine();
+  const [syncUrl, setSyncUrl] = useState(() => syncEngine.loadConfig().url);
+  const [syncKey, setSyncKey] = useState(() => syncEngine.loadConfig().anonKey);
+  const [syncAccessToken, setSyncAccessToken] = useState(() => syncEngine.loadConfig().accessToken || '');
+  const [syncTenant, setSyncTenant] = useState(() => syncEngine.loadConfig().tenantId || '');
+  const [syncAutoEnabled, setSyncAutoEnabled] = useState(() => syncEngine.loadConfig().autoSyncEnabled);
+  const [syncEmail, setSyncEmail] = useState('');
+  const [syncPassword, setSyncPassword] = useState('');
   const [syncBusy, setSyncBusy] = useState(false);
   const [syncMsg, setSyncMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
 
@@ -1344,126 +1350,318 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                 )}
               </div>
 
-              {/* ===== CARD: Multi-device Sync (Supabase) ===== */}
+              {/* ===== CARD: Multi-device Auto Cloud Sync (Supabase) ===== */}
               <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-                <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-1 flex items-center gap-2">
-                  <Cloud size={20} className="text-sky-500" />
-                  المزامنة بين الأجهزة (Supabase — تجريبي)
-                </h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-                  اربط حساب Supabase لتشغيل أكثر من جهاز على نفس بيانات المتجر. نفّذ ملف <span className="font-mono text-xs" dir="ltr">supabase/schema.sql</span> في محرر SQL في Supabase أولاً.
-                </p>
-
-                {/* Warning note */}
-                <div className="p-4 bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800 text-sm text-amber-800 dark:text-amber-300 mb-4 flex items-start gap-2">
-                  <AlertTriangle size={18} className="flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="font-bold">⚠️ تنبيه أمني بشأن المزامنة:</p>
-                    <p className="text-xs mt-1 leading-relaxed">
-                      المزامنة ميزة تجريبية وتعتمد على عزل البيانات بمعرّف المتجر (Tenant ID). تأكد من تنفيذ أحدث ملف <span className="font-mono" dir="ltr">schema.sql</span> في Supabase لضمان عزل البيانات عبر RLS.
-                    </p>
+                <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
+                  <div className="flex items-center gap-2">
+                    <Cloud size={22} className="text-sky-500" />
+                    <h3 className="text-lg font-bold text-gray-800 dark:text-white">
+                      المزامنة السحابية اللحظية (Cloud Auto Sync)
+                    </h3>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-xs px-2.5 py-1 rounded-full font-bold flex items-center gap-1.5 ${
+                      sync.status === 'synced'
+                        ? 'bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300'
+                        : sync.status === 'syncing'
+                        ? 'bg-sky-100 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300'
+                        : sync.status === 'offline'
+                        ? 'bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300'
+                        : sync.status === 'error'
+                        ? 'bg-rose-100 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300'
+                        : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+                    }`}>
+                      <span className={`w-2 h-2 rounded-full ${
+                        sync.status === 'synced' ? 'bg-emerald-500' :
+                        sync.status === 'syncing' ? 'bg-sky-500 animate-ping' :
+                        sync.status === 'offline' ? 'bg-amber-500' :
+                        sync.status === 'error' ? 'bg-rose-500' : 'bg-gray-400'
+                      }`} />
+                      {sync.status === 'synced' ? 'متزامن لحظياً ⚡' :
+                       sync.status === 'syncing' ? 'جارٍ المزامنة...' :
+                       sync.status === 'offline' ? 'وضع أوفلاين (محلي)' :
+                       sync.status === 'error' ? 'خطأ بالاتصال' : 'المزامنة معطلة'}
+                    </span>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
+                  تتيح العمل على الكمبيوتر والهاتف في نفس الوقت مع انعكاس كافة التعديلات لحظة بلحظة واستمرار العمل عند انقطاع الإنترنت.
+                </p>
+
+                {/* Master Toggle */}
+                <div className="flex items-center justify-between p-4 bg-sky-50/70 dark:bg-sky-950/30 rounded-2xl border border-sky-200 dark:border-sky-800 mb-5">
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">رابط Supabase URL</label>
+                    <h4 className="font-bold text-sm text-gray-900 dark:text-white flex items-center gap-2">
+                      <Zap size={16} className="text-sky-500" />
+                      تفعيل المزامنة التلقائية اللحظية
+                    </h4>
+                    <p className="text-xs text-gray-600 dark:text-gray-300 mt-0.5">
+                      رفع التعديلات واستقبال تحديثات الأجهزة الأخرى تلقائياً في الخلفية.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = !syncAutoEnabled;
+                      setSyncAutoEnabled(next);
+                      sync.updateConfig({ autoSyncEnabled: next });
+                      setSyncMsg({ kind: 'ok', text: next ? 'تم تفعيل المزامنة التلقائية اللحظية ⚡' : 'تم إيقاف المزامنة التلقائية' });
+                    }}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      syncAutoEnabled ? 'bg-sky-600' : 'bg-gray-300 dark:bg-gray-600'
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        syncAutoEnabled ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {/* Diagnostics Status Chips */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-5">
+                  <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl border border-gray-100 dark:border-gray-700">
+                    <span className="text-[11px] text-gray-500 dark:text-gray-400 block">الاتصال</span>
+                    <span className="text-xs font-bold text-gray-800 dark:text-white mt-0.5 flex items-center gap-1">
+                      {sync.isOnline ? <Wifi size={13} className="text-emerald-500" /> : <AlertTriangle size={13} className="text-amber-500" />}
+                      {sync.isOnline ? 'أونلاين' : 'أوفلاين'}
+                    </span>
+                  </div>
+                  <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl border border-gray-100 dark:border-gray-700">
+                    <span className="text-[11px] text-gray-500 dark:text-gray-400 block">البث اللحظي</span>
+                    <span className="text-xs font-bold text-gray-800 dark:text-white mt-0.5 flex items-center gap-1">
+                      <Zap size={13} className={sync.isRealtimeConnected ? 'text-emerald-500' : 'text-gray-400'} />
+                      {sync.isRealtimeConnected ? 'مستمع نشط ⚡' : 'غير متصل'}
+                    </span>
+                  </div>
+                  <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl border border-gray-100 dark:border-gray-700">
+                    <span className="text-[11px] text-gray-500 dark:text-gray-400 block">قائمة الانتظار</span>
+                    <span className="text-xs font-bold text-blue-600 dark:text-blue-400 mt-0.5">
+                      {sync.pendingCount} تعديل معلق
+                    </span>
+                  </div>
+                  <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl border border-gray-100 dark:border-gray-700">
+                    <span className="text-[11px] text-gray-500 dark:text-gray-400 block">آخر مزامنة</span>
+                    <span className="text-xs font-bold text-gray-800 dark:text-white mt-0.5" dir="ltr">
+                      {sync.lastSyncedAt ? new Date(sync.lastSyncedAt).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }) : 'لم تتم بعد'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Connection Form */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                      رابط Supabase URL
+                    </label>
                     <input
                       type="text"
                       dir="ltr"
                       value={syncUrl}
                       onChange={e => setSyncUrl(e.target.value)}
                       placeholder="https://xxxx.supabase.co"
-                      className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-800 dark:text-white font-mono text-sm"
+                      className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-800 dark:text-white font-mono text-xs"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Anon Public Key</label>
+                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                      Anon Public Key
+                    </label>
                     <input
                       type="password"
                       dir="ltr"
                       value={syncKey}
                       onChange={e => setSyncKey(e.target.value)}
-                      placeholder="anon public key"
-                      className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-800 dark:text-white font-mono text-sm"
+                      placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                      className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-800 dark:text-white font-mono text-xs"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Supabase Auth Access Token</label>
-                    <input
-                      type="password"
-                      dir="ltr"
-                      value={syncAccessToken}
-                      onChange={e => setSyncAccessToken(e.target.value)}
-                      placeholder="eyJ... (من Supabase Auth)"
-                      className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-800 dark:text-white font-mono text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">معرّف المتجر (Tenant ID)</label>
+                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                      معرّف المتجر / الترخيص (Tenant ID)
+                    </label>
                     <input
                       type="text"
                       dir="ltr"
                       value={syncTenant}
                       onChange={e => setSyncTenant(e.target.value)}
-                      placeholder="افتراضي: معرّف الترخيص"
-                      className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-800 dark:text-white font-mono text-sm"
+                      placeholder="افتراضي: معرّف الترخيص المفعل"
+                      className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-800 dark:text-white font-mono text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                      توكن الدخول (Supabase Auth Access Token)
+                    </label>
+                    <input
+                      type="password"
+                      dir="ltr"
+                      value={syncAccessToken}
+                      onChange={e => setSyncAccessToken(e.target.value)}
+                      placeholder="eyJhbGciOi..."
+                      className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-800 dark:text-white font-mono text-xs"
                     />
                   </div>
                 </div>
 
+                {/* Direct Login Helper */}
+                <div className="p-3 bg-gray-50 dark:bg-gray-750 rounded-xl border border-gray-200 dark:border-gray-700 mb-4">
+                  <p className="text-xs font-bold text-gray-700 dark:text-gray-300 mb-2">
+                    أو تسجيل الدخول المباشر بحساب Supabase Auth:
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <input
+                      type="email"
+                      dir="ltr"
+                      value={syncEmail}
+                      onChange={e => setSyncEmail(e.target.value)}
+                      placeholder="البريد الإلكتروني"
+                      className="p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-xs text-gray-800 dark:text-white"
+                    />
+                    <input
+                      type="password"
+                      dir="ltr"
+                      value={syncPassword}
+                      onChange={e => setSyncPassword(e.target.value)}
+                      placeholder="كلمة المرور"
+                      className="p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-xs text-gray-800 dark:text-white"
+                    />
+                    <button
+                      type="button"
+                      disabled={syncBusy || !syncEmail || !syncPassword}
+                      onClick={async () => {
+                        setSyncBusy(true);
+                        setSyncMsg(null);
+                        try {
+                          sync.updateConfig({ url: syncUrl, anonKey: syncKey, tenantId: syncTenant });
+                          const res = await sync.signInWithPassword(syncEmail, syncPassword);
+                          if (res.ok) {
+                            setSyncMsg({ kind: 'ok', text: 'تم تسجيل الدخول وربط الحساب بنجاح ✅' });
+                            setSyncAccessToken(syncEngine.loadConfig().accessToken || '');
+                          } else {
+                            setSyncMsg({ kind: 'err', text: res.error || 'فشل تسجيل الدخول' });
+                          }
+                        } finally {
+                          setSyncBusy(false);
+                        }
+                      }}
+                      className="px-3 py-2 bg-slate-700 hover:bg-slate-800 text-white rounded-lg text-xs font-bold transition disabled:opacity-50"
+                    >
+                      تسجيل الدخول والربط
+                    </button>
+                  </div>
+                </div>
+
                 {syncMsg && (
-                  <p className={`text-sm mb-3 font-medium ${syncMsg.kind === 'ok' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                  <p className={`text-sm mb-4 font-medium flex items-center gap-1.5 ${
+                    syncMsg.kind === 'ok' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
+                  }`}>
+                    {syncMsg.kind === 'ok' ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
                     {syncMsg.text}
                   </p>
                 )}
 
-                <div className="flex flex-wrap gap-3">
+                {/* Actions Bar */}
+                <div className="flex flex-wrap gap-2.5">
                   <button
-                    onClick={async () => {
-                      saveSyncConfig({ url: syncUrl, anonKey: syncKey, accessToken: syncAccessToken, tenantId: syncTenant });
-                      setSyncMsg({ kind: 'ok', text: 'تم حفظ إعدادات المزامنة ✅' });
+                    type="button"
+                    onClick={() => {
+                      sync.updateConfig({
+                        url: syncUrl,
+                        anonKey: syncKey,
+                        accessToken: syncAccessToken,
+                        tenantId: syncTenant,
+                        autoSyncEnabled: syncAutoEnabled,
+                      });
+                      setSyncMsg({ kind: 'ok', text: 'تم حفظ إعدادات المزامنة السحابية بنجاح ✅' });
                     }}
-                    className="px-5 py-2.5 bg-gray-600 hover:bg-gray-700 text-white font-bold rounded-xl transition"
+                    className="px-4 py-2.5 bg-gray-700 hover:bg-gray-800 text-white font-bold rounded-xl text-xs transition"
                   >
                     حفظ الإعدادات
                   </button>
+
                   <button
+                    type="button"
+                    disabled={syncBusy || !sync.isOnline}
                     onClick={async () => {
-                      setSyncBusy(true); setSyncMsg(null);
+                      setSyncBusy(true);
+                      setSyncMsg(null);
                       try {
-                        const n = await pushAll();
-                        setSyncMsg({ kind: 'ok', text: `تم رفع بيانات هذا الجهاز إلى السحابة (${n} مخزن) ✅` });
+                        await sync.triggerSyncNow();
+                        setSyncMsg({ kind: 'ok', text: 'تمت المزامنة اللحظية بنجاح مع السحابة ⚡' });
                       } catch (err) {
-                        setSyncMsg({ kind: 'err', text: err instanceof Error ? err.message : 'فشل الرفع' });
+                        setSyncMsg({ kind: 'err', text: err instanceof Error ? err.message : 'فشلت المزامنة' });
+                      } finally {
+                        setSyncBusy(false);
                       }
-                      setSyncBusy(false);
                     }}
-                    disabled={syncBusy}
-                    className="flex items-center gap-2 px-5 py-2.5 bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white font-bold rounded-xl transition"
+                    className="flex items-center gap-1.5 px-4 py-2.5 bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white font-bold rounded-xl text-xs transition"
                   >
-                    {syncBusy ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
-                    رفع بيانات هذا الجهاز
+                    {syncBusy ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
+                    مزامنة لحظية الآن
                   </button>
+
                   <button
+                    type="button"
+                    disabled={syncBusy || !sync.isOnline}
                     onClick={async () => {
-                      if (!confirm('سيتم استبدال بيانات هذا الجهاز ببيانات السحابة. متأكد؟')) return;
-                      setSyncBusy(true); setSyncMsg(null);
+                      setSyncBusy(true);
+                      setSyncMsg(null);
                       try {
-                        const n = await pullAll();
-                        setSyncMsg({ kind: 'ok', text: `تم تنزيل البيانات (${n} مخزن) — سيُعاد التشغيل...` });
+                        const count = await sync.pushAllSnapshots();
+                        setSyncMsg({ kind: 'ok', text: `تم رفع لقطة كاملة لجميع المخازن (${count} مخزن) ✅` });
+                      } catch (err) {
+                        setSyncMsg({ kind: 'err', text: err instanceof Error ? err.message : 'فشل رفع اللقطة' });
+                      } finally {
+                        setSyncBusy(false);
+                      }
+                    }}
+                    className="flex items-center gap-1.5 px-4 py-2.5 bg-slate-600 hover:bg-slate-700 disabled:opacity-50 text-white font-bold rounded-xl text-xs transition"
+                  >
+                    <Upload size={15} />
+                    رفع لقطة شاملة (Snapshot)
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={syncBusy || !sync.isOnline}
+                    onClick={async () => {
+                      if (!confirm('سيتم استبدال البيانات المحلية بالكامل بلقطة السحابة. هل أنت متأكد؟')) return;
+                      setSyncBusy(true);
+                      setSyncMsg(null);
+                      try {
+                        const count = await sync.pullAllSnapshots();
+                        setSyncMsg({ kind: 'ok', text: `تم استرجاع البيانات (${count} مخزن) — سيُعاد التشغيل...` });
                         setTimeout(() => window.location.reload(), 1500);
                       } catch (err) {
-                        setSyncMsg({ kind: 'err', text: err instanceof Error ? err.message : 'فشل التنزيل' });
+                        setSyncMsg({ kind: 'err', text: err instanceof Error ? err.message : 'فشل الاسترجاع' });
+                      } finally {
+                        setSyncBusy(false);
                       }
-                      setSyncBusy(false);
                     }}
-                    disabled={syncBusy}
-                    className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold rounded-xl transition"
+                    className="flex items-center gap-1.5 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold rounded-xl text-xs transition"
                   >
-                    {syncBusy ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-                    تنزيل من السحابة
+                    <Download size={15} />
+                    استرجاع لقطة شاملة
                   </button>
+
+                  {sync.pendingCount > 0 && (
+                    <button
+                      type="button"
+                      disabled={syncBusy}
+                      onClick={async () => {
+                        if (!confirm('هل تريد مسح التعديلات المعلقة في قائمة الانتظار المحلية دون رفعها؟')) return;
+                        await sync.clearOutbox();
+                        setSyncMsg({ kind: 'ok', text: 'تم تفريغ قائمة الانتظار' });
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-600 dark:bg-rose-950/30 dark:hover:bg-rose-900/40 rounded-xl text-xs font-bold transition mr-auto"
+                    >
+                      <Trash2 size={14} />
+                      تفريغ الانتظار ({sync.pendingCount})
+                    </button>
+                  )}
                 </div>
               </div>
 
