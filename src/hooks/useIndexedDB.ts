@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 
 const DB_NAME = 'MobileShopDB';
-const DB_VERSION = 7;
+const DB_VERSION = 8;
 
 // Store names
 const STORES = {
@@ -24,7 +24,55 @@ const STORES = {
   auditLogs: 'auditLogs',
   settings: 'settings',
   backups: 'backups', // local backup snapshots (excluded from backup payloads)
+  syncOutbox: 'syncOutbox', // offline operations queue for cloud sync
+  syncMeta: 'syncMeta', // cloud sync state and bookmarks
 };
+
+export type StoreDeltaListener = (
+  storeName: string,
+  delta: { addedOrChanged: StoreRecord[]; removedIds: string[] },
+  isRemote?: boolean
+) => void;
+
+const deltaListeners = new Set<StoreDeltaListener>();
+
+export function onStoreDelta(listener: StoreDeltaListener): () => void {
+  deltaListeners.add(listener);
+  return () => {
+    deltaListeners.delete(listener);
+  };
+}
+
+let isRemoteApplying = false;
+
+export function setRemoteApplying(applying: boolean): void {
+  isRemoteApplying = applying;
+}
+
+export function isApplyingRemote(): boolean {
+  return isRemoteApplying;
+}
+
+function notifyDeltaListeners(
+  storeName: string,
+  delta: { addedOrChanged: StoreRecord[]; removedIds: string[] }
+): void {
+  if (
+    storeName === STORES.syncOutbox ||
+    storeName === STORES.syncMeta ||
+    storeName === STORES.backups
+  ) {
+    return;
+  }
+  if (delta.addedOrChanged.length === 0 && delta.removedIds.length === 0) return;
+  for (const listener of deltaListeners) {
+    try {
+      listener(storeName, delta, isRemoteApplying);
+    } catch (e) {
+      console.error('[useIndexedDB] Delta listener error:', e);
+    }
+  }
+}
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -259,7 +307,9 @@ async function replaceStoresData(dataMap: Record<string, StoreRecord[]>): Promis
 // Atomically reset all application data. The unused `settings` object store is
 // intentionally excluded; the `appSettings` key/value store is never touched.
 async function resetAllStores(dataMap: Record<string, StoreRecord[]>): Promise<void> {
-  const storeNames = Object.values(STORES).filter(name => name !== STORES.settings);
+  const storeNames = Object.values(STORES).filter(
+    name => name !== STORES.settings && name !== STORES.syncOutbox && name !== STORES.syncMeta
+  );
   await runTransaction(storeNames, 'readwrite', transaction => {
     storeNames.forEach(storeName => {
       const store = transaction.objectStore(storeName);
@@ -270,12 +320,12 @@ async function resetAllStores(dataMap: Record<string, StoreRecord[]>): Promise<v
 }
 
 /**
- * يصدّر كل المخازن. `excludeStores` ضروري هنا: مخزن `backups` نفسه فيه
- * نسخة كاملة من الداتا كلها (لعدد 7 لقطة)، وقراءته ثم حذفه من الـ payload
- * يعني كل نسخة احتياطية تقرأ الداتا ~8 مرات من غير أي فايدة.
+ * يصدّر كل المخازن. `excludeStores` ضروري هنا: مخزن `backups` ومخازن المزامنة
+ * مستبعدة افتراضياً حتى لا تتضخم ملفات النسخ الاحتياطي.
  */
 async function exportAllData(excludeStores: readonly string[] = []): Promise<Record<string, unknown[]>> {
-  const skipped = new Set(excludeStores);
+  const defaultExcluded = [STORES.backups, STORES.syncOutbox, STORES.syncMeta];
+  const skipped = new Set([...defaultExcluded, ...excludeStores]);
   const data: Record<string, unknown[]> = {};
   for (const storeName of Object.values(STORES)) {
     if (skipped.has(storeName)) continue;
@@ -291,7 +341,15 @@ async function exportAllData(excludeStores: readonly string[] = []): Promise<Rec
 /** Import supplied stores atomically; callers validate records before calling. */
 async function importAllData(data: Record<string, unknown[]>): Promise<void> {
   const records: Record<string, StoreRecord[]> = {};
-  const allowed = new Set(Object.values(STORES).filter(name => name !== STORES.backups && name !== STORES.settings));
+  const allowed = new Set(
+    Object.values(STORES).filter(
+      name =>
+        name !== STORES.backups &&
+        name !== STORES.settings &&
+        name !== STORES.syncOutbox &&
+        name !== STORES.syncMeta
+    )
+  );
 
   for (const [storeName, items] of Object.entries(data)) {
     if (!allowed.has(storeName)) continue;
@@ -454,6 +512,8 @@ export function useIndexedDB<T extends StoreRecord>(
       persistedRef.current = { snapshot: next, known: true };
       return;
     }
+
+    notifyDeltaListeners(storeName, { addedOrChanged, removedIds });
 
     // إعادة الكتابة الكاملة بتبقى أرخص لما التغيير يلمس كل السجلات تقريبًا
     const fullRewriteCost = next.length + 1;
@@ -651,6 +711,8 @@ export async function persistMultiStoreDeltas(
         continue;
       }
 
+      notifyDeltaListeners(delta.storeName, { addedOrChanged, removedIds });
+
       const fullRewriteCost = delta.next.length + 1;
       const deltaCost = addedOrChanged.length + removedIds.length;
 
@@ -702,5 +764,8 @@ export const indexedDBUtils = {
   persistMultiStoreDeltas,
   runAtomicTransaction,
   runTransaction,
+  onStoreDelta,
+  setRemoteApplying,
+  isApplyingRemote,
   STORES,
 };
