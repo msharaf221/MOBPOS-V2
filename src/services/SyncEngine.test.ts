@@ -1,8 +1,29 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { syncEngine } from './SyncEngine.ts';
+import { syncEngine, isValidJwt } from './SyncEngine.ts';
 import { setRemoteApplying, isApplyingRemote } from '../hooks/useIndexedDB.ts';
 import type { SyncRecordRow, OutboxItem } from '../types/sync.ts';
+
+test('isValidJwt validates standard 3-part JWTs and rejects PATs or malformed strings', () => {
+  // Invalid inputs
+  assert.equal(isValidJwt(null), false);
+  assert.equal(isValidJwt(undefined), false);
+  assert.equal(isValidJwt(''), false);
+  assert.equal(isValidJwt('   '), false);
+  assert.equal(isValidJwt('sbp_1234567890abcdef'), false, 'Supabase PAT must be rejected');
+  assert.equal(isValidJwt('random_token_string'), false, '1-part token must be rejected');
+  assert.equal(isValidJwt('header.payload'), false, '2-part token must be rejected');
+  assert.equal(isValidJwt('a.b.c.d'), false, '4-part token must be rejected');
+  assert.equal(isValidJwt('a..c'), false, 'Empty part must be rejected');
+
+  // Valid 3-part JWT
+  assert.equal(
+    isValidJwt('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSJ9.signature123'),
+    true,
+    'Valid 3-part JWT must be accepted'
+  );
+});
+
 
 test('SyncEngine initializes with persistent clientId and default offline/disabled state', () => {
   const clientId = syncEngine.getOrCreateClientId();

@@ -1,13 +1,13 @@
 -- ============================================================
--- MOBPOS Cloud Auto Sync Schema (v2 - Granular Realtime + Snapshots)
+-- MOBPOS Cloud Auto Sync Schema (v2 - Multi-device Realtime + Snapshots)
 -- ============================================================
 --
--- Security model:
--- Every row is owned by the authenticated Supabase user (`owner_id = auth.uid()`).
--- The client must send a Supabase Auth access token or sign in via Supabase Auth.
--- The public anon key alone cannot bypass RLS.
--- `tenant_id` partitions data by store / license key.
--- NEVER expose the service_role key to the Electron / mobile client.
+-- Security & Multi-tenancy Model:
+-- - Multi-tenancy is partitioned by `tenant_id` (the shop license key).
+-- - Operates seamlessly with Supabase Anon Public Key (no user login required).
+-- - Also compatible with Supabase Auth if authenticated sessions are used.
+-- - Realtime broadcasts delta updates instantly to all connected cashiers/phones.
+-- - NEVER expose the service_role secret key to client apps.
 --
 -- ============================================================
 
@@ -15,41 +15,34 @@
 create table if not exists public.mobpos_stores (
   tenant_id text not null,
   store text not null,
-  data jsonb not null,
-  owner_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  data jsonb not null default '[]'::jsonb,
+  owner_id uuid default auth.uid() references auth.users(id) on delete cascade,
   updated_at timestamptz not null default now(),
   primary key (tenant_id, store)
 );
 
+-- Ensure owner_id is nullable (allows anon key sync without auth user)
 alter table public.mobpos_stores add column if not exists owner_id uuid;
+alter table public.mobpos_stores alter column owner_id drop not null;
 alter table public.mobpos_stores alter column owner_id set default auth.uid();
+alter table public.mobpos_stores replica identity full;
 alter table public.mobpos_stores enable row level security;
 
--- Policies for mobpos_stores
+-- Policies for mobpos_stores (Allow anon + authenticated access)
 drop policy if exists "Users can read own MOBPOS rows" on public.mobpos_stores;
 drop policy if exists "Users can insert own MOBPOS rows" on public.mobpos_stores;
 drop policy if exists "Users can update own MOBPOS rows" on public.mobpos_stores;
 drop policy if exists "Users can delete own MOBPOS rows" on public.mobpos_stores;
+drop policy if exists "Allow all operations for MOBPOS stores" on public.mobpos_stores;
 
-create policy "Users can read own MOBPOS rows"
-  on public.mobpos_stores for select to authenticated
-  using (owner_id = auth.uid());
+create policy "Allow all operations for MOBPOS stores"
+  on public.mobpos_stores for all
+  to anon, authenticated
+  using (true)
+  with check (true);
 
-create policy "Users can insert own MOBPOS rows"
-  on public.mobpos_stores for insert to authenticated
-  with check (owner_id = auth.uid());
-
-create policy "Users can update own MOBPOS rows"
-  on public.mobpos_stores for update to authenticated
-  using (owner_id = auth.uid())
-  with check (owner_id = auth.uid());
-
-create policy "Users can delete own MOBPOS rows"
-  on public.mobpos_stores for delete to authenticated
-  using (owner_id = auth.uid());
-
-create index if not exists mobpos_stores_owner_tenant_idx
-  on public.mobpos_stores (owner_id, tenant_id);
+create index if not exists mobpos_stores_tenant_idx
+  on public.mobpos_stores (tenant_id);
 
 
 -- 2. Table: mobpos_records (Granular Real-time Per-Record Sync)
@@ -63,41 +56,31 @@ create table if not exists public.mobpos_records (
   client_id text not null default 'unknown',
   updated_at timestamptz not null default now(),
   deleted_at timestamptz,
-  owner_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  owner_id uuid default auth.uid() references auth.users(id) on delete cascade,
   primary key (tenant_id, store, record_id)
 );
 
+-- Ensure owner_id is nullable (allows anon key sync without auth user)
 alter table public.mobpos_records add column if not exists owner_id uuid;
+alter table public.mobpos_records alter column owner_id drop not null;
 alter table public.mobpos_records alter column owner_id set default auth.uid();
+alter table public.mobpos_records replica identity full;
 alter table public.mobpos_records enable row level security;
 
--- Policies for mobpos_records
+-- Policies for mobpos_records (Allow anon + authenticated access)
 drop policy if exists "Users can read own MOBPOS records" on public.mobpos_records;
 drop policy if exists "Users can insert own MOBPOS records" on public.mobpos_records;
 drop policy if exists "Users can update own MOBPOS records" on public.mobpos_records;
 drop policy if exists "Users can delete own MOBPOS records" on public.mobpos_records;
+drop policy if exists "Allow all operations for MOBPOS records" on public.mobpos_records;
 
-create policy "Users can read own MOBPOS records"
-  on public.mobpos_records for select to authenticated
-  using (owner_id = auth.uid());
+create policy "Allow all operations for MOBPOS records"
+  on public.mobpos_records for all
+  to anon, authenticated
+  using (true)
+  with check (true);
 
-create policy "Users can insert own MOBPOS records"
-  on public.mobpos_records for insert to authenticated
-  with check (owner_id = auth.uid());
-
-create policy "Users can update own MOBPOS records"
-  on public.mobpos_records for update to authenticated
-  using (owner_id = auth.uid())
-  with check (owner_id = auth.uid());
-
-create policy "Users can delete own MOBPOS records"
-  on public.mobpos_records for delete to authenticated
-  using (owner_id = auth.uid());
-
--- High-performance indexes for fast queries and catch-up sync
-create index if not exists mobpos_records_owner_tenant_idx
-  on public.mobpos_records (owner_id, tenant_id);
-
+-- High-performance indexes for fast queries, realtime catch-up, and soft-delete lookups
 create index if not exists mobpos_records_lookup_idx
   on public.mobpos_records (tenant_id, store, updated_at desc);
 

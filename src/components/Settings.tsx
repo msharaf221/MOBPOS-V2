@@ -40,7 +40,7 @@ import {
   DriveBackupFile,
 } from '../utils/googleDrive';
 import { useSyncEngine } from '../hooks/useSyncEngine';
-import { syncEngine } from '../services/SyncEngine';
+import { syncEngine, isValidJwt } from '../services/SyncEngine';
 
 interface SettingsProps {
   currentUser: User;
@@ -1451,10 +1451,11 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                 </div>
 
                 {/* Connection Form */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                      رابط Supabase URL
+                    <label className="block text-xs font-bold text-gray-750 dark:text-gray-300 mb-1 flex items-center justify-between">
+                      <span>رابط Supabase URL</span>
+                      <span className="text-[10px] text-sky-600 dark:text-sky-400 font-normal">مطلوب</span>
                     </label>
                     <input
                       type="text"
@@ -1462,12 +1463,13 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                       value={syncUrl}
                       onChange={e => setSyncUrl(e.target.value)}
                       placeholder="https://xxxx.supabase.co"
-                      className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-800 dark:text-white font-mono text-xs"
+                      className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-800 dark:text-white font-mono text-xs focus:ring-2 focus:ring-sky-500"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                      Anon Public Key
+                    <label className="block text-xs font-bold text-gray-750 dark:text-gray-300 mb-1 flex items-center justify-between">
+                      <span>Anon Public Key</span>
+                      <span className="text-[10px] text-sky-600 dark:text-sky-400 font-normal">مطلوب</span>
                     </label>
                     <input
                       type="password"
@@ -1475,84 +1477,125 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                       value={syncKey}
                       onChange={e => setSyncKey(e.target.value)}
                       placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-                      className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-800 dark:text-white font-mono text-xs"
+                      className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-800 dark:text-white font-mono text-xs focus:ring-2 focus:ring-sky-500"
                     />
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                      معرّف المتجر / الترخيص (Tenant ID)
+                      معرّف المتجر (Tenant ID)
                     </label>
                     <input
                       type="text"
                       dir="ltr"
                       value={syncTenant}
                       onChange={e => setSyncTenant(e.target.value)}
-                      placeholder="افتراضي: معرّف الترخيص المفعل"
-                      className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-800 dark:text-white font-mono text-xs"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                      توكن الدخول (Supabase Auth Access Token)
-                    </label>
-                    <input
-                      type="password"
-                      dir="ltr"
-                      value={syncAccessToken}
-                      onChange={e => setSyncAccessToken(e.target.value)}
-                      placeholder="eyJhbGciOi..."
+                      placeholder="افتراضي: معرّف الترخيص"
                       className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-800 dark:text-white font-mono text-xs"
                     />
                   </div>
                 </div>
 
-                {/* Direct Login Helper */}
-                <div className="p-3 bg-gray-50 dark:bg-gray-750 rounded-xl border border-gray-200 dark:border-gray-700 mb-4">
-                  <p className="text-xs font-bold text-gray-700 dark:text-gray-300 mb-2">
-                    أو تسجيل الدخول المباشر بحساب Supabase Auth:
-                  </p>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    <input
-                      type="email"
-                      dir="ltr"
-                      value={syncEmail}
-                      onChange={e => setSyncEmail(e.target.value)}
-                      placeholder="البريد الإلكتروني"
-                      className="p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-xs text-gray-800 dark:text-white"
-                    />
-                    <input
-                      type="password"
-                      dir="ltr"
-                      value={syncPassword}
-                      onChange={e => setSyncPassword(e.target.value)}
-                      placeholder="كلمة المرور"
-                      className="p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-xs text-gray-800 dark:text-white"
-                    />
+                {/* Token Alert if non-JWT token is present */}
+                {syncAccessToken && !isValidJwt(syncAccessToken) && (
+                  <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 rounded-xl text-xs text-amber-800 dark:text-amber-200 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle size={16} className="text-amber-600 shrink-0" />
+                      <span>
+                        تنبيه: التوكن المسجل ليس بصيغة JWT (مثل Personal Access Token sbp_...). المزامنة لا تحتاجه وتعمل مباشرة بمفتاح Anon Key.
+                      </span>
+                    </div>
                     <button
                       type="button"
-                      disabled={syncBusy || !syncEmail || !syncPassword}
-                      onClick={async () => {
-                        setSyncBusy(true);
-                        setSyncMsg(null);
-                        try {
-                          sync.updateConfig({ url: syncUrl, anonKey: syncKey, tenantId: syncTenant });
-                          const res = await sync.signInWithPassword(syncEmail, syncPassword);
-                          if (res.ok) {
-                            setSyncMsg({ kind: 'ok', text: 'تم تسجيل الدخول وربط الحساب بنجاح ✅' });
-                            setSyncAccessToken(syncEngine.loadConfig().accessToken || '');
-                          } else {
-                            setSyncMsg({ kind: 'err', text: res.error || 'فشل تسجيل الدخول' });
-                          }
-                        } finally {
-                          setSyncBusy(false);
-                        }
+                      onClick={() => {
+                        setSyncAccessToken('');
+                        sync.updateConfig({ accessToken: undefined });
+                        setSyncMsg({ kind: 'ok', text: 'تم حذف التوكن بنجاح والاعتماد على Anon Key ✅' });
                       }}
-                      className="px-3 py-2 bg-slate-700 hover:bg-slate-800 text-white rounded-lg text-xs font-bold transition disabled:opacity-50"
+                      className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold transition shrink-0"
                     >
-                      تسجيل الدخول والربط
+                      إزالة التوكن واستخدام Anon Key فقط
                     </button>
                   </div>
-                </div>
+                )}
+
+                {/* Optional / Advanced Settings Accordion */}
+                <details className="border border-gray-200 dark:border-gray-700 rounded-xl p-3 bg-gray-50/60 dark:bg-gray-750/50 mb-4 group">
+                  <summary className="cursor-pointer text-xs font-bold text-gray-700 dark:text-gray-300 flex items-center justify-between select-none">
+                    <span>إعدادات متقدمة (اختياري: توكن مخصص أو حساب Supabase Auth)</span>
+                    <span className="text-[11px] text-gray-400 group-open:rotate-180 transition-transform">▼</span>
+                  </summary>
+
+                  <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 space-y-3">
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                      💡 المزامنة اللحظية تعمل تلقائياً عبر مفتاح Anon Key للمتجر ولا تتطلب تسجيل دخول أو توكن. يمكنك إبقاء الحقول بالأسفل فارغة.
+                    </p>
+
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                        توكن الدخول (Supabase Auth Access Token - JWT فقط)
+                      </label>
+                      <input
+                        type="password"
+                        dir="ltr"
+                        value={syncAccessToken}
+                        onChange={e => setSyncAccessToken(e.target.value)}
+                        placeholder="eyJhbGciOi..."
+                        className="w-full p-2.5 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-800 dark:text-white font-mono text-xs"
+                      />
+                    </div>
+
+                    <div className="pt-2">
+                      <p className="text-xs font-bold text-gray-700 dark:text-gray-300 mb-2">
+                        تسجيل الدخول المباشر بحساب Supabase Auth:
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <input
+                          type="email"
+                          dir="ltr"
+                          value={syncEmail}
+                          onChange={e => setSyncEmail(e.target.value)}
+                          placeholder="البريد الإلكتروني"
+                          className="p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-xs text-gray-800 dark:text-white"
+                        />
+                        <input
+                          type="password"
+                          dir="ltr"
+                          value={syncPassword}
+                          onChange={e => setSyncPassword(e.target.value)}
+                          placeholder="كلمة المرور"
+                          className="p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-xs text-gray-800 dark:text-white"
+                        />
+                        <button
+                          type="button"
+                          disabled={syncBusy || !syncEmail || !syncPassword}
+                          onClick={async () => {
+                            setSyncBusy(true);
+                            setSyncMsg(null);
+                            try {
+                              sync.updateConfig({
+                                url: syncUrl.trim().replace(/\/+$/, ''),
+                                anonKey: syncKey.trim().replace(/^['"]|['"]$/g, ''),
+                                tenantId: syncTenant.trim() || undefined,
+                              });
+                              const res = await sync.signInWithPassword(syncEmail, syncPassword);
+                              if (res.ok) {
+                                setSyncMsg({ kind: 'ok', text: 'تم تسجيل الدخول وربط الحساب بنجاح ✅' });
+                                setSyncAccessToken(syncEngine.loadConfig().accessToken || '');
+                              } else {
+                                setSyncMsg({ kind: 'err', text: res.error || 'فشل تسجيل الدخول' });
+                              }
+                            } finally {
+                              setSyncBusy(false);
+                            }
+                          }}
+                          className="px-3 py-2 bg-slate-700 hover:bg-slate-800 text-white rounded-lg text-xs font-bold transition disabled:opacity-50"
+                        >
+                          تسجيل الدخول والربط
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </details>
 
                 {syncMsg && (
                   <p className={`text-sm mb-4 font-medium flex items-center gap-1.5 ${
@@ -1568,11 +1611,20 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                   <button
                     type="button"
                     onClick={() => {
+                      const cleanUrl = syncUrl.trim().replace(/\/+$/, '');
+                      const cleanKey = syncKey.trim().replace(/^['"]|['"]$/g, '');
+                      const cleanToken = isValidJwt(syncAccessToken) ? syncAccessToken.trim() : undefined;
+                      const cleanTenant = syncTenant.trim() || undefined;
+
+                      setSyncUrl(cleanUrl);
+                      setSyncKey(cleanKey);
+                      setSyncAccessToken(cleanToken || '');
+
                       sync.updateConfig({
-                        url: syncUrl,
-                        anonKey: syncKey,
-                        accessToken: syncAccessToken,
-                        tenantId: syncTenant,
+                        url: cleanUrl,
+                        anonKey: cleanKey,
+                        accessToken: cleanToken,
+                        tenantId: cleanTenant,
                         autoSyncEnabled: syncAutoEnabled,
                       });
                       setSyncMsg({ kind: 'ok', text: 'تم حفظ إعدادات المزامنة السحابية بنجاح ✅' });

@@ -14,6 +14,14 @@ import type {
   SyncRecordRow,
 } from '../types/sync.ts';
 
+export function isValidJwt(token?: string | null): boolean {
+  if (!token) return false;
+  const trimmed = token.trim();
+  if (trimmed.startsWith('sbp_')) return false;
+  const parts = trimmed.split('.');
+  return parts.length === 3 && parts.every(p => p.length > 0);
+}
+
 function getStoredActiveLicense(): ActiveLicense | null {
   if (typeof localStorage === 'undefined') return null;
   try {
@@ -116,10 +124,18 @@ class SyncEngine {
     if (typeof localStorage === 'undefined') {
       return { url: '', anonKey: '', autoSyncEnabled: true };
     }
+    const rawToken = (localStorage.getItem(CFG_ACCESS_TOKEN) || '').trim();
+    // Auto-clean non-JWT access tokens (such as Supabase Personal Access Tokens sbp_...)
+    const validToken = isValidJwt(rawToken) ? rawToken : undefined;
+    if (rawToken && !validToken) {
+      console.warn('[SyncEngine] Cleared non-JWT access token from storage');
+      localStorage.removeItem(CFG_ACCESS_TOKEN);
+    }
+
     return {
-      url: (localStorage.getItem(CFG_URL) || '').trim(),
-      anonKey: (localStorage.getItem(CFG_KEY) || '').trim(),
-      accessToken: (localStorage.getItem(CFG_ACCESS_TOKEN) || '').trim() || undefined,
+      url: (localStorage.getItem(CFG_URL) || '').trim().replace(/\/+$/, ''),
+      anonKey: (localStorage.getItem(CFG_KEY) || '').trim().replace(/^['"]|['"]$/g, ''),
+      accessToken: validToken,
       refreshToken: (localStorage.getItem(CFG_REFRESH_TOKEN) || '').trim() || undefined,
       userEmail: (localStorage.getItem(CFG_USER_EMAIL) || '').trim() || undefined,
       tenantId: this.resolveTenantId(),
@@ -129,9 +145,16 @@ class SyncEngine {
 
   public saveConfig(cfg: Partial<SyncConfig>): void {
     if (typeof localStorage === 'undefined') return;
-    if (cfg.url !== undefined) localStorage.setItem(CFG_URL, cfg.url.trim());
-    if (cfg.anonKey !== undefined) localStorage.setItem(CFG_KEY, cfg.anonKey.trim());
-    if (cfg.accessToken !== undefined) localStorage.setItem(CFG_ACCESS_TOKEN, cfg.accessToken.trim());
+    if (cfg.url !== undefined) localStorage.setItem(CFG_URL, cfg.url.trim().replace(/\/+$/, ''));
+    if (cfg.anonKey !== undefined) localStorage.setItem(CFG_KEY, cfg.anonKey.trim().replace(/^['"]|['"]$/g, ''));
+    if (cfg.accessToken !== undefined) {
+      const clean = cfg.accessToken.trim();
+      if (isValidJwt(clean)) {
+        localStorage.setItem(CFG_ACCESS_TOKEN, clean);
+      } else {
+        localStorage.removeItem(CFG_ACCESS_TOKEN);
+      }
+    }
     if (cfg.refreshToken !== undefined) localStorage.setItem(CFG_REFRESH_TOKEN, cfg.refreshToken.trim());
     if (cfg.userEmail !== undefined) localStorage.setItem(CFG_USER_EMAIL, cfg.userEmail.trim());
     if (cfg.tenantId !== undefined) localStorage.setItem(CFG_TENANT, cfg.tenantId.trim());
@@ -246,8 +269,7 @@ class SyncEngine {
   private evaluateStatus(): void {
     const isConfigured = Boolean(
       this.config.url &&
-      this.config.anonKey &&
-      (this.config.accessToken || this.config.userEmail)
+      this.config.anonKey
     );
     this.state.isConfigured = isConfigured;
 
@@ -296,6 +318,8 @@ class SyncEngine {
     }
 
     try {
+      const validToken = isValidJwt(this.config.accessToken) ? this.config.accessToken!.trim() : undefined;
+
       this.supabase = createClient(this.config.url, this.config.anonKey, {
         auth: {
           persistSession: true,
@@ -303,20 +327,18 @@ class SyncEngine {
           detectSessionInUrl: false,
         },
         global: {
-          headers: this.config.accessToken
-            ? { Authorization: `Bearer ${this.config.accessToken}` }
+          headers: validToken
+            ? { Authorization: `Bearer ${validToken}` }
             : {},
         },
       });
 
       // If we have an existing session token, configure it
-      if (this.config.accessToken) {
-        if (this.config.refreshToken) {
-          void this.supabase.auth.setSession({
-            access_token: this.config.accessToken,
-            refresh_token: this.config.refreshToken,
-          }).catch(err => console.warn('[SyncEngine] setSession failed:', err));
-        }
+      if (validToken && this.config.refreshToken) {
+        void this.supabase.auth.setSession({
+          access_token: validToken,
+          refresh_token: this.config.refreshToken,
+        }).catch(err => console.warn('[SyncEngine] setSession failed:', err));
       }
 
       this.setupRealtimeSubscription();
@@ -335,18 +357,40 @@ class SyncEngine {
     if (!this.config.url || !this.config.anonKey) {
       return { ok: false, error: 'أدخل رابط ومفتاح Supabase أولاً' };
     }
+    const cleanEmail = email.trim();
     try {
       if (!this.supabase) {
         this.supabase = createClient(this.config.url, this.config.anonKey);
       }
-      const { data, error } = await this.supabase.auth.signInWithPassword({ email, password });
-      if (error || !data.session) {
-        return { ok: false, error: error?.message || 'فشل تسجيل الدخول' };
+      const { data, error } = await this.supabase.auth.signInWithPassword({ email: cleanEmail, password });
+      let session = data?.session;
+      let user = data?.user;
+      let errorMsg = error?.message;
+      
+      // Auto Sign-Up if user doesn't exist yet in the Supabase project
+      if (error && (error.message.toLowerCase().includes('invalid login credentials') || error.message.toLowerCase().includes('user not found'))) {
+        const signUpRes = await this.supabase.auth.signUp({ email: cleanEmail, password });
+        if (!signUpRes.error && signUpRes.data?.session) {
+          session = signUpRes.data.session;
+          user = signUpRes.data.user;
+          errorMsg = undefined;
+        } else if (!signUpRes.error && signUpRes.data?.user && !signUpRes.data?.session) {
+          return {
+            ok: false,
+            error: 'تم إنشاء المستخدم في Supabase لكن يتطلب تأكيد البريد الإلكتروني. يُرجى مراجعة البريد أو إيقاف خيار "Confirm email" من إعدادات Supabase Auth.',
+          };
+        } else if (signUpRes.error) {
+          errorMsg = signUpRes.error.message;
+        }
+      }
+
+      if (!session || errorMsg) {
+        return { ok: false, error: errorMsg || 'فشل تسجيل الدخول' };
       }
       this.saveConfig({
-        accessToken: data.session.access_token,
-        refreshToken: data.session.refresh_token,
-        userEmail: data.user.email || email,
+        accessToken: session.access_token,
+        refreshToken: session.refresh_token,
+        userEmail: user?.email || cleanEmail,
       });
       return { ok: true };
     } catch (err) {
@@ -544,7 +588,22 @@ class SyncEngine {
       }
     } catch (err) {
       console.warn('[SyncEngine] Drain failed, backing off:', err);
-      this.state.errorMessage = err instanceof Error ? err.message : 'فشل رفع البيانات للسحابة';
+      const rawMsg = err instanceof Error ? err.message : 'فشل رفع البيانات للسحابة';
+
+      // Auto-recovery: If JWT was malformed (e.g. Expected 3 parts in JWT; got 1),
+      // clear the invalid token from localStorage, reset client, and retry immediately with clean anonKey!
+      if (rawMsg.includes('Expected 3 parts in JWT') || rawMsg.includes('invalid JWT')) {
+        console.warn('[SyncEngine] Malformed JWT detected in request, purging token and switching to anon key');
+        if (typeof localStorage !== 'undefined') {
+          localStorage.removeItem(CFG_ACCESS_TOKEN);
+        }
+        this.config.accessToken = undefined;
+        this.state.errorMessage = null;
+        this.reconnect();
+        return;
+      }
+
+      this.state.errorMessage = rawMsg;
       // Schedule exponential retry
       if (this.drainTimer) clearTimeout(this.drainTimer);
       this.drainTimer = setTimeout(() => {

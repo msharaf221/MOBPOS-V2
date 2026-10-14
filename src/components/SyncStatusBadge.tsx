@@ -11,6 +11,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { useSyncEngine } from '../hooks/useSyncEngine';
+import { syncEngine } from '../services/SyncEngine';
 import { formatDate } from '../utils/format';
 
 interface SyncStatusBadgeProps {
@@ -166,8 +167,24 @@ export default function SyncStatusBadge({ onOpenSettings }: SyncStatusBadgeProps
             <div className="mt-3 p-2.5 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/50 text-xs text-red-700 dark:text-red-300">
               <p className="font-medium flex items-center gap-1">
                 <AlertCircle size={14} className="shrink-0" />
-                {errorMessage}
+                {errorMessage.includes('Expected 3 parts in JWT')
+                  ? 'خطأ بتنسيق التوكن: تم إدخال رمز غير متوافق (مثل Personal Access Token).'
+                  : errorMessage}
               </p>
+              {errorMessage.includes('Expected 3 parts in JWT') && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    syncEngine.saveConfig({ accessToken: undefined });
+                    syncEngine.reconnect();
+                    void syncEngine.triggerDrain();
+                  }}
+                  className="mt-2 w-full py-1.5 px-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition shadow-sm"
+                >
+                  <Zap size={13} />
+                  إصلاح فوري (الاعتماد على Anon Key فقط)
+                </button>
+              )}
             </div>
           )}
 
