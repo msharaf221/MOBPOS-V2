@@ -33,6 +33,7 @@ import ReportPreview from './components/ReportPreview';
 import AuditLog from './components/AuditLog';
 import { demoAppSettings, getDemoShowcaseData } from './data/demoShowcase';
 import { isLanClient, fetchLanServerInfo, fetchCentralData, pushCentralData, pushDelta, connectLanStream } from './utils/lanSync';
+import { syncEngine } from './services/SyncEngine';
 
 const isDevDemo =
   import.meta.env.DEV &&
@@ -79,6 +80,53 @@ export default function App() {
     }, 60000); // check every minute
     return () => clearInterval(interval);
   }, [screen, license]);
+
+  // Connect SyncEngine to local store setters and active license
+  useEffect(() => {
+    syncEngine.setStoreDispatcher((storeName, action) => {
+      type Identifiable = { id: string; [key: string]: unknown };
+      const storeSetters: Record<string, (val: unknown) => void> = {
+        users: store.setUsers as (val: unknown) => void,
+        customers: store.setCustomers as (val: unknown) => void,
+        categories: store.setCategories as (val: unknown) => void,
+        inventory: store.setInventory as (val: unknown) => void,
+        imeiUnits: store.setImeiUnits as (val: unknown) => void,
+        sales: store.setSales as (val: unknown) => void,
+        saleReturns: store.setSaleReturns as (val: unknown) => void,
+        maintenance: store.setMaintenance as (val: unknown) => void,
+        safes: store.setSafes as (val: unknown) => void,
+        transactions: store.setTransactions as (val: unknown) => void,
+        suppliers: store.setSuppliers as (val: unknown) => void,
+        purchases: store.setPurchases as (val: unknown) => void,
+        stockWastes: store.setStockWastes as (val: unknown) => void,
+        inventoryAudits: store.setInventoryAudits as (val: unknown) => void,
+        sideAccountEntries: store.setSideAccountEntries as (val: unknown) => void,
+        notifications: store.setNotifications as (val: unknown) => void,
+        auditLogs: store.setAuditLogs as (val: unknown) => void,
+      };
+
+      const setter = storeSetters[storeName];
+      if (!setter) return;
+
+      if (action.type === 'delete' && action.id) {
+        (setter as unknown as (fn: (prev: Identifiable[]) => Identifiable[]) => void)(prev =>
+          prev.filter(it => it.id !== action.id)
+        );
+      } else if (action.type === 'upsert' && action.item) {
+        const newItem = action.item as Identifiable;
+        (setter as unknown as (fn: (prev: Identifiable[]) => Identifiable[]) => void)(prev => {
+          const map = new Map(prev.map(it => [it.id, it]));
+          map.set(newItem.id, { ...(map.get(newItem.id) || {}), ...newItem });
+          return Array.from(map.values());
+        });
+      } else if (action.type === 'replace' && Array.isArray(action.items)) {
+        setter(action.items);
+      }
+    });
+
+    syncEngine.setLicense(license);
+    syncEngine.init();
+  }, [license, store.setUsers, store.setCustomers, store.setCategories, store.setInventory, store.setImeiUnits, store.setSales, store.setSaleReturns, store.setMaintenance, store.setSafes, store.setTransactions, store.setSuppliers, store.setPurchases, store.setStockWastes, store.setInventoryAudits, store.setSideAccountEntries, store.setNotifications, store.setAuditLogs]);
 
   // Verify the stored license on load: re-check the digital signature,
   // expiration, and that we are still on the device it was activated on.
