@@ -357,6 +357,10 @@ export interface AppSettings {
   lanEnabled?: boolean;
   /** رمز حماية الدخول من أجهزة الشبكة */
   lanPin?: string;
+  /** تفعيل المزامنة السحابية اللحظية (Supabase) */
+  cloudSyncEnabled?: boolean;
+  /** المزامنة التلقائية اللحظية في الخلفية */
+  cloudAutoSync?: boolean;
 }
 
 // ============ AUDIT LOG TYPES ============
