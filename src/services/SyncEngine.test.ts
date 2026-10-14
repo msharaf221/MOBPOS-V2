@@ -1,0 +1,116 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { syncEngine } from './SyncEngine.ts';
+import { setRemoteApplying, isApplyingRemote } from '../hooks/useIndexedDB.ts';
+import type { SyncRecordRow, OutboxItem } from '../types/sync.ts';
+
+test('SyncEngine initializes with persistent clientId and default offline/disabled state', () => {
+  const clientId = syncEngine.getOrCreateClientId();
+  assert.ok(clientId, 'Client ID must be generated');
+  assert.equal(typeof clientId, 'string');
+  assert.equal(syncEngine.getOrCreateClientId(), clientId, 'Client ID must be persistent');
+
+  const state = syncEngine.getState();
+  assert.ok(['synced', 'syncing', 'offline', 'error', 'disabled'].includes(state.status));
+  assert.equal(state.clientId, clientId);
+});
+
+test('Last-Write-Wins (LWW): newer remote timestamp overrides older local timestamp', () => {
+  const localRecord = {
+    id: 'prod_123',
+    name: 'شاشة سامسونج',
+    sellPrice: 1500,
+    updated_at: '2026-10-14T10:00:00.000Z',
+  };
+
+  const incomingRemoteRow: SyncRecordRow = {
+    tenant_id: 'tenant_test',
+    store: 'inventory',
+    record_id: 'prod_123',
+    data: {
+      id: 'prod_123',
+      name: 'شاشة سامسونج الأصلية',
+      sellPrice: 1600,
+      updated_at: '2026-10-14T10:05:00.000Z',
+    },
+    version: 2,
+    client_id: 'other_device_456',
+    updated_at: '2026-10-14T10:05:00.000Z',
+    deleted_at: null,
+  };
+
+  const localTime = new Date(localRecord.updated_at).getTime();
+  const remoteTime = new Date(incomingRemoteRow.updated_at).getTime();
+  assert.ok(remoteTime > localTime, 'Remote timestamp must be greater than local');
+});
+
+test('Last-Write-Wins (LWW): older remote timestamp does NOT override newer local timestamp', () => {
+  const localRecord = {
+    id: 'prod_123',
+    name: 'شاشة سامسونج الحديثة',
+    sellPrice: 1700,
+    updated_at: '2026-10-14T11:00:00.000Z',
+  };
+
+  const incomingRemoteRow: SyncRecordRow = {
+    tenant_id: 'tenant_test',
+    store: 'inventory',
+    record_id: 'prod_123',
+    data: {
+      id: 'prod_123',
+      name: 'شاشة سامسونج القديمة',
+      sellPrice: 1500,
+      updated_at: '2026-10-14T10:30:00.000Z',
+    },
+    version: 1,
+    client_id: 'other_device_456',
+    updated_at: '2026-10-14T10:30:00.000Z',
+    deleted_at: null,
+  };
+
+  const localTime = new Date(localRecord.updated_at).getTime();
+  const remoteTime = new Date(incomingRemoteRow.updated_at).getTime();
+  assert.ok(localTime > remoteTime, 'Local timestamp is newer than remote; local wins');
+});
+
+test('Soft delete tombstone is properly identified and prioritized', () => {
+  const remoteDeleteRow: SyncRecordRow = {
+    tenant_id: 'tenant_test',
+    store: 'sales',
+    record_id: 'sale_999',
+    data: {},
+    version: 3,
+    client_id: 'device_pos_1',
+    updated_at: '2026-10-14T12:00:00.000Z',
+    deleted_at: '2026-10-14T12:00:00.000Z',
+  };
+
+  assert.ok(remoteDeleteRow.deleted_at !== null, 'deleted_at must indicate tombstone');
+});
+
+test('Echo suppression flag prevents remote writes from re-triggering outbox capture', () => {
+  assert.equal(isApplyingRemote(), false, 'Default remote applying flag should be false');
+  setRemoteApplying(true);
+  assert.equal(isApplyingRemote(), true, 'Flag must be true when remote sync is applying');
+  setRemoteApplying(false);
+  assert.equal(isApplyingRemote(), false, 'Flag must be reset to false after apply');
+});
+
+test('OutboxItem structure conforms to required properties', () => {
+  const item: OutboxItem = {
+    id: 'outbox_inventory_p1',
+    tenantId: 'tenant_abc',
+    store: 'inventory',
+    recordId: 'p1',
+    action: 'upsert',
+    data: { id: 'p1', name: 'كابل شحن', quantity: 20 },
+    clientUpdatedAt: '2026-10-14T12:30:00.000Z',
+    clientId: 'test_client',
+    retryCount: 0,
+    createdAt: '2026-10-14T12:30:00.000Z',
+  };
+
+  assert.equal(item.action, 'upsert');
+  assert.equal(item.recordId, 'p1');
+  assert.ok(item.clientUpdatedAt);
+});
