@@ -14,6 +14,7 @@ import { countUnreadNotifications, selectVisibleNotifications } from '../utils/a
 import { defaultAppSettings } from '../hooks/useStore';
 import { formatDate } from '../utils/format';
 import TitleBar from './TitleBar';
+import SyncStatusBadge from './SyncStatusBadge';
 
 // Must match the event name dispatched from Settings.tsx after saving branding changes.
 const BRANDING_UPDATED_EVENT = 'mobpos:appSettingsUpdated';
@@ -306,7 +307,10 @@ export default function Layout({
                 {menuItems.find(m => m.id === currentPage)?.label || 'لوحة التحكم'}
               </h2>
 
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-3">
+                {/* Cloud Sync Status */}
+                <SyncStatusBadge onOpenSettings={() => onNavigate('settings')} />
+
                 {/* Dark Mode Toggle */}
                 <button
                   onClick={onToggleDarkMode}
