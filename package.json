@@ -20,7 +20,10 @@
     "setup:ci": "node scripts/install-workflow.cjs",
     "dist:win": "npm run build && electron-builder --win --x64",
     "dist:win:publish": "npm run build && electron-builder --win --x64 --publish always",
-    "dist:win:portable": "npm run build && electron-builder --win portable --x64"
+    "dist:win:portable": "npm run build && electron-builder --win portable --x64",
+    "mobile:dev": "npm --prefix mobile run dev",
+    "mobile:build": "npm --prefix mobile run build",
+    "mobile:preview": "npm --prefix mobile run preview"
   },
   "dependencies": {
     "@fontsource/cairo": "^5.3.0",
