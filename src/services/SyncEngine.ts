@@ -260,7 +260,7 @@ class SyncEngine {
   private isLicenseValid(): boolean {
     if (!this.activeLicense) {
       const stored = getStoredActiveLicense();
-      if (!stored) return false;
+      if (!stored) return true; // Allow sync when user provides custom Supabase credentials without a local license file
       return !checkLicenseExpired(stored.expiresAt, stored.lifetime);
     }
     return !checkLicenseExpired(this.activeLicense.expiresAt, this.activeLicense.lifetime);

@@ -47,7 +47,7 @@ export default function App() {
   const [hideAmounts, setHideAmounts] = useState<boolean>(() => {
     return localStorage.getItem('mobpos_companion_hide_amounts') === 'true';
   });
-  const [autoRefreshInterval, setAutoRefreshInterval] = useState<number>(30);
+  const [autoRefreshInterval, setAutoRefreshInterval] = useState<number>(10);
 
   // Modals state
   const [selectedSale, setSelectedSale] = useState<SaleRecord | null>(null);
@@ -86,7 +86,7 @@ export default function App() {
     refreshMetrics().catch(() => undefined);
   }, [refreshMetrics]);
 
-  // Subscribe to manager changes
+  // Subscribe to manager local storage changes
   useEffect(() => {
     const unsub = multiBranchManager.subscribe(() => {
       setBranches(multiBranchManager.getBranches());
@@ -94,7 +94,30 @@ export default function App() {
     return unsub;
   }, []);
 
-  // Auto-refresh interval
+  // Subscribe to live Supabase Realtime WebSocket changes across all branches
+  useEffect(() => {
+    const unsubRealtime = multiBranchManager.setupAllRealtime(() => {
+      console.log('[Mobile Realtime] Live push received -> refreshing metrics');
+      refreshMetrics().catch(() => undefined);
+    });
+
+    // Auto-refresh when user switches back to the phone screen
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        refreshMetrics().catch(() => undefined);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleVisibilityChange);
+
+    return () => {
+      unsubRealtime();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleVisibilityChange);
+    };
+  }, [branches, refreshMetrics]);
+
+  // Fallback polling interval (default 10s)
   useEffect(() => {
     if (autoRefreshInterval <= 0) return;
     const timer = setInterval(() => {

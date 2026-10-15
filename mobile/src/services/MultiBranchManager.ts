@@ -122,6 +122,64 @@ class MultiBranchManager {
     return this.clients.get(branch.id) || null;
   }
 
+  public setupRealtimeForBranch(branch: BranchConfig, onLiveChange?: () => void): void {
+    const client = this.getClient(branch);
+    if (!client) return;
+
+    if (this.channels.has(branch.id)) {
+      const oldCh = this.channels.get(branch.id);
+      if (oldCh) void oldCh.unsubscribe();
+      this.channels.delete(branch.id);
+    }
+
+    try {
+      const channel = client
+        .channel(`branch_${branch.id}_live_${Date.now()}`)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'mobpos_records' },
+          (payload) => {
+            console.log(`[MultiBranch Live] Record update on ${branch.name}:`, payload.eventType);
+            this.metricsCache.delete(branch.id);
+            if (onLiveChange) onLiveChange();
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'mobpos_stores' },
+          (payload) => {
+            console.log(`[MultiBranch Live] Snapshot update on ${branch.name}:`, payload.eventType);
+            this.metricsCache.delete(branch.id);
+            if (onLiveChange) onLiveChange();
+          }
+        )
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            console.log(`[MultiBranch Live] Subscribed to realtime updates for ${branch.name}`);
+            this.updateBranch(branch.id, { status: 'connected' });
+          }
+        });
+
+      this.channels.set(branch.id, channel);
+    } catch (e) {
+      console.warn(`[MultiBranch Live] Failed to subscribe realtime for ${branch.name}:`, e);
+    }
+  }
+
+  public setupAllRealtime(onLiveChange?: () => void): () => void {
+    const branches = this.getBranches().filter(b => b.enabled && b.supabaseUrl && b.supabaseAnonKey);
+    for (const b of branches) {
+      this.setupRealtimeForBranch(b, onLiveChange);
+    }
+
+    return () => {
+      for (const [, ch] of this.channels.entries()) {
+        void ch.unsubscribe();
+      }
+      this.channels.clear();
+    };
+  }
+
   /**
    * Fetches live data from Supabase for a single branch.
    * If credentials are not yet set or offline, returns realistic offline/demo data.
