@@ -32,3 +32,4 @@ activation-server/data/
 
 # Packaging outputs
 release/
+mobile-dist/

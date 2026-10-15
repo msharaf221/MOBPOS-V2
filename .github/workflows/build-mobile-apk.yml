@@ -67,10 +67,8 @@ jobs:
           path: build-artifacts/MOBPOS-Companion.apk
           retention-days: 30
 
-      - name: Upload to Latest Release if tagged
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Upload to Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG_NAME="${GITHUB_REF#refs/tags/}"
-          gh release upload "$TAG_NAME" build-artifacts/MOBPOS-Companion.apk --clobber || true
+          gh release upload v1.0.21 build-artifacts/MOBPOS-Companion.apk --clobber || true
