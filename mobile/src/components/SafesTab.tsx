@@ -47,76 +47,97 @@ export const SafesTab: React.FC<SafesTabProps> = ({
   }, [transactions, filterType, searchQuery]);
 
   return (
-    <div className="space-y-4 pb-24">
+    <div className="space-y-4 pb-28 animate-in fade-in duration-200">
       {/* Total Liquid Cash Header Card */}
-      <div className="p-4 rounded-3xl glass-panel relative overflow-hidden">
-        <div className="flex items-center justify-between mb-1 text-slate-300 text-xs font-bold">
-          <span className="flex items-center gap-1.5">
-            <Wallet size={16} className="text-amber-400" />
-            إجمالي السيولة النقدية المتاحة
+      <div
+        className="p-5 rounded-3xl relative overflow-hidden border border-amber-500/25 space-y-3"
+        style={{
+          background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.12) 0%, rgba(15, 23, 42, 0.95) 45%, rgba(15, 23, 42, 0.85) 100%)',
+          backdropFilter: 'blur(20px)',
+          boxShadow: '0 20px 40px -15px rgba(245, 158, 11, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.1)',
+        }}
+      >
+        <div className="flex items-center justify-between text-slate-300 text-xs font-bold">
+          <span className="flex items-center gap-2 text-amber-300">
+            <span className="p-1.5 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30">
+              <Wallet size={16} />
+            </span>
+            <span>إجمالي السيولة النقدية المتاحة</span>
           </span>
-          <span className="text-[10px] text-slate-400 font-mono">
-            {safes.length} خزائن / أدراج
+          <span className="text-[10px] text-amber-300 font-mono bg-amber-500/15 px-2.5 py-1 rounded-xl border border-amber-500/25">
+            {safes.length} خزائن وأدراج
           </span>
         </div>
 
-        <div className="text-3xl font-black text-white font-mono mt-2 tracking-tight">
+        <div className="text-3xl sm:text-4xl font-black text-white font-mono tracking-tight drop-shadow-md">
           {formatCurrency(totalBalance, hideAmounts)}
         </div>
 
-        <p className="text-[11px] text-slate-400 mt-2 flex items-center gap-1">
-          <ShieldCheck size={13} className="text-emerald-400" />
-          <span>مجموع أرصدة الأدراج والخزائن والمحافظ لجميع الفروع المختارة</span>
+        <p className="text-[11px] text-slate-400 pt-1 border-t border-white/[0.08] flex items-center gap-1.5">
+          <ShieldCheck size={14} className="text-emerald-400 shrink-0" />
+          <span>مجموع النقدية الحقيقية في أدراج الكاشير والخزائن والمحافظ الإلكترونية</span>
         </p>
       </div>
 
       {/* Safes Breakdown Grid */}
       <div className="space-y-2">
-        <div className="text-xs font-bold text-slate-300 px-1">
-          أرصدة الخزائن والأدراج بالتفصيل:
+        <div className="flex items-center justify-between text-xs font-bold text-slate-300 px-1">
+          <span>أرصدة الخزائن والأدراج بالتفصيل:</span>
+          <span className="text-[10px] text-slate-500 font-mono">{safes.length} حسابات</span>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
           {safes.map(safe => {
             const isWallet = safe.type === 'wallet';
             const isBank = safe.type === 'bank';
+            const pct = totalBalance > 0 ? Math.round((Number(safe.balance || 0) / totalBalance) * 100) : 0;
             return (
               <div
                 key={safe.id}
-                className="p-3.5 rounded-2xl glass-card flex items-center justify-between"
+                className="p-4 rounded-3xl glass-card space-y-2.5 border border-white/[0.06] hover:border-amber-500/30 transition shadow-sm"
               >
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div
-                    className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
-                      isWallet
-                        ? 'bg-rose-500/15 text-rose-400'
-                        : isBank
-                        ? 'bg-blue-500/15 text-blue-400'
-                        : 'bg-amber-500/15 text-amber-400'
-                    }`}
-                  >
-                    {isWallet ? <Smartphone size={17} /> : isBank ? <Building size={17} /> : <Wallet size={17} />}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div
+                      className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 shadow-inner ${
+                        isWallet
+                          ? 'bg-rose-500/15 text-rose-400 border border-rose-500/25'
+                          : isBank
+                          ? 'bg-blue-500/15 text-blue-400 border border-blue-500/25'
+                          : 'bg-amber-500/15 text-amber-400 border border-amber-500/25'
+                      }`}
+                    >
+                      {isWallet ? <Smartphone size={18} /> : isBank ? <Building size={18} /> : <Wallet size={18} />}
+                    </div>
+
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold text-white truncate">
+                        {safe.name}
+                      </div>
+                      <div className="text-[10px] text-slate-400 truncate mt-0.5">
+                        {safe.branchName || 'الفرع'} • {isWallet ? 'محفظة إلكترونية' : isBank ? 'حساب بنكي' : 'درج كاشير'}
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="min-w-0">
-                    <div className="text-xs font-bold text-white truncate">
-                      {safe.name}
-                    </div>
-                    {safe.branchName && (
-                      <div className="text-[10px] text-slate-400 truncate mt-0.5">
-                        {safe.branchName}
-                      </div>
-                    )}
+                  <div className="text-left font-mono">
+                    <span className="text-sm font-black text-white block">
+                      {formatCurrency(safe.balance, hideAmounts)}
+                    </span>
+                    <span className="text-[10px] text-amber-400 font-bold bg-amber-500/10 px-1.5 py-0.2 rounded">
+                      {pct}%
+                    </span>
                   </div>
                 </div>
 
-                <div className="text-left font-mono">
-                  <span className="text-sm font-bold text-white block">
-                    {formatCurrency(safe.balance, hideAmounts)}
-                  </span>
-                  <span className="text-[9px] text-slate-500">
-                    {isWallet ? 'محفظة إلكترونية' : isBank ? 'حساب بنكي' : 'كاش نقدي'}
-                  </span>
+                {/* Balance proportion bar */}
+                <div className="w-full h-1.5 rounded-full bg-slate-800/80 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-500 ${
+                      isWallet ? 'bg-rose-500' : isBank ? 'bg-blue-500' : 'bg-amber-400'
+                    }`}
+                    style={{ width: `${Math.max(pct, 2)}%` }}
+                  />
                 </div>
               </div>
             );
@@ -125,7 +146,7 @@ export const SafesTab: React.FC<SafesTabProps> = ({
       </div>
 
       {/* Live Cash Flow Transactions */}
-      <div className="space-y-2.5 pt-2">
+      <div className="space-y-3 pt-2">
         <div className="flex items-center justify-between text-xs px-1">
           <span className="font-bold text-slate-200">سجل حركات الصندوق والمصروفات</span>
           <div className="flex items-center gap-1">

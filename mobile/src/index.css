@@ -8,11 +8,16 @@
 
   body {
     font-family: var(--font-cairo);
-    background-color: #050811;
-    color: #f1f5f9;
+    background-color: #030712;
+    background-image: 
+      radial-gradient(at 100% 0%, rgba(14, 165, 233, 0.08) 0px, transparent 50%),
+      radial-gradient(at 0% 100%, rgba(99, 102, 241, 0.08) 0px, transparent 50%);
+    background-attachment: fixed;
+    color: #f8fafc;
     user-select: none;
     -webkit-tap-highlight-color: transparent;
     -webkit-touch-callout: none;
+    overscroll-behavior-y: contain;
   }
 }
 
@@ -25,33 +30,80 @@
   scrollbar-width: none;
 }
 
-/* Glassmorphism helpers */
+/* Glassmorphism system */
 .glass-panel {
-  background: rgba(15, 23, 42, 0.75);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(135deg, rgba(17, 24, 39, 0.85) 0%, rgba(15, 23, 42, 0.7) 100%);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 .glass-panel-elevated {
-  background: rgba(22, 30, 49, 0.88);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: linear-gradient(145deg, rgba(24, 34, 53, 0.92) 0%, rgba(15, 23, 42, 0.85) 100%);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 
 .glass-card {
-  background: rgba(30, 41, 59, 0.5);
+  background: rgba(30, 41, 59, 0.55);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.3);
+}
+
+.glass-card-interactive {
+  background: rgba(30, 41, 59, 0.45);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.07);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.glass-card-interactive:active {
+  transform: scale(0.975);
+  background: rgba(30, 41, 59, 0.7);
+  border-color: rgba(56, 189, 248, 0.3);
+}
+
+.glass-pill {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Neon glow accents */
+.glow-cyan {
+  box-shadow: 0 0 25px -5px rgba(6, 182, 212, 0.4);
+}
+.glow-emerald {
+  box-shadow: 0 0 25px -5px rgba(16, 185, 129, 0.4);
+}
+.glow-amber {
+  box-shadow: 0 0 25px -5px rgba(245, 158, 11, 0.4);
+}
+.glow-indigo {
+  box-shadow: 0 0 25px -5px rgba(99, 102, 241, 0.4);
 }
 
 /* Safe areas for iPhone notch & home indicator */
 .safe-bottom {
-  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.5rem);
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.75rem);
 }
 
 .safe-top {
   padding-top: calc(env(safe-area-inset-top, 0px) + 0.5rem);
+}
+
+/* Pulse animation */
+@keyframes softPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(0.98); }
+}
+
+.animate-soft-pulse {
+  animation: softPulse 2s ease-in-out infinite;
 }

@@ -39,6 +39,7 @@ export interface SaleRecord {
   safeName?: string;
   cashierName?: string;
   customerName?: string;
+  customerPhone?: string;
   customerId?: string;
   items: SaleItem[];
   branchId?: string;

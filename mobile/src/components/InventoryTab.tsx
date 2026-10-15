@@ -62,17 +62,26 @@ export const InventoryTab: React.FC<InventoryTabProps> = ({
   }, [inventory]);
 
   return (
-    <div className="space-y-3 pb-24">
-      {/* Search Input */}
+    <div className="space-y-3.5 pb-28 animate-in fade-in duration-200">
+      {/* Search Input with clear button */}
       <div className="relative">
         <input
           type="text"
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
           placeholder="ابحث عن موبايل، إكسسوار، سيريال، باركود..."
-          className="w-full pr-10 pl-4 py-3 rounded-2xl bg-slate-900 border border-slate-750 text-white placeholder-slate-500 text-xs focus:outline-none focus:border-cyan-500/50 transition font-sans"
+          className="w-full pr-10 pl-10 py-3.5 rounded-2xl bg-slate-900/90 border border-white/[0.08] text-white placeholder-slate-500 text-xs focus:outline-none focus:border-cyan-500/50 shadow-lg font-sans transition"
         />
-        <Search size={16} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
+        <Search size={17} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
+        {searchQuery && (
+          <button
+            type="button"
+            onClick={() => setSearchQuery('')}
+            className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-1"
+          >
+            <span className="text-xs">✕</span>
+          </button>
+        )}
       </div>
 
       {/* Filter Chips */}
@@ -80,16 +89,16 @@ export const InventoryTab: React.FC<InventoryTabProps> = ({
         {[
           { id: 'all', label: `جميع البضاعة (${inventory.length})` },
           { id: 'lowStock', label: 'نواقص البضاعة فقط ⚠️' },
-          { id: 'imei', label: 'موبايلات وسيريال (IMEI) 📱' },
+          { id: 'imei', label: 'أجهزة بسيريال (IMEI) 📱' },
         ].map(filter => (
           <button
             key={filter.id}
             type="button"
             onClick={() => setFilterMode(filter.id as any)}
-            className={`px-3 py-1.5 rounded-xl whitespace-nowrap font-medium transition ${
+            className={`px-3 py-1.5 rounded-xl whitespace-nowrap font-bold transition-all text-xs flex items-center gap-1.5 active:scale-95 ${
               filterMode === filter.id
-                ? 'bg-cyan-500 text-slate-950 font-bold'
-                : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-white'
+                ? 'bg-gradient-to-r from-cyan-500 to-sky-500 text-slate-950 shadow-md shadow-cyan-500/25'
+                : 'bg-slate-900/80 border border-white/[0.06] text-slate-400 hover:text-white'
             }`}
           >
             {filter.label}
@@ -99,8 +108,10 @@ export const InventoryTab: React.FC<InventoryTabProps> = ({
 
       {/* Inventory List */}
       {filteredItems.length === 0 ? (
-        <div className="py-12 text-center text-slate-500 text-xs glass-card rounded-2xl">
-          لا توجد أصناف مطابقة للبحث الحالي
+        <div className="py-14 text-center text-slate-500 text-xs glass-card rounded-3xl space-y-2 border border-white/[0.05]">
+          <Package size={32} className="mx-auto text-slate-600 stroke-[1.5]" />
+          <p className="font-bold text-slate-400">لا توجد أصناف مطابقة للبحث الحالي</p>
+          <p className="text-[10px] text-slate-500">جرب كتابة اسم مختلف أو إزالة الفلترة</p>
         </div>
       ) : (
         <div className="space-y-2.5">
@@ -108,46 +119,42 @@ export const InventoryTab: React.FC<InventoryTabProps> = ({
             const isLow = (item.quantity || 0) <= (item.minQuantity || 2);
             const isOut = (item.quantity || 0) <= 0;
             const groupInfo = groupedByName.get(item.name.trim().toLowerCase());
+            const profitPerPiece = (Number(item.sellPrice) || 0) - (Number(item.costPrice) || 0);
 
             return (
               <div
                 key={item.id}
-                className={`p-3.5 rounded-2xl glass-card space-y-2.5 transition border ${
+                className={`p-4 rounded-3xl glass-card space-y-3 transition-all border shadow-sm ${
                   isOut
-                    ? 'border-rose-500/40 bg-rose-950/10'
+                    ? 'border-rose-500/40 bg-rose-950/20'
                     : isLow
-                    ? 'border-amber-500/30'
-                    : 'border-slate-800/80'
+                    ? 'border-amber-500/35 bg-amber-950/15'
+                    : 'border-white/[0.06] hover:border-cyan-500/30'
                 }`}
               >
                 <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-start gap-2.5 min-w-0">
+                  <div className="flex items-start gap-3 min-w-0">
                     <div
-                      className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
+                      className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 shadow-inner ${
                         item.hasImei
-                          ? 'bg-cyan-500/15 text-cyan-400'
-                          : 'bg-slate-800 text-slate-300'
+                          ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/25'
+                          : 'bg-slate-800/80 text-slate-300 border border-white/[0.06]'
                       }`}
                     >
-                      {item.hasImei ? <Smartphone size={17} /> : <Package size={17} />}
+                      {item.hasImei ? <Smartphone size={18} /> : <Package size={18} />}
                     </div>
 
                     <div className="min-w-0">
                       <div className="text-xs font-bold text-white truncate">
                         {item.name}
                       </div>
-                      <div className="flex items-center gap-2 text-[10px] text-slate-400 mt-0.5">
-                        {item.category && <span>{item.category}</span>}
+                      <div className="flex items-center gap-1.5 text-[10px] text-slate-400 mt-0.5 flex-wrap">
+                        {item.category && <span className="bg-slate-800 px-1.5 py-0.2 rounded text-slate-300">{item.category}</span>}
                         {item.branchName && (
-                          <>
-                            <span>•</span>
-                            <span className="text-slate-300 font-medium">{item.branchName}</span>
-                          </>
+                          <span className="text-cyan-400 font-medium">📍 {item.branchName}</span>
                         )}
-                        {item.hasImei && (
-                          <span className="px-1.5 py-0.2 rounded bg-cyan-500/15 text-cyan-400 font-bold">
-                            جهاز بسيريال
-                          </span>
+                        {item.barcode && (
+                          <span className="font-mono text-slate-500">[{item.barcode}]</span>
                         )}
                       </div>
                     </div>
@@ -155,9 +162,9 @@ export const InventoryTab: React.FC<InventoryTabProps> = ({
 
                   <div className="text-left shrink-0">
                     <span
-                      className={`text-xs px-2 py-0.5 rounded-lg font-mono font-bold block ${
+                      className={`text-xs px-2.5 py-1 rounded-xl font-mono font-black block shadow-sm ${
                         isOut
-                          ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                          ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30 animate-pulse'
                           : isLow
                           ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                           : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20'

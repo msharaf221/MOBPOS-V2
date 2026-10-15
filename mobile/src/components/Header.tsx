@@ -39,37 +39,37 @@ export const Header: React.FC<HeaderProps> = ({
     : branches.find(b => b.id === selectedBranchId);
 
   return (
-    <header className="sticky top-0 z-40 bg-slate-950/80 backdrop-blur-xl border-b border-slate-800/80 safe-top px-4 py-3">
-      <div className="max-w-md mx-auto flex items-center justify-between gap-2">
+    <header className="sticky top-0 z-40 bg-slate-950/80 backdrop-blur-2xl border-b border-white/[0.08] safe-top px-3.5 py-2.5">
+      <div className="max-w-md mx-auto flex items-center justify-between gap-2.5">
         {/* Branch Switcher Button */}
         <div className="relative flex-1 min-w-0">
           <button
             type="button"
             onClick={() => setDropdownOpen(!dropdownOpen)}
-            className="flex items-center gap-2 p-1.5 pr-2.5 rounded-2xl bg-slate-900/90 hover:bg-slate-850 border border-slate-750/70 text-right transition-all w-full max-w-[260px] shadow-sm active:scale-98"
+            className="flex items-center gap-2 p-1.5 pr-2.5 rounded-2xl bg-slate-900/90 hover:bg-slate-850 border border-white/[0.09] text-right transition-all w-full max-w-[270px] shadow-md shadow-black/40 active:scale-98"
           >
             <div
-              className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0 shadow-inner"
+              className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 shadow-inner"
               style={{
-                backgroundColor: selectedBranch ? `${selectedBranch.color}20` : 'rgba(56, 189, 248, 0.15)',
-                color: selectedBranch ? selectedBranch.color : '#38bdf8',
-                border: `1px solid ${selectedBranch ? selectedBranch.color : '#38bdf8'}40`,
+                backgroundColor: selectedBranch ? `${selectedBranch.color}25` : 'rgba(6, 182, 212, 0.15)',
+                color: selectedBranch ? selectedBranch.color : '#06b6d4',
+                border: `1px solid ${selectedBranch ? selectedBranch.color : '#06b6d4'}45`,
               }}
             >
-              <Building2 size={15} />
+              <Building2 size={16} />
             </div>
 
             <div className="flex-1 min-w-0">
-              <div className="text-[10px] text-slate-400 flex items-center gap-1 leading-tight">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                <span>{selectedBranchId === 'all' ? 'مجمع الفروع' : (selectedBranch?.city || 'فرع مستقل')}</span>
+              <div className="text-[10px] text-slate-400 flex items-center gap-1.5 leading-tight">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_6px_#34d399]" />
+                <span className="truncate">{selectedBranchId === 'all' ? 'مجمع الفروع المباشر' : (selectedBranch?.city || 'فرع مستقل')}</span>
               </div>
-              <div className="text-xs font-bold text-white truncate leading-normal">
+              <div className="text-xs font-black text-white truncate leading-normal">
                 {selectedBranchId === 'all' ? 'جميع الفروع (شامل)' : selectedBranch?.name}
               </div>
             </div>
 
-            <ChevronDown size={14} className={`text-slate-400 transition-transform duration-200 shrink-0 ${dropdownOpen ? 'rotate-180' : ''}`} />
+            <ChevronDown size={14} className={`text-slate-400 transition-transform duration-200 shrink-0 ${dropdownOpen ? 'rotate-180 text-cyan-400' : ''}`} />
           </button>
 
           {/* Dropdown Menu */}

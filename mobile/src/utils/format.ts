@@ -1,4 +1,4 @@
-export function formatCurrency(amount: number, hideAmounts: boolean = false): string {
+export function formatCurrency(amount?: number | null, hideAmounts: boolean = false): string {
   if (hideAmounts) return '••••••';
   const num = Number(amount) || 0;
   return new Intl.NumberFormat('ar-EG', {
@@ -6,12 +6,12 @@ export function formatCurrency(amount: number, hideAmounts: boolean = false): st
   }).format(num) + ' ج.م';
 }
 
-export function formatNumber(num: number, hideAmounts: boolean = false): string {
+export function formatNumber(num?: number | null, hideAmounts: boolean = false): string {
   if (hideAmounts) return '•••';
-  return new Intl.NumberFormat('ar-EG').format(num || 0);
+  return new Intl.NumberFormat('ar-EG').format(Number(num) || 0);
 }
 
-export function formatTimeAgo(dateStr: string): string {
+export function formatTimeAgo(dateStr?: string | null): string {
   if (!dateStr) return '';
   try {
     const diff = (Date.now() - new Date(dateStr).getTime()) / 1000;
