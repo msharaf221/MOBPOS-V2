@@ -60,19 +60,66 @@ export const BranchEditModal: React.FC<BranchEditModalProps> = ({
     setTestResult(null);
 
     try {
-      const client = createClient(supabaseUrl.trim().replace(/\/+$/, ''), supabaseAnonKey.trim(), {
+      const cleanUrl = supabaseUrl.trim().replace(/\/+$/, '');
+      const cleanKey = supabaseAnonKey.trim();
+      const cleanTenant = tenantId.trim();
+
+      const client = createClient(cleanUrl, cleanKey, {
         auth: { persistSession: false },
       });
-      const { data, error } = await client
+
+      // 1. Check if mobpos_records exists
+      const { data: recData, error: recErr } = await client
         .from('mobpos_records')
         .select('tenant_id')
-        .limit(1);
+        .limit(5);
 
-      if (error) {
-        setTestResult({ ok: false, msg: `فشل الاتصال: ${error.message}` });
-      } else {
-        setTestResult({ ok: true, msg: 'تم الاتصال بقاعدة بيانات الفرع بنجاح! ⚡' });
+      // 2. Check if mobpos_stores exists
+      const { data: storeData, error: storeErr } = await client
+        .from('mobpos_stores')
+        .select('tenant_id, store')
+        .limit(10);
+
+      // If both tables fail to exist
+      if (recErr && storeErr) {
+        setTestResult({
+          ok: false,
+          msg: `⚠️ متصل بـ Supabase بنجاح ولكن الجداول غير موجودة بعد! يرجى تشغيل كود SQL من ملف supabase/schema.sql في الـ SQL Editor لإنشاء الجداول. (${recErr.message})`,
+        });
+        return;
       }
+
+      // Check if data exists for this tenant
+      const hasRecForTenant = (recData || []).some(r => r.tenant_id === cleanTenant);
+      const hasStoreForTenant = (storeData || []).some(s => s.tenant_id === cleanTenant);
+
+      if (hasRecForTenant || hasStoreForTenant) {
+        setTestResult({
+          ok: true,
+          msg: '✅ متصل بنجاح! تم العثور على بيانات المتجر في السحابة ومطابقة معرف المتجر بنجاح ⚡',
+        });
+        return;
+      }
+
+      // If tenant didn't match, check if ANY tenant exists
+      const foundOtherTenant = recData?.[0]?.tenant_id || storeData?.[0]?.tenant_id;
+      if (foundOtherTenant) {
+        setTestResult({
+          ok: true,
+          msg: `⚠️ متصل بالسحابة! وجدنا بيانات لمعرف متجر آخر: "${foundOtherTenant}". انسخ هذا المعرف وضعه في خانة "معرف المتجر" أعلاه.`,
+        });
+        // Auto-suggest it in state
+        if (!cleanTenant) {
+          setTenantId(foundOtherTenant);
+        }
+        return;
+      }
+
+      // If tables exist but 0 rows
+      setTestResult({
+        ok: true,
+        msg: '⚠️ متصل بالسحابة والجداول جاهزة، لكن قاعدة البيانات فارغة تماماً! يُرجى فتح برنامج الكاشير على الكمبيوتر والضغط على "رفع لقطة شاملة (Snapshot)" من شاشة الإعدادات.',
+      });
     } catch (err) {
       setTestResult({ ok: false, msg: err instanceof Error ? err.message : 'خطأ بالاتصال' });
     } finally {

@@ -137,66 +137,35 @@ class MultiBranchManager {
     try {
       const tenantId = branch.tenantId.trim();
 
-      // 1. Fetch sales
-      const { data: salesRows, error: salesErr } = await client
-        .from('mobpos_records')
-        .select('*')
-        .eq('tenant_id', tenantId)
-        .eq('store', 'sales')
-        .is('deleted_at', null)
-        .order('updated_at', { ascending: false })
-        .limit(200);
+      // 1. Fetch from mobpos_records (delta real-time table)
+      let salesRows: any[] = [];
+      let safesRows: any[] = [];
+      let txRows: any[] = [];
+      let invRows: any[] = [];
+      let maintRows: any[] = [];
+      let custRows: any[] = [];
 
-      if (salesErr) {
-        console.warn(`[MultiBranch] Branch ${branch.name} sales fetch error:`, salesErr.message);
+      try {
+        const [resSales, resSafes, resTx, resInv, resMaint, resCust] = await Promise.all([
+          client.from('mobpos_records').select('*').eq('tenant_id', tenantId).eq('store', 'sales').is('deleted_at', null).order('updated_at', { ascending: false }).limit(200),
+          client.from('mobpos_records').select('*').eq('tenant_id', tenantId).eq('store', 'safes').is('deleted_at', null),
+          client.from('mobpos_records').select('*').eq('tenant_id', tenantId).eq('store', 'transactions').is('deleted_at', null).order('updated_at', { ascending: false }).limit(100),
+          client.from('mobpos_records').select('*').eq('tenant_id', tenantId).eq('store', 'inventory').is('deleted_at', null).limit(300),
+          client.from('mobpos_records').select('*').eq('tenant_id', tenantId).eq('store', 'maintenance').is('deleted_at', null).limit(100),
+          client.from('mobpos_records').select('*').eq('tenant_id', tenantId).eq('store', 'customers').is('deleted_at', null).limit(150),
+        ]);
+
+        if (resSales.data && resSales.data.length > 0) salesRows = resSales.data;
+        if (resSafes.data && resSafes.data.length > 0) safesRows = resSafes.data;
+        if (resTx.data && resTx.data.length > 0) txRows = resTx.data;
+        if (resInv.data && resInv.data.length > 0) invRows = resInv.data;
+        if (resMaint.data && resMaint.data.length > 0) maintRows = resMaint.data;
+        if (resCust.data && resCust.data.length > 0) custRows = resCust.data;
+      } catch (err) {
+        console.warn(`[MultiBranch] mobpos_records query error:`, err);
       }
 
-      // 2. Fetch safes
-      const { data: safesRows } = await client
-        .from('mobpos_records')
-        .select('*')
-        .eq('tenant_id', tenantId)
-        .eq('store', 'safes')
-        .is('deleted_at', null);
-
-      // 3. Fetch transactions
-      const { data: txRows } = await client
-        .from('mobpos_records')
-        .select('*')
-        .eq('tenant_id', tenantId)
-        .eq('store', 'transactions')
-        .is('deleted_at', null)
-        .order('updated_at', { ascending: false })
-        .limit(100);
-
-      // 4. Fetch inventory
-      const { data: invRows } = await client
-        .from('mobpos_records')
-        .select('*')
-        .eq('tenant_id', tenantId)
-        .eq('store', 'inventory')
-        .is('deleted_at', null)
-        .limit(300);
-
-      // 5. Fetch maintenance
-      const { data: maintRows } = await client
-        .from('mobpos_records')
-        .select('*')
-        .eq('tenant_id', tenantId)
-        .eq('store', 'maintenance')
-        .is('deleted_at', null)
-        .limit(100);
-
-      // 6. Fetch customers
-      const { data: custRows } = await client
-        .from('mobpos_records')
-        .select('*')
-        .eq('tenant_id', tenantId)
-        .eq('store', 'customers')
-        .is('deleted_at', null)
-        .limit(150);
-
-      const sales: SaleRecord[] = (salesRows || []).map(r => ({
+      let sales: SaleRecord[] = salesRows.map(r => ({
         ...r.data,
         id: r.record_id,
         branchId: branch.id,
@@ -204,14 +173,14 @@ class MultiBranchManager {
         branchColor: branch.color,
       }));
 
-      const safes: Safe[] = (safesRows || []).map(r => ({
+      let safes: Safe[] = safesRows.map(r => ({
         ...r.data,
         id: r.record_id,
         branchId: branch.id,
         branchName: branch.name,
       }));
 
-      const transactions: Transaction[] = (txRows || []).map(r => ({
+      let transactions: Transaction[] = txRows.map(r => ({
         ...r.data,
         id: r.record_id,
         branchId: branch.id,
@@ -219,26 +188,89 @@ class MultiBranchManager {
         branchColor: branch.color,
       }));
 
-      const inventory: InventoryItem[] = (invRows || []).map(r => ({
+      let inventory: InventoryItem[] = invRows.map(r => ({
         ...r.data,
         id: r.record_id,
         branchId: branch.id,
         branchName: branch.name,
       }));
 
-      const maintenance: MaintenanceOrder[] = (maintRows || []).map(r => ({
+      let maintenance: MaintenanceOrder[] = maintRows.map(r => ({
         ...r.data,
         id: r.record_id,
         branchId: branch.id,
         branchName: branch.name,
       }));
 
-      const customers: Customer[] = (custRows || []).map(r => ({
+      let customers: Customer[] = custRows.map(r => ({
         ...r.data,
         id: r.record_id,
         branchId: branch.id,
         branchName: branch.name,
       }));
+
+      // Fallback: If mobpos_records is empty, read from mobpos_stores (full snapshots pushed by desktop POS)
+      if (sales.length === 0 && inventory.length === 0 && safes.length === 0) {
+        let storeQuery = client.from('mobpos_stores').select('*');
+        if (tenantId) {
+          storeQuery = storeQuery.eq('tenant_id', tenantId);
+        }
+        let { data: storeRows, error: storeErr } = await storeQuery;
+
+        // If no records for this tenantId, check if any tenant exists in mobpos_stores
+        if ((!storeRows || storeRows.length === 0) && !storeErr) {
+          const { data: anyStoreRows } = await client.from('mobpos_stores').select('*').limit(20);
+          if (anyStoreRows && anyStoreRows.length > 0) {
+            storeRows = anyStoreRows;
+            console.info(`[MultiBranch] Auto-detected tenant in mobpos_stores: ${anyStoreRows[0].tenant_id}`);
+          }
+        }
+
+        if (storeRows && storeRows.length > 0) {
+          for (const row of storeRows) {
+            const arr = Array.isArray(row.data) ? row.data : [];
+            if (row.store === 'sales') {
+              sales = arr.map((item: any) => ({
+                ...item,
+                branchId: branch.id,
+                branchName: branch.name,
+                branchColor: branch.color,
+              }));
+            } else if (row.store === 'safes') {
+              safes = arr.map((item: any) => ({
+                ...item,
+                branchId: branch.id,
+                branchName: branch.name,
+              }));
+            } else if (row.store === 'transactions') {
+              transactions = arr.map((item: any) => ({
+                ...item,
+                branchId: branch.id,
+                branchName: branch.name,
+                branchColor: branch.color,
+              }));
+            } else if (row.store === 'inventory') {
+              inventory = arr.map((item: any) => ({
+                ...item,
+                branchId: branch.id,
+                branchName: branch.name,
+              }));
+            } else if (row.store === 'maintenance') {
+              maintenance = arr.map((item: any) => ({
+                ...item,
+                branchId: branch.id,
+                branchName: branch.name,
+              }));
+            } else if (row.store === 'customers') {
+              customers = arr.map((item: any) => ({
+                ...item,
+                branchId: branch.id,
+                branchName: branch.name,
+              }));
+            }
+          }
+        }
+      }
 
       // Calculate today's metrics
       const now = new Date();
