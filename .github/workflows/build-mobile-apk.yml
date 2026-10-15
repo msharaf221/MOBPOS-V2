@@ -71,4 +71,5 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload v1.0.21 build-artifacts/MOBPOS-Companion.apk --clobber || true
+          VERSION="$(node -p "require('./package.json').version")"
+          gh release upload "v$VERSION" build-artifacts/MOBPOS-Companion.apk --clobber || gh release upload v1.0.21 build-artifacts/MOBPOS-Companion.apk --clobber || true
