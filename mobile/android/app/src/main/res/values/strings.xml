@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">MOBPOS Companion</string>
+    <string name="title_activity_main">MOBPOS Companion</string>
+    <string name="package_name">com.mobpos.companion</string>
+    <string name="custom_url_scheme">com.mobpos.companion</string>
+</resources>
