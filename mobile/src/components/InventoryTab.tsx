@@ -26,15 +26,17 @@ export const InventoryTab: React.FC<InventoryTabProps> = ({
   const filteredItems = useMemo(() => {
     return inventory.filter(item => {
       const isLow = (item.quantity || 0) <= (item.minQuantity || 2);
+      const hasDeviceImei = Boolean(item.hasImei || (item as any).hasIMEI);
       if (filterMode === 'lowStock' && !isLow) return false;
-      if (filterMode === 'imei' && !item.hasImei) return false;
+      if (filterMode === 'imei' && !hasDeviceImei) return false;
 
       if (!searchQuery.trim()) return true;
       const q = searchQuery.toLowerCase();
       const matchName = item.name.toLowerCase().includes(q);
       const matchCat = (item.category || '').toLowerCase().includes(q);
-      const matchBarcode = (item.barcode || '').includes(q);
-      return matchName || matchCat || matchBarcode;
+      const matchBarcode = (item.barcode || '').toLowerCase().includes(q);
+      const matchBranch = (item.branchName || '').toLowerCase().includes(q);
+      return matchName || matchCat || matchBarcode || matchBranch;
     });
   }, [inventory, filterMode, searchQuery]);
 
@@ -118,6 +120,7 @@ export const InventoryTab: React.FC<InventoryTabProps> = ({
           {filteredItems.map(item => {
             const isLow = (item.quantity || 0) <= (item.minQuantity || 2);
             const isOut = (item.quantity || 0) <= 0;
+            const hasDeviceImei = Boolean(item.hasImei || (item as any).hasIMEI);
             const groupInfo = groupedByName.get(item.name.trim().toLowerCase());
             const profitPerPiece = (Number(item.sellPrice) || 0) - (Number(item.costPrice) || 0);
 
@@ -136,12 +139,12 @@ export const InventoryTab: React.FC<InventoryTabProps> = ({
                   <div className="flex items-start gap-3 min-w-0">
                     <div
                       className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 shadow-inner ${
-                        item.hasImei
+                        hasDeviceImei
                           ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/25'
                           : 'bg-slate-800/80 text-slate-300 border border-white/[0.06]'
                       }`}
                     >
-                      {item.hasImei ? <Smartphone size={18} /> : <Package size={18} />}
+                      {hasDeviceImei ? <Smartphone size={18} /> : <Package size={18} />}
                     </div>
 
                     <div className="min-w-0">

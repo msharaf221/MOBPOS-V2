@@ -30,7 +30,7 @@ export const MaintenanceModal: React.FC<MaintenanceModalProps> = ({
 
   const filtered = orders.filter(o => {
     if (statusFilter === 'active') return o.status !== 'delivered' && o.status !== 'cancelled';
-    if (statusFilter === 'ready') return o.status === 'ready';
+    if (statusFilter === 'ready') return o.status === 'ready' || (o.status as string) === 'completed';
     return true;
   });
 
@@ -107,17 +107,21 @@ export const MaintenanceModal: React.FC<MaintenanceModalProps> = ({
                   </div>
                   <span
                     className={`text-[10px] px-2 py-0.5 rounded-md font-bold ${
-                      order.status === 'ready'
+                      order.status === 'ready' || (order.status as string) === 'completed'
                         ? 'bg-emerald-500/20 text-emerald-400'
                         : order.status === 'delivered'
                         ? 'bg-blue-500/20 text-blue-400'
+                        : order.status === 'cancelled'
+                        ? 'bg-rose-500/20 text-rose-400'
                         : 'bg-amber-500/20 text-amber-300'
                     }`}
                   >
-                    {order.status === 'ready'
+                    {order.status === 'ready' || (order.status as string) === 'completed'
                       ? 'جاهز للاستلام ✅'
                       : order.status === 'delivered'
-                      ? 'تم التسليم'
+                      ? 'تم التسليم 📦'
+                      : order.status === 'cancelled'
+                      ? 'ملغاة ❌'
                       : 'قيد الصيانة ⏳'}
                   </span>
                 </div>

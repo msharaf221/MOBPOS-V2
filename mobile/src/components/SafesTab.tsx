@@ -31,17 +31,37 @@ export const SafesTab: React.FC<SafesTabProps> = ({
     return safes.reduce((acc, s) => acc + (Number(s.balance) || 0), 0);
   }, [safes]);
 
+  const isOutflowType = (type: string) =>
+    type === 'expense' ||
+    type === 'withdrawal' ||
+    type === 'wallet_withdrawal' ||
+    type === 'purchase' ||
+    type === 'maintenance_cost' ||
+    type === 'waste' ||
+    type === 'return' ||
+    type === 'sale_return';
+
+  const isInflowType = (type: string) =>
+    type === 'sale' ||
+    type === 'deposit' ||
+    type === 'wallet_deposit' ||
+    type === 'income' ||
+    type === 'customer_payment' ||
+    type === 'maintenance' ||
+    type === 'capital';
+
   const filteredTransactions = useMemo(() => {
     return transactions.filter(t => {
-      if (filterType === 'expense' && t.type !== 'expense' && t.type !== 'withdrawal') return false;
-      if (filterType === 'income' && t.type !== 'sale' && t.type !== 'deposit') return false;
+      if (filterType === 'expense' && !isOutflowType(t.type)) return false;
+      if (filterType === 'income' && !isInflowType(t.type)) return false;
 
       if (!searchQuery.trim()) return true;
       const q = searchQuery.toLowerCase();
       return (
         t.description.toLowerCase().includes(q) ||
         (t.category || '').toLowerCase().includes(q) ||
-        (t.userName || '').toLowerCase().includes(q)
+        (t.userName || '').toLowerCase().includes(q) ||
+        (t.safeName || '').toLowerCase().includes(q)
       );
     });
   }, [transactions, filterType, searchQuery]);
@@ -88,7 +108,7 @@ export const SafesTab: React.FC<SafesTabProps> = ({
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
           {safes.map(safe => {
-            const isWallet = safe.type === 'wallet';
+            const isWallet = safe.type === 'wallet' || (safe.type as string) === 'ewallet';
             const isBank = safe.type === 'bank';
             const pct = totalBalance > 0 ? Math.round((Number(safe.balance || 0) / totalBalance) * 100) : 0;
             return (
@@ -194,7 +214,8 @@ export const SafesTab: React.FC<SafesTabProps> = ({
 
         <div className="space-y-2">
           {filteredTransactions.map(tx => {
-            const isOut = tx.type === 'expense' || tx.type === 'withdrawal' || tx.type === 'purchase';
+            const isOut = isOutflowType(tx.type);
+            const txDate = tx.date || (tx as any).createdAt || '';
             return (
               <div
                 key={tx.id}
@@ -240,7 +261,7 @@ export const SafesTab: React.FC<SafesTabProps> = ({
                     {isOut ? '-' : '+'} {formatCurrency(tx.amount, hideAmounts)}
                   </span>
                   <span className="text-[10px] text-slate-500 block">
-                    {formatTimeAgo(tx.date)}
+                    {formatTimeAgo(txDate)}
                   </span>
                 </div>
               </div>

@@ -140,7 +140,7 @@ export const BranchEditModal: React.FC<BranchEditModalProps> = ({
         color,
         supabaseUrl: supabaseUrl.trim().replace(/\/+$/, ''),
         supabaseAnonKey: supabaseAnonKey.trim(),
-        tenantId: tenantId.trim() || `tenant_${Date.now()}`,
+        tenantId: tenantId.trim(),
         enabled,
       },
       branch?.id

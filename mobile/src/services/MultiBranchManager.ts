@@ -3,6 +3,7 @@ import type {
   BranchConfig,
   BranchMetrics,
   SaleRecord,
+  SaleItem,
   Safe,
   Transaction,
   InventoryItem,
@@ -11,33 +12,19 @@ import type {
 } from '../types';
 
 const STORAGE_KEY_BRANCHES = 'mobpos_companion_branches_v1';
-const STORAGE_KEY_SETTINGS = 'mobpos_companion_settings_v1';
 
-// Default initial branch seeded with the active MOBPOS project credentials
+// Default initial branch configuration
 const DEFAULT_BRANCHES: BranchConfig[] = [
   {
     id: 'b_main',
-    name: 'فرع وسط البلد (الرئيسي)',
-    city: 'القاهرة',
-    code: 'CAI-01',
+    name: 'الفرع الرئيسي',
+    city: 'المركز الرئيسي',
+    code: 'HQ-01',
     color: '#06b6d4', // Cyan
-    supabaseUrl: 'https://tbxyyaumefhdgmpccidq.supabase.co',
-    supabaseAnonKey: '',
-    tenantId: '',
-    enabled: true,
-    createdAt: new Date().toISOString(),
-    status: 'connected',
-  },
-  {
-    id: 'b_second',
-    name: 'فرع المعادي',
-    city: 'القاهرة',
-    code: 'MAA-02',
-    color: '#8b5cf6', // Violet
     supabaseUrl: '',
     supabaseAnonKey: '',
     tenantId: '',
-    enabled: false,
+    enabled: true,
     createdAt: new Date().toISOString(),
     status: 'offline',
   },
@@ -85,15 +72,21 @@ class MultiBranchManager {
   public updateBranch(id: string, updates: Partial<BranchConfig>): void {
     const branches = this.getBranches().map(b => (b.id === id ? { ...b, ...updates } : b));
     this.saveBranches(branches);
-    // Invalidate client if credentials changed
-    if (updates.supabaseUrl || updates.supabaseAnonKey) {
+    if (updates.supabaseUrl !== undefined || updates.supabaseAnonKey !== undefined) {
+      const oldCh = this.channels.get(id);
+      if (oldCh) void oldCh.unsubscribe();
+      this.channels.delete(id);
       this.clients.delete(id);
+      this.metricsCache.delete(id);
     }
   }
 
   public deleteBranch(id: string): void {
     const branches = this.getBranches().filter(b => b.id !== id);
     this.saveBranches(branches);
+    const oldCh = this.channels.get(id);
+    if (oldCh) void oldCh.unsubscribe();
+    this.channels.delete(id);
     this.clients.delete(id);
     this.metricsCache.delete(id);
   }
@@ -203,170 +196,85 @@ class MultiBranchManager {
 
   /**
    * Fetches live data from Supabase for a single branch.
-   * If credentials are not yet set or offline, returns realistic offline/demo data.
+   * Merges baseline snapshots from `mobpos_stores` with recent deltas from `mobpos_records`.
+   * Normalizes desktop models to mobile types with 100% schema alignment.
    */
   public async fetchBranchMetrics(branch: BranchConfig): Promise<BranchMetrics> {
     const client = this.getClient(branch);
 
     if (!client) {
-      // Return cached or mock preview data for this branch
-      return this.generateMockMetrics(branch);
+      this.updateBranch(branch.id, {
+        status: 'offline',
+        errorMessage: 'يرجى إدخال Supabase URL ومفتاح Anon Key في إعدادات الفرع',
+      });
+      return this.getEmptyMetrics(branch.id, branch.name, branch.color);
     }
 
     try {
       let activeTenantId = branch.tenantId ? branch.tenantId.trim() : '';
 
-      // Smart Auto-Discovery: If tenantId was not provided, auto-detect from latest records or stores
+      // 1. Smart Auto-Discovery of Tenant ID if missing
       if (!activeTenantId) {
         try {
-          const { data: sampleRec } = await client
-            .from('mobpos_records')
+          const { data: sampleStore } = await client
+            .from('mobpos_stores')
             .select('tenant_id')
-            .is('deleted_at', null)
             .order('updated_at', { ascending: false })
             .limit(1);
 
-          if (sampleRec && sampleRec.length > 0 && sampleRec[0].tenant_id) {
-            activeTenantId = sampleRec[0].tenant_id;
-            console.info(`[MultiBranch] Auto-discovered tenantId from mobpos_records: ${activeTenantId}`);
+          if (sampleStore && sampleStore.length > 0 && sampleStore[0].tenant_id) {
+            activeTenantId = sampleStore[0].tenant_id;
+            console.info(`[MultiBranch] Auto-discovered tenantId from mobpos_stores: ${activeTenantId}`);
             this.updateBranch(branch.id, { tenantId: activeTenantId });
           } else {
-            const { data: sampleStore } = await client
-              .from('mobpos_stores')
+            const { data: sampleRec } = await client
+              .from('mobpos_records')
               .select('tenant_id')
+              .is('deleted_at', null)
               .order('updated_at', { ascending: false })
               .limit(1);
-            if (sampleStore && sampleStore.length > 0 && sampleStore[0].tenant_id) {
-              activeTenantId = sampleStore[0].tenant_id;
-              console.info(`[MultiBranch] Auto-discovered tenantId from mobpos_stores: ${activeTenantId}`);
+
+            if (sampleRec && sampleRec.length > 0 && sampleRec[0].tenant_id) {
+              activeTenantId = sampleRec[0].tenant_id;
+              console.info(`[MultiBranch] Auto-discovered tenantId from mobpos_records: ${activeTenantId}`);
               this.updateBranch(branch.id, { tenantId: activeTenantId });
             }
           }
         } catch (discoverErr) {
-          console.warn('[MultiBranch] Auto-discovery notice:', discoverErr);
+          console.warn('[MultiBranch] Auto-discovery warning:', discoverErr);
         }
       }
 
-      // 1. Fetch from mobpos_records (delta real-time table)
-      let salesRows: any[] = [];
-      let safesRows: any[] = [];
-      let txRows: any[] = [];
-      let invRows: any[] = [];
-      let maintRows: any[] = [];
-      let custRows: any[] = [];
+      // Raw store containers
+      const rawStores: Record<string, any[]> = {
+        inventory: [],
+        imeiUnits: [],
+        customers: [],
+        safes: [],
+        users: [],
+        categories: [],
+        maintenance: [],
+        sales: [],
+        transactions: [],
+      };
 
+      // 2. Fetch Baseline Snapshots from mobpos_stores
       try {
-        const fetchRecords = (tenant: string) => {
-          let sQuery = client.from('mobpos_records').select('*').eq('store', 'sales').is('deleted_at', null).order('updated_at', { ascending: false }).limit(200);
-          let sfQuery = client.from('mobpos_records').select('*').eq('store', 'safes').is('deleted_at', null);
-          let tQuery = client.from('mobpos_records').select('*').eq('store', 'transactions').is('deleted_at', null).order('updated_at', { ascending: false }).limit(100);
-          let iQuery = client.from('mobpos_records').select('*').eq('store', 'inventory').is('deleted_at', null).limit(300);
-          let mQuery = client.from('mobpos_records').select('*').eq('store', 'maintenance').is('deleted_at', null).limit(100);
-          let cQuery = client.from('mobpos_records').select('*').eq('store', 'customers').is('deleted_at', null).limit(150);
-
-          if (tenant) {
-            sQuery = sQuery.eq('tenant_id', tenant);
-            sfQuery = sfQuery.eq('tenant_id', tenant);
-            tQuery = tQuery.eq('tenant_id', tenant);
-            iQuery = iQuery.eq('tenant_id', tenant);
-            mQuery = mQuery.eq('tenant_id', tenant);
-            cQuery = cQuery.eq('tenant_id', tenant);
-          }
-
-          return Promise.all([sQuery, sfQuery, tQuery, iQuery, mQuery, cQuery]);
-        };
-
-        let [resSales, resSafes, resTx, resInv, resMaint, resCust] = await fetchRecords(activeTenantId);
-
-        const countFound = (resSales.data?.length || 0) + (resSafes.data?.length || 0) + (resInv.data?.length || 0);
-
-        // Self-Healing Tenant Check: If nothing was found and activeTenantId was set, verify if records exist under another tenant
-        if (countFound === 0 && activeTenantId) {
-          const { data: anyRec } = await client
-            .from('mobpos_records')
-            .select('tenant_id')
-            .is('deleted_at', null)
-            .order('updated_at', { ascending: false })
-            .limit(1);
-
-          if (anyRec && anyRec.length > 0 && anyRec[0].tenant_id && anyRec[0].tenant_id !== activeTenantId) {
-            activeTenantId = anyRec[0].tenant_id;
-            console.info(`[MultiBranch] Mismatched tenant recovered. Switching to active tenant: ${activeTenantId}`);
-            this.updateBranch(branch.id, { tenantId: activeTenantId });
-            [resSales, resSafes, resTx, resInv, resMaint, resCust] = await fetchRecords(activeTenantId);
-          }
-        }
-
-        if (resSales.data && resSales.data.length > 0) salesRows = resSales.data;
-        if (resSafes.data && resSafes.data.length > 0) safesRows = resSafes.data;
-        if (resTx.data && resTx.data.length > 0) txRows = resTx.data;
-        if (resInv.data && resInv.data.length > 0) invRows = resInv.data;
-        if (resMaint.data && resMaint.data.length > 0) maintRows = resMaint.data;
-        if (resCust.data && resCust.data.length > 0) custRows = resCust.data;
-      } catch (err) {
-        console.warn(`[MultiBranch] mobpos_records query error:`, err);
-      }
-
-      let sales: SaleRecord[] = salesRows.map(r => ({
-        ...r.data,
-        id: r.record_id,
-        branchId: branch.id,
-        branchName: branch.name,
-        branchColor: branch.color,
-      }));
-
-      let safes: Safe[] = safesRows.map(r => ({
-        ...r.data,
-        id: r.record_id,
-        branchId: branch.id,
-        branchName: branch.name,
-      }));
-
-      let transactions: Transaction[] = txRows.map(r => ({
-        ...r.data,
-        id: r.record_id,
-        branchId: branch.id,
-        branchName: branch.name,
-        branchColor: branch.color,
-      }));
-
-      let inventory: InventoryItem[] = invRows.map(r => ({
-        ...r.data,
-        id: r.record_id,
-        branchId: branch.id,
-        branchName: branch.name,
-      }));
-
-      let maintenance: MaintenanceOrder[] = maintRows.map(r => ({
-        ...r.data,
-        id: r.record_id,
-        branchId: branch.id,
-        branchName: branch.name,
-      }));
-
-      let customers: Customer[] = custRows.map(r => ({
-        ...r.data,
-        id: r.record_id,
-        branchId: branch.id,
-        branchName: branch.name,
-      }));
-
-      // Fallback: If mobpos_records is empty, read from mobpos_stores (full snapshots pushed by desktop POS)
-      if (sales.length === 0 && inventory.length === 0 && safes.length === 0) {
         let storeQuery = client.from('mobpos_stores').select('*');
         if (activeTenantId) {
           storeQuery = storeQuery.eq('tenant_id', activeTenantId);
         }
         let { data: storeRows, error: storeErr } = await storeQuery;
 
-        // If no records for this tenantId, check if any tenant exists in mobpos_stores
+        // Self-Healing Tenant: if no rows found for provided activeTenantId, check if any exists
         if ((!storeRows || storeRows.length === 0) && !storeErr) {
           const { data: anyStoreRows } = await client.from('mobpos_stores').select('*').limit(20);
           if (anyStoreRows && anyStoreRows.length > 0) {
             storeRows = anyStoreRows;
             const discoveredTenant = anyStoreRows[0].tenant_id;
-            console.info(`[MultiBranch] Auto-detected tenant in mobpos_stores: ${discoveredTenant}`);
             if (discoveredTenant && discoveredTenant !== branch.tenantId) {
+              activeTenantId = discoveredTenant;
+              console.info(`[MultiBranch] Auto-healed tenant from mobpos_stores: ${discoveredTenant}`);
               this.updateBranch(branch.id, { tenantId: discoveredTenant });
             }
           }
@@ -374,75 +282,288 @@ class MultiBranchManager {
 
         if (storeRows && storeRows.length > 0) {
           for (const row of storeRows) {
-            const arr = Array.isArray(row.data) ? row.data : [];
-            if (row.store === 'sales') {
-              sales = arr.map((item: any) => ({
-                ...item,
-                branchId: branch.id,
-                branchName: branch.name,
-                branchColor: branch.color,
-              }));
-            } else if (row.store === 'safes') {
-              safes = arr.map((item: any) => ({
-                ...item,
-                branchId: branch.id,
-                branchName: branch.name,
-              }));
-            } else if (row.store === 'transactions') {
-              transactions = arr.map((item: any) => ({
-                ...item,
-                branchId: branch.id,
-                branchName: branch.name,
-                branchColor: branch.color,
-              }));
-            } else if (row.store === 'inventory') {
-              inventory = arr.map((item: any) => ({
-                ...item,
-                branchId: branch.id,
-                branchName: branch.name,
-              }));
-            } else if (row.store === 'maintenance') {
-              maintenance = arr.map((item: any) => ({
-                ...item,
-                branchId: branch.id,
-                branchName: branch.name,
-              }));
-            } else if (row.store === 'customers') {
-              customers = arr.map((item: any) => ({
-                ...item,
-                branchId: branch.id,
-                branchName: branch.name,
-              }));
+            if (row.store && Array.isArray(row.data)) {
+              rawStores[row.store] = row.data;
             }
           }
         }
+      } catch (storeFetchErr) {
+        console.warn(`[MultiBranch] Error fetching mobpos_stores for ${branch.name}:`, storeFetchErr);
       }
 
-      // Calculate today's metrics
+      // 3. Fetch Real-time Deltas from mobpos_records and overlay on top of baseline
+      try {
+        let deltaQuery = client.from('mobpos_records').select('*').is('deleted_at', null).order('updated_at', { ascending: false }).limit(600);
+        if (activeTenantId) {
+          deltaQuery = deltaQuery.eq('tenant_id', activeTenantId);
+        }
+        const { data: deltaRows, error: deltaErr } = await deltaQuery;
+
+        if (deltaRows && deltaRows.length > 0 && !deltaErr) {
+          // Overlay deltas onto corresponding store arrays
+          for (const row of deltaRows) {
+            const storeName = row.store;
+            const recordData = row.data;
+            const recordId = row.record_id || recordData?.id;
+            if (!storeName || !recordData || !recordId) continue;
+
+            if (!rawStores[storeName]) {
+              rawStores[storeName] = [];
+            }
+
+            const existingIdx = rawStores[storeName].findIndex((item: any) => item.id === recordId);
+            if (existingIdx >= 0) {
+              rawStores[storeName][existingIdx] = { ...rawStores[storeName][existingIdx], ...recordData };
+            } else {
+              rawStores[storeName].unshift({ ...recordData, id: recordId });
+            }
+          }
+        }
+      } catch (deltaFetchErr) {
+        console.warn(`[MultiBranch] Error fetching mobpos_records deltas for ${branch.name}:`, deltaFetchErr);
+      }
+
+      // 4. Build Lookup Maps for Schema Normalization
+      const inventoryMap = new Map<string, any>();
+      (rawStores.inventory || []).forEach((item: any) => {
+        if (item.id) inventoryMap.set(item.id, item);
+      });
+
+      const imeiMap = new Map<string, any>();
+      (rawStores.imeiUnits || []).forEach((item: any) => {
+        if (item.id) imeiMap.set(item.id, item);
+      });
+
+      const customersMap = new Map<string, any>();
+      (rawStores.customers || []).forEach((item: any) => {
+        if (item.id) customersMap.set(item.id, item);
+      });
+
+      const usersMap = new Map<string, any>();
+      (rawStores.users || []).forEach((item: any) => {
+        if (item.id) usersMap.set(item.id, item);
+      });
+
+      const safesMap = new Map<string, any>();
+      (rawStores.safes || []).forEach((item: any) => {
+        if (item.id) safesMap.set(item.id, item);
+      });
+
+      const categoriesMap = new Map<string, any>();
+      (rawStores.categories || []).forEach((item: any) => {
+        if (item.id) categoriesMap.set(item.id, item);
+      });
+
+      // 5. Normalize Sales Records
+      const normalizedSales: SaleRecord[] = (rawStores.sales || []).map((s: any) => {
+        const customer = s.customerId ? customersMap.get(s.customerId) : null;
+        const cashier = s.cashierId ? usersMap.get(s.cashierId) : null;
+        const safe = s.safeId ? safesMap.get(s.safeId) : null;
+
+        // In desktop schema:
+        // s.total is net total after discount
+        // s.subtotal is gross total before discount
+        // s.paid is amount collected
+        // s.remaining is debt
+        const finalTotal = Number(s.total ?? s.finalTotal ?? 0);
+        const subtotal = Number(s.subtotal ?? s.total ?? finalTotal);
+        const paidAmount = Number(s.paid ?? s.paidAmount ?? finalTotal);
+        const remainingAmount = Number(s.remaining ?? s.remainingAmount ?? 0);
+        const discount = Number(s.discount ?? 0);
+        const profit = Number(s.profit ?? 0);
+        const rawDate = s.createdAt || s.date || new Date().toISOString();
+
+        // Normalize line items
+        const rawItems = Array.isArray(s.items) ? s.items : [];
+        const items: SaleItem[] = rawItems.map((it: any, idx: number) => {
+          const inv = it.inventoryId ? inventoryMap.get(it.inventoryId) : null;
+          const imeiObj = it.imeiUnitId ? imeiMap.get(it.imeiUnitId) : null;
+          const unitPrice = Number(it.unitPrice ?? it.price ?? inv?.sellPrice ?? 0);
+          const costPrice = Number(it.costPrice ?? it.cost ?? inv?.costPrice ?? 0);
+          const imeiStr = it.imei || (imeiObj ? (imeiObj.imei1 || imeiObj.imei2) : undefined);
+
+          return {
+            id: it.id || it.inventoryId || `item_${idx}`,
+            name: it.name || inv?.name || 'صنف مبيعات',
+            quantity: Number(it.quantity) || 1,
+            price: unitPrice,
+            cost: costPrice,
+            imei: imeiStr,
+          };
+        });
+
+        let paymentMethodLabel = s.paymentMethod || 'نقدي (كاش)';
+        if (paymentMethodLabel === 'cash') paymentMethodLabel = 'نقدي (كاش)';
+        else if (paymentMethodLabel === 'card') paymentMethodLabel = 'بطاقة / فيزا';
+        else if (paymentMethodLabel === 'installment') paymentMethodLabel = 'آجل / تقسيط';
+
+        return {
+          id: s.id,
+          invoiceNumber: s.invoiceNumber || s.id?.slice(0, 8),
+          date: rawDate,
+          createdAt: rawDate,
+          total: subtotal,
+          discount,
+          finalTotal,
+          paidAmount,
+          remainingAmount,
+          profit,
+          paymentMethod: paymentMethodLabel,
+          safeId: s.safeId,
+          safeName: safe?.name || s.safeName || 'الخزينة الرئيسية',
+          cashierName: cashier?.name || s.cashierName || 'كاشير المحل',
+          customerName: customer?.name || s.customerName || (s.customerId ? 'عميل مسجل' : 'عميل نقدي'),
+          customerPhone: customer?.phone || s.customerPhone || '',
+          customerId: s.customerId,
+          items,
+          branchId: branch.id,
+          branchName: branch.name,
+          branchColor: branch.color,
+        };
+      });
+
+      // Sort sales descending by date
+      normalizedSales.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+      // 6. Normalize Inventory Items
+      const normalizedInventory: InventoryItem[] = (rawStores.inventory || []).map((it: any) => {
+        const cat = it.categoryId ? categoriesMap.get(it.categoryId) : null;
+        return {
+          id: it.id,
+          name: it.name || 'منتج غير مسمى',
+          category: cat?.name || it.category || '',
+          quantity: Number(it.quantity) || 0,
+          minQuantity: Number(it.minQuantity) || 2,
+          costPrice: Number(it.costPrice) || 0,
+          sellPrice: Number(it.sellPrice) || 0,
+          barcode: it.barcode || it.code || '',
+          hasImei: Boolean(it.hasIMEI ?? it.hasImei),
+          branchId: branch.id,
+          branchName: branch.name,
+        };
+      });
+
+      // 7. Normalize Safes
+      const normalizedSafes: Safe[] = (rawStores.safes || []).map((s: any) => {
+        let typeVal: 'cash' | 'bank' | 'wallet' | 'card' = 'cash';
+        if (s.type === 'ewallet' || s.type === 'wallet') typeVal = 'wallet';
+        else if (s.type === 'bank') typeVal = 'bank';
+        else if (s.type === 'card') typeVal = 'card';
+
+        return {
+          id: s.id,
+          name: s.name || 'خزينة',
+          type: typeVal,
+          balance: Number(s.balance) || 0,
+          isDefault: Boolean(s.isDefault),
+          branchId: branch.id,
+          branchName: branch.name,
+        };
+      });
+
+      // 8. Normalize Transactions
+      const normalizedTransactions: Transaction[] = (rawStores.transactions || []).map((t: any) => {
+        const safe = t.safeId ? safesMap.get(t.safeId) : null;
+        const user = t.userId ? usersMap.get(t.userId) : null;
+        const rawDate = t.createdAt || t.date || new Date().toISOString();
+
+        return {
+          id: t.id,
+          date: rawDate,
+          type: t.type || 'expense',
+          amount: Number(t.amount) || 0,
+          safeId: t.safeId,
+          safeName: safe?.name || t.safeName || '',
+          description: t.description || 'حركة نقدية',
+          category: t.category || '',
+          userName: user?.name || t.userName || '',
+          branchId: branch.id,
+          branchName: branch.name,
+          branchColor: branch.color,
+        };
+      });
+
+      // Sort transactions descending by date
+      normalizedTransactions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+      // 9. Normalize Maintenance Orders
+      const normalizedMaintenance: MaintenanceOrder[] = (rawStores.maintenance || []).map((m: any) => {
+        let statusVal: 'received' | 'inspecting' | 'repairing' | 'ready' | 'delivered' | 'cancelled' = 'received';
+        if (m.status === 'completed' || m.status === 'ready') statusVal = 'ready';
+        else if (m.status === 'in_progress' || m.status === 'repairing') statusVal = 'repairing';
+        else if (m.status === 'delivered') statusVal = 'delivered';
+        else if (m.status === 'cancelled') statusVal = 'cancelled';
+        else if (m.status === 'inspecting') statusVal = 'inspecting';
+
+        const rawDate = m.receivedAt || m.receivedDate || m.createdAt || new Date().toISOString();
+        const partsCost = Array.isArray(m.parts)
+          ? m.parts.reduce((sum: number, p: any) => sum + (Number(p.total) || 0), 0)
+          : 0;
+
+        return {
+          id: m.id,
+          ticketNumber: m.ticketNumber || m.id?.slice(0, 6),
+          customerName: m.customerName || 'عميل صيانة',
+          customerPhone: m.customerPhone || '',
+          deviceModel: m.deviceModel || m.deviceType || 'جهاز صيانة',
+          problem: m.problem || m.diagnosis || 'فحص وإصلاح',
+          status: statusVal,
+          costPrice: Number(m.costPrice ?? partsCost ?? 0),
+          expectedPrice: Number(m.estimatedCost ?? m.expectedPrice ?? 0),
+          finalPrice: Number(m.finalCost ?? m.finalPrice ?? m.estimatedCost ?? 0),
+          receivedDate: rawDate,
+          deliveryDate: m.deliveredAt || m.deliveryDate,
+          branchId: branch.id,
+          branchName: branch.name,
+        };
+      });
+
+      // 10. Normalize Customers
+      const normalizedCustomers: Customer[] = (rawStores.customers || []).map((c: any) => ({
+        id: c.id,
+        name: c.name || 'عميل',
+        phone: c.phone || '',
+        balance: Number(c.balance) || 0,
+        branchId: branch.id,
+        branchName: branch.name,
+      }));
+
+      // 11. Calculate Real KPIs
       const now = new Date();
       const todayDateStr = now.toISOString().slice(0, 10);
 
-      const todaySales = sales.filter(s => {
+      const todaySales = normalizedSales.filter(s => {
         const d = (s.date || s.createdAt || '').slice(0, 10);
         return d === todayDateStr;
       });
 
       const todaySalesTotal = todaySales.reduce((acc, s) => acc + (Number(s.finalTotal) || 0), 0);
-      const todayProfitTotal = todaySales.reduce((acc, s) => acc + (Number(s.profit) || (s.finalTotal * 0.18)), 0);
-      const todayCashCollected = todaySales.reduce((acc, s) => acc + (Number(s.paidAmount || s.finalTotal) || 0), 0);
+      const todayProfitTotal = todaySales.reduce((acc, s) => {
+        if (s.profit && Number(s.profit) > 0) return acc + Number(s.profit);
+        return acc + Math.round(Number(s.finalTotal) * 0.18);
+      }, 0);
 
-      const todayExpenses = transactions.filter(t => {
+      const todayCashCollected = todaySales.reduce((acc, s) => acc + (Number(s.paidAmount) || 0), 0);
+
+      const todayExpenses = normalizedTransactions.filter(t => {
         const d = (t.date || '').slice(0, 10);
-        return d === todayDateStr && (t.type === 'expense' || t.type === 'withdrawal');
+        const isOutflow =
+          t.type === 'expense' ||
+          t.type === 'withdrawal' ||
+          (t.type as string) === 'wallet_withdrawal' ||
+          (t.type as string) === 'purchase' ||
+          (t.type as string) === 'maintenance_cost' ||
+          (t.type as string) === 'waste';
+        return d === todayDateStr && isOutflow;
       });
       const todayExpensesTotal = todayExpenses.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
 
-      const totalSafesBalance = safes.reduce((acc, s) => acc + (Number(s.balance) || 0), 0);
-      const lowStockCount = inventory.filter(i => (i.quantity || 0) <= (i.minQuantity || 2)).length;
-      const activeMaintenanceCount = maintenance.filter(m => m.status !== 'delivered' && m.status !== 'cancelled').length;
-      const totalCustomerDebts = customers.reduce((acc, c) => acc + Math.max(0, Number(c.balance) || 0), 0);
+      const totalSafesBalance = normalizedSafes.reduce((acc, s) => acc + (Number(s.balance) || 0), 0);
+      const lowStockCount = normalizedInventory.filter(i => (i.quantity || 0) <= (i.minQuantity || 2)).length;
+      const activeMaintenanceCount = normalizedMaintenance.filter(m => m.status !== 'delivered' && m.status !== 'cancelled').length;
+      const totalCustomerDebts = normalizedCustomers.reduce((acc, c) => acc + Math.max(0, Number(c.balance) || 0), 0);
 
-      // Hourly breakdown for today
+      // Hourly breakdown for today (9 AM to 11 PM)
       const hourlyBuckets: Record<string, number> = {};
       for (let h = 9; h <= 23; h++) {
         const label = `${h > 12 ? h - 12 : h} ${h >= 12 ? 'م' : 'ص'}`;
@@ -472,30 +593,39 @@ class MultiBranchManager {
         activeMaintenanceCount,
         totalCustomerDebts,
         hourlySales,
-        recentSales: sales.slice(0, 30),
-        recentTransactions: transactions.slice(0, 30),
-        safesList: safes,
-        inventoryList: inventory,
-        maintenanceList: maintenance,
-        customersList: customers,
+        recentSales: normalizedSales.slice(0, 100),
+        recentTransactions: normalizedTransactions.slice(0, 100),
+        safesList: normalizedSafes,
+        inventoryList: normalizedInventory,
+        maintenanceList: normalizedMaintenance,
+        customersList: normalizedCustomers,
         lastSyncedAt: new Date().toISOString(),
       };
 
       this.metricsCache.set(branch.id, metrics);
-      this.updateBranch(branch.id, { status: 'connected', lastSyncAt: metrics.lastSyncedAt });
+      this.updateBranch(branch.id, {
+        status: 'connected',
+        lastSyncAt: metrics.lastSyncedAt,
+        errorMessage: undefined,
+      });
       return metrics;
     } catch (err) {
       console.error(`[MultiBranch] Error fetching branch ${branch.name}:`, err);
+      const errMsg = err instanceof Error ? err.message : 'خطأ بالاتصال بالفرع';
       this.updateBranch(branch.id, {
         status: 'error',
-        errorMessage: err instanceof Error ? err.message : 'خطأ بالاتصال بالفرع',
+        errorMessage: errMsg,
       });
-      return this.generateMockMetrics(branch);
+      // Return cached metrics if available, or clean empty metrics (NEVER fake mock data)
+      if (this.metricsCache.has(branch.id)) {
+        return this.metricsCache.get(branch.id)!;
+      }
+      return this.getEmptyMetrics(branch.id, branch.name, branch.color);
     }
   }
 
   /**
-   * Aggregates metrics across all selected/enabled branches.
+   * Aggregates metrics across all enabled branches.
    */
   public async fetchAggregateMetrics(branches: BranchConfig[]): Promise<{
     combined: BranchMetrics;
@@ -509,7 +639,6 @@ class MultiBranchManager {
 
     const perBranch = await Promise.all(enabled.map(b => this.fetchBranchMetrics(b)));
 
-    // Combine all
     const combined: BranchMetrics = {
       branchId: 'all',
       branchName: 'جميع الفروع مجمعة',
@@ -527,11 +656,11 @@ class MultiBranchManager {
       recentSales: perBranch
         .flatMap(m => m.recentSales)
         .sort((a, b) => new Date(b.date || '').getTime() - new Date(a.date || '').getTime())
-        .slice(0, 50),
+        .slice(0, 100),
       recentTransactions: perBranch
         .flatMap(m => m.recentTransactions)
         .sort((a, b) => new Date(b.date || '').getTime() - new Date(a.date || '').getTime())
-        .slice(0, 50),
+        .slice(0, 100),
       safesList: perBranch.flatMap(m => m.safesList),
       inventoryList: perBranch.flatMap(m => m.inventoryList),
       maintenanceList: perBranch.flatMap(m => m.maintenanceList),
@@ -544,7 +673,7 @@ class MultiBranchManager {
 
   private combineHourly(metrics: BranchMetrics[]): { hour: string; total: number }[] {
     if (metrics.length === 0) return [];
-    const base = metrics[0].hourlySales.map(h => ({ hour: h.hour, total: 0 }));
+    const base = (metrics[0]?.hourlySales || []).map(h => ({ hour: h.hour, total: 0 }));
     metrics.forEach(m => {
       m.hourlySales.forEach((h, idx) => {
         if (base[idx]) base[idx].total += h.total;
@@ -553,7 +682,13 @@ class MultiBranchManager {
     return base;
   }
 
-  private getEmptyMetrics(id: string, name: string, color: string): BranchMetrics {
+  public getEmptyMetrics(id: string, name: string, color: string): BranchMetrics {
+    const hourlySales: { hour: string; total: number }[] = [];
+    for (let h = 9; h <= 23; h++) {
+      const label = `${h > 12 ? h - 12 : h} ${h >= 12 ? 'م' : 'ص'}`;
+      hourlySales.push({ hour: label, total: 0 });
+    }
+
     return {
       branchId: id,
       branchName: name,
@@ -567,192 +702,14 @@ class MultiBranchManager {
       lowStockCount: 0,
       activeMaintenanceCount: 0,
       totalCustomerDebts: 0,
-      hourlySales: [],
+      hourlySales,
       recentSales: [],
       recentTransactions: [],
       safesList: [],
       inventoryList: [],
       maintenanceList: [],
       customersList: [],
-    };
-  }
-
-  /** Generates realistic preview data if the branch is newly added or Supabase isn't reachable yet */
-  private generateMockMetrics(branch: BranchConfig): BranchMetrics {
-    const isMain = branch.id === 'b_main';
-    const mult = isMain ? 1.0 : 0.65;
-
-    const mockSales: SaleRecord[] = [
-      {
-        id: `sale_${branch.id}_1`,
-        invoiceNumber: `${branch.code || 'B'}-INV-1042`,
-        date: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
-        total: 18500 * mult,
-        finalTotal: 18500 * mult,
-        paidAmount: 18500 * mult,
-        profit: 2200 * mult,
-        paymentMethod: 'نقدي (كاش)',
-        cashierName: isMain ? 'أحمد كمال' : 'محمود سامي',
-        customerName: 'كريم عبد العزيز',
-        branchId: branch.id,
-        branchName: branch.name,
-        branchColor: branch.color,
-        items: [
-          { id: '1', name: 'Samsung Galaxy A55 5G 256GB', quantity: 1, price: 17800 * mult, imei: '354892109845123' },
-          { id: '2', name: 'جراب شفاف ماج سيف أصلي', quantity: 1, price: 350 * mult },
-          { id: '3', name: 'لاصقة حماية 9D سيراميك', quantity: 1, price: 350 * mult },
-        ],
-      },
-      {
-        id: `sale_${branch.id}_2`,
-        invoiceNumber: `${branch.code || 'B'}-INV-1041`,
-        date: new Date(Date.now() - 45 * 60 * 1000).toISOString(),
-        total: 4200 * mult,
-        finalTotal: 4200 * mult,
-        paidAmount: 4200 * mult,
-        profit: 950 * mult,
-        paymentMethod: 'إنستاباي / تحويل بنكي',
-        cashierName: isMain ? 'أحمد كمال' : 'محمود سامي',
-        customerName: 'عميل نقدي',
-        branchId: branch.id,
-        branchName: branch.name,
-        branchColor: branch.color,
-        items: [
-          { id: '4', name: 'سماعة AirPods Pro 2 الأصلية', quantity: 1, price: 4200 * mult },
-        ],
-      },
-      {
-        id: `sale_${branch.id}_3`,
-        invoiceNumber: `${branch.code || 'B'}-INV-1040`,
-        date: new Date(Date.now() - 110 * 60 * 1000).toISOString(),
-        total: 850 * mult,
-        finalTotal: 850 * mult,
-        paidAmount: 850 * mult,
-        profit: 320 * mult,
-        paymentMethod: 'نقدي (كاش)',
-        cashierName: isMain ? 'أحمد كمال' : 'محمود سامي',
-        customerName: 'طارق الدسوقي',
-        branchId: branch.id,
-        branchName: branch.name,
-        branchColor: branch.color,
-        items: [
-          { id: '5', name: 'شاحن أنكر 20W أصلي Type-C', quantity: 1, price: 550 * mult },
-          { id: '6', name: 'كابل شحن ايفون قماش معتمد', quantity: 1, price: 300 * mult },
-        ],
-      },
-    ];
-
-    const mockSafes: Safe[] = [
-      { id: `s_${branch.id}_1`, name: 'درج الكاشير الرئيسي', type: 'cash', balance: isMain ? 24500 : 14200, branchId: branch.id, branchName: branch.name },
-      { id: `s_${branch.id}_2`, name: 'خزينة المحل الحديدية', type: 'cash', balance: isMain ? 85000 : 42000, branchId: branch.id, branchName: branch.name },
-      { id: `s_${branch.id}_3`, name: 'محفظة إنستاباي / فودافون كاش', type: 'wallet', balance: isMain ? 12300 : 6800, branchId: branch.id, branchName: branch.name },
-    ];
-
-    const mockTransactions: Transaction[] = [
-      {
-        id: `tx_${branch.id}_1`,
-        date: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-        type: 'expense',
-        amount: 150,
-        safeId: `s_${branch.id}_1`,
-        safeName: 'درج الكاشير الرئيسي',
-        description: 'بوفيه وضيافة وشاي للعملاء',
-        category: 'مصروفات تشغيل',
-        userName: isMain ? 'أحمد كمال' : 'محمود سامي',
-        branchId: branch.id,
-        branchName: branch.name,
-        branchColor: branch.color,
-      },
-      {
-        id: `tx_${branch.id}_2`,
-        date: new Date(Date.now() - 120 * 60 * 1000).toISOString(),
-        type: 'expense',
-        amount: 800,
-        safeId: `s_${branch.id}_1`,
-        safeName: 'درج الكاشير الرئيسي',
-        description: 'شراء كراتين شحن وأكياس لوجو',
-        category: 'مستلزمات تعبئة',
-        userName: isMain ? 'أحمد كمال' : 'محمود سامي',
-        branchId: branch.id,
-        branchName: branch.name,
-        branchColor: branch.color,
-      },
-    ];
-
-    const mockInventory: InventoryItem[] = [
-      { id: `inv_1`, name: 'iPhone 15 Pro Max 256GB تيتانيوم', quantity: 2, minQuantity: 3, sellPrice: 56000, costPrice: 52000, hasImei: true, branchId: branch.id, branchName: branch.name },
-      { id: `inv_2`, name: 'شاشة سامسونج A54 أصلية توكيل', quantity: 1, minQuantity: 2, sellPrice: 2800, costPrice: 2200, branchId: branch.id, branchName: branch.name },
-      { id: `inv_3`, name: 'باور بانك أنكر 20,000 مللي أمبير', quantity: 0, minQuantity: 4, sellPrice: 1950, costPrice: 1500, branchId: branch.id, branchName: branch.name },
-      { id: `inv_4`, name: 'سماعة Joyroom Pro اللاسلكية', quantity: 8, minQuantity: 3, sellPrice: 750, costPrice: 500, branchId: branch.id, branchName: branch.name },
-    ];
-
-    const mockMaintenance: MaintenanceOrder[] = [
-      {
-        id: `maint_1`,
-        ticketNumber: `${branch.code || 'B'}-M-201`,
-        customerName: 'إبراهيم حسن',
-        customerPhone: '01012345678',
-        deviceModel: 'iPhone 13 Pro',
-        problem: 'تغيير بطارية أصلية + فحص شحن',
-        status: 'repairing',
-        costPrice: 900,
-        finalPrice: 1600,
-        receivedDate: new Date(Date.now() - 4 * 3600 * 1000).toISOString(),
-        branchId: branch.id,
-        branchName: branch.name,
-      },
-      {
-        id: `maint_2`,
-        ticketNumber: `${branch.code || 'B'}-M-202`,
-        customerName: 'سارة فهمي',
-        customerPhone: '01198765432',
-        deviceModel: 'Xiaomi Redmi Note 12',
-        problem: 'شاشة مكسورة - تغيير شاشة كاملة',
-        status: 'ready',
-        costPrice: 850,
-        finalPrice: 1400,
-        receivedDate: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
-        branchId: branch.id,
-        branchName: branch.name,
-      },
-    ];
-
-    const mockCustomers: Customer[] = [
-      { id: `cust_1`, name: 'شركة النور للاتصالات', phone: '01000000001', balance: 14500, branchId: branch.id, branchName: branch.name },
-      { id: `cust_2`, name: 'المهندس حسام الدين', phone: '01222222222', balance: 3200, branchId: branch.id, branchName: branch.name },
-    ];
-
-    const hourlySales = [
-      { hour: '10 ص', total: 1200 * mult },
-      { hour: '12 م', total: 4500 * mult },
-      { hour: '2 م', total: 2800 * mult },
-      { hour: '4 م', total: 6200 * mult },
-      { hour: '6 م', total: 9800 * mult },
-      { hour: '8 م', total: 14500 * mult },
-      { hour: '10 م', total: 7200 * mult },
-    ];
-
-    return {
-      branchId: branch.id,
-      branchName: branch.name,
-      branchColor: branch.color,
-      todaySalesTotal: isMain ? 46200 : 28400,
-      todayProfitTotal: isMain ? 8600 : 5100,
-      todayInvoicesCount: isMain ? 18 : 11,
-      todayCashCollected: isMain ? 43500 : 27000,
-      todayExpensesTotal: isMain ? 950 : 600,
-      totalSafesBalance: mockSafes.reduce((acc, s) => acc + s.balance, 0),
-      lowStockCount: 3,
-      activeMaintenanceCount: 2,
-      totalCustomerDebts: isMain ? 17700 : 8400,
-      hourlySales,
-      recentSales: mockSales,
-      recentTransactions: mockTransactions,
-      safesList: mockSafes,
-      inventoryList: mockInventory,
-      maintenanceList: mockMaintenance,
-      customersList: mockCustomers,
-      lastSyncedAt: new Date().toISOString(),
+      lastSyncedAt: undefined,
     };
   }
 }

@@ -51,7 +51,13 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
 
   const profitMarginPct = metrics.todaySalesTotal > 0
     ? Math.round((metrics.todayProfitTotal / metrics.todaySalesTotal) * 100)
-    : 18;
+    : 0;
+
+  const isCompletelyEmpty =
+    metrics.todayInvoicesCount === 0 &&
+    metrics.totalSafesBalance === 0 &&
+    metrics.inventoryList.length === 0 &&
+    metrics.recentSales.length === 0;
 
   return (
     <div className="space-y-4 pb-28 animate-in fade-in duration-300">
@@ -70,6 +76,26 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
           <span>بث مباشر لحظي</span>
         </div>
       </div>
+
+      {/* Helpful Setup Banner when no records exist yet */}
+      {isCompletelyEmpty && (
+        <div className="p-4 rounded-3xl bg-slate-900/90 border border-cyan-500/30 space-y-2.5 backdrop-blur-md shadow-lg">
+          <div className="flex items-center gap-2 text-cyan-400 text-xs font-bold">
+            <Sparkles size={16} />
+            <span>في انتظار المزامنة الأولى مع الكاشير</span>
+          </div>
+          <p className="text-xs text-slate-300 leading-relaxed">
+            لتحديث البيانات فورياً: تأكد من ضبط إعدادات السحابة (Supabase) والضغط على زر "رفع لقطة شاملة (Snapshot)" في شاشة إعدادات الكاشير على الكمبيوتر.
+          </p>
+          <button
+            type="button"
+            onClick={() => onNavigateToTab('settings')}
+            className="px-3.5 py-1.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs transition active:scale-95 shadow-md shadow-cyan-500/20"
+          >
+            إعدادات الفروع والربط ⚙️
+          </button>
+        </div>
+      )}
 
       {/* Hero Bento: Today's Total Sales */}
       <div

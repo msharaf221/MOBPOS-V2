@@ -105,7 +105,8 @@ export default function App() {
       if (evt) {
         if (evt.table === 'mobpos_records' && evt.data?.store === 'sales') {
           const recData = evt.data.data;
-          const total = recData?.finalTotal ? `${Number(recData.finalTotal).toLocaleString()} ج.م` : '';
+          const rawTotal = recData?.total ?? recData?.finalTotal;
+          const total = rawTotal ? `${Number(rawTotal).toLocaleString()} ج.م` : '';
           const invoiceNum = recData?.invoiceNumber || recData?.id || '';
           setLiveToast({
             id: String(Date.now()),

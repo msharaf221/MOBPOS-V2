@@ -31,9 +31,10 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const [copied, setCopied] = useState(false);
 
   const generateShareText = () => {
+    const saleDateStr = sale.date || sale.createdAt || new Date().toISOString();
     let text = `🧾 *فاتورة مبيعات — ${sale.branchName || 'محل الموبايلات'}*\n`;
     text += `رقم الفاتورة: ${sale.invoiceNumber || 'نقدي'}\n`;
-    text += `التاريخ: ${new Date(sale.date).toLocaleString('ar-EG')}\n`;
+    text += `التاريخ: ${new Date(saleDateStr).toLocaleString('ar-EG')}\n`;
     text += `العميل: ${sale.customerName || 'عميل نقدي'}\n`;
     text += `الكاشير: ${sale.cashierName || 'الفرع'}\n`;
     text += `------------------------------\n`;
@@ -91,7 +92,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 )}
               </div>
               <p className="text-[10px] text-slate-400 font-mono">
-                {formatTimeAgo(sale.date)} • {new Date(sale.date).toLocaleDateString('ar-EG')}
+                {formatTimeAgo(sale.date || sale.createdAt)} • {new Date(sale.date || sale.createdAt || Date.now()).toLocaleDateString('ar-EG')}
               </p>
             </div>
           </div>
