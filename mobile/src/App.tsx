@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Zap } from 'lucide-react';
 import type { BranchConfig, BranchMetrics, SaleRecord } from './types';
 import { multiBranchManager } from './services/MultiBranchManager';
 import { Header } from './components/Header';
@@ -42,6 +43,7 @@ export default function App() {
 
   const [perBranchMetrics, setPerBranchMetrics] = useState<BranchMetrics[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [liveToast, setLiveToast] = useState<{ id: string; title: string; subtitle?: string } | null>(null);
 
   // App settings
   const [hideAmounts, setHideAmounts] = useState<boolean>(() => {
@@ -96,9 +98,34 @@ export default function App() {
 
   // Subscribe to live Supabase Realtime WebSocket changes across all branches
   useEffect(() => {
-    const unsubRealtime = multiBranchManager.setupAllRealtime(() => {
-      console.log('[Mobile Realtime] Live push received -> refreshing metrics');
+    const unsubRealtime = multiBranchManager.setupAllRealtime(evt => {
+      console.log('[Mobile Realtime] Live push received -> refreshing metrics', evt);
       refreshMetrics().catch(() => undefined);
+
+      if (evt) {
+        if (evt.table === 'mobpos_records' && evt.data?.store === 'sales') {
+          const recData = evt.data.data;
+          const total = recData?.finalTotal ? `${Number(recData.finalTotal).toLocaleString()} ج.م` : '';
+          const invoiceNum = recData?.invoiceNumber || recData?.id || '';
+          setLiveToast({
+            id: String(Date.now()),
+            title: `⚡ فاتورة مبيعات جديدة #${invoiceNum}`,
+            subtitle: `${evt.branchName || 'الفرع'} • ${total}`,
+          });
+        } else if (evt.table === 'mobpos_records' && evt.data?.store === 'safes') {
+          setLiveToast({
+            id: String(Date.now()),
+            title: `💰 حركة خزينة جديدة`,
+            subtitle: `${evt.branchName || 'الفرع'} • تم تحديث الرصيد لحظياً`,
+          });
+        } else if (evt.table === 'mobpos_stores') {
+          setLiveToast({
+            id: String(Date.now()),
+            title: `🔄 تم استلام لقطة شاملة للمتجر`,
+            subtitle: `${evt.branchName || 'الفرع'} • مزامنة تلقائية ناجحة`,
+          });
+        }
+      }
     });
 
     // Auto-refresh when user switches back to the phone screen
@@ -116,6 +143,15 @@ export default function App() {
       window.removeEventListener('focus', handleVisibilityChange);
     };
   }, [branches, refreshMetrics]);
+
+  // Auto-dismiss live toast after 4 seconds
+  useEffect(() => {
+    if (!liveToast) return;
+    const timer = setTimeout(() => {
+      setLiveToast(null);
+    }, 4000);
+    return () => clearTimeout(timer);
+  }, [liveToast]);
 
   // Fallback polling interval (default 10s)
   useEffect(() => {
@@ -167,6 +203,22 @@ export default function App() {
 
       {/* Main Container constrained to Mobile Form Factor */}
       <div className="w-full max-w-md min-h-screen flex flex-col relative z-10 border-x border-slate-850/50 shadow-2xl">
+        {/* Floating Live Notification Toast */}
+        {liveToast && (
+          <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 w-11/12 max-w-sm p-3 rounded-2xl bg-slate-900/95 border border-cyan-500/40 shadow-2xl backdrop-blur-xl flex items-center gap-3 animate-in fade-in slide-in-from-top-3 duration-300">
+            <div className="w-8 h-8 rounded-xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center shrink-0 border border-cyan-400/30">
+              <Zap size={16} className="animate-pulse" />
+            </div>
+            <div className="flex-1 min-w-0 text-right">
+              <div className="text-xs font-black text-white truncate">{liveToast.title}</div>
+              {liveToast.subtitle && (
+                <div className="text-[11px] text-cyan-300/80 truncate font-medium">{liveToast.subtitle}</div>
+              )}
+            </div>
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping shrink-0" />
+          </div>
+        )}
+
         {/* Header */}
         <Header
           branches={branches}

@@ -6,6 +6,7 @@
 import { createClient, SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
 import { indexedDBUtils, onStoreDelta, setRemoteApplying } from '../hooks/useIndexedDB.ts';
 import type { ActiveLicense } from '../license/types.ts';
+import type { AppSettings } from '../types/index.ts';
 import type {
   SyncConfig,
   SyncEngineState,
@@ -78,6 +79,8 @@ class SyncEngine {
   private backoffMs = INITIAL_BACKOFF_MS;
   private drainTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private debouncedSnapshotTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastAutoSnapshotTime = 0;
   private unsubscribeDelta: (() => void) | null = null;
   private initialized = false;
 
@@ -163,6 +166,102 @@ class SyncEngine {
     this.config = this.loadConfig();
     this.state.tenantId = this.resolveTenantId();
     this.reconnect();
+
+    // Dual-write to persistent IndexedDB so credentials can NEVER be wiped!
+    void this.persistCredentialsToIndexedDB(this.config);
+  }
+
+  /**
+   * Persists Supabase configuration into IndexedDB ('settings' and 'syncMeta' stores)
+   * as a permanent backup against localStorage clearing or Electron cache flushes.
+   */
+  public async persistCredentialsToIndexedDB(cfg: SyncConfig): Promise<void> {
+    try {
+      if (cfg.url) await indexedDBUtils.put(indexedDBUtils.STORES.syncMeta, { id: 'supabase_url', value: cfg.url });
+      if (cfg.anonKey) await indexedDBUtils.put(indexedDBUtils.STORES.syncMeta, { id: 'supabase_anon_key', value: cfg.anonKey });
+      if (cfg.tenantId) await indexedDBUtils.put(indexedDBUtils.STORES.syncMeta, { id: 'supabase_tenant_id', value: cfg.tenantId });
+
+      const allSettings = await indexedDBUtils.getAll<AppSettings & { id: string }>(indexedDBUtils.STORES.settings);
+      if (allSettings.length > 0) {
+        const cur = allSettings[0];
+        const updated: AppSettings & { id: string } = {
+          ...cur,
+          supabaseUrl: cfg.url || cur.supabaseUrl,
+          supabaseAnonKey: cfg.anonKey || cur.supabaseAnonKey,
+          supabaseTenantId: cfg.tenantId || cur.supabaseTenantId,
+          cloudSyncEnabled: cfg.autoSyncEnabled,
+          cloudAutoSync: cfg.autoSyncEnabled,
+        };
+        await indexedDBUtils.put(indexedDBUtils.STORES.settings, updated);
+      }
+    } catch (e) {
+      console.warn('[SyncEngine] Failed to persist credentials to IndexedDB:', e);
+    }
+  }
+
+  /**
+   * Self-Healing Storage:
+   * Rehydrates Supabase connection credentials from persistent IndexedDB
+   * (settings store / syncMeta store) if localStorage was cleared or wiped.
+   */
+  public async selfHealFromIndexedDB(): Promise<boolean> {
+    if (typeof localStorage === 'undefined') return false;
+
+    try {
+      let url = localStorage.getItem(CFG_URL) || '';
+      let key = localStorage.getItem(CFG_KEY) || '';
+      let tenant = localStorage.getItem(CFG_TENANT) || '';
+      let restored = false;
+
+      // 1. Check persistent settings store in IndexedDB
+      const allSettings = await indexedDBUtils.getAll<AppSettings & { id: string }>(indexedDBUtils.STORES.settings);
+      const appSettings = allSettings[0];
+      if (appSettings) {
+        if (!url && appSettings.supabaseUrl) {
+          localStorage.setItem(CFG_URL, appSettings.supabaseUrl);
+          url = appSettings.supabaseUrl;
+          restored = true;
+        }
+        if (!key && appSettings.supabaseAnonKey) {
+          localStorage.setItem(CFG_KEY, appSettings.supabaseAnonKey);
+          key = appSettings.supabaseAnonKey;
+          restored = true;
+        }
+        if (!tenant && appSettings.supabaseTenantId) {
+          localStorage.setItem(CFG_TENANT, appSettings.supabaseTenantId);
+          tenant = appSettings.supabaseTenantId;
+          restored = true;
+        }
+      }
+
+      // 2. Check syncMeta store as secondary fallback
+      const meta = await indexedDBUtils.getAll<{ id: string; value: string }>(indexedDBUtils.STORES.syncMeta);
+      const metaMap = new Map(meta.map(m => [m.id, m.value]));
+      if (!url && metaMap.get('supabase_url')) {
+        localStorage.setItem(CFG_URL, metaMap.get('supabase_url')!);
+        restored = true;
+      }
+      if (!key && metaMap.get('supabase_anon_key')) {
+        localStorage.setItem(CFG_KEY, metaMap.get('supabase_anon_key')!);
+        restored = true;
+      }
+      if (!tenant && metaMap.get('supabase_tenant_id')) {
+        localStorage.setItem(CFG_TENANT, metaMap.get('supabase_tenant_id')!);
+        restored = true;
+      }
+
+      if (restored) {
+        console.info('[SyncEngine] Self-healing activated: restored Supabase credentials from persistent IndexedDB ✅');
+        this.config = this.loadConfig();
+        this.state.tenantId = this.resolveTenantId();
+        this.reconnect();
+        this.emitState();
+        return true;
+      }
+    } catch (err) {
+      console.warn('[SyncEngine] Self-healing check failed:', err);
+    }
+    return false;
   }
 
   public setLicense(license: ActiveLicense | null): void {
@@ -197,12 +296,23 @@ class SyncEngine {
     // Reconnect client & realtime
     this.reconnect();
 
-    // Periodic check & outbox flush interval (every 15s)
+    // Self-Healing Storage: Restore credentials from IndexedDB if localStorage was wiped
+    void this.selfHealFromIndexedDB();
+
+    // Zero-Touch Background Worker:
+    // Runs silent check every 30s to drain pending records and auto-push fresh snapshot
     this.heartbeatTimer = setInterval(() => {
-      if (this.state.isOnline && this.state.pendingCount > 0 && !this.isDraining) {
-        void this.triggerDrain();
+      if (this.state.isOnline && this.state.status !== 'disabled') {
+        if (this.state.pendingCount > 0 && !this.isDraining) {
+          void this.triggerDrain();
+        }
+
+        // Auto-refresh snapshot every 3 minutes silently so mobpos_stores is never stale
+        if (Date.now() - this.lastAutoSnapshotTime > 180000 && !this.isDraining) {
+          void this.autoPushSnapshotInBackground();
+        }
       }
-    }, 15000);
+    }, 30000);
   }
 
   public destroy(): void {
@@ -217,6 +327,10 @@ class SyncEngine {
     if (this.drainTimer) {
       clearTimeout(this.drainTimer);
       this.drainTimer = null;
+    }
+    if (this.debouncedSnapshotTimer) {
+      clearTimeout(this.debouncedSnapshotTimer);
+      this.debouncedSnapshotTimer = null;
     }
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
@@ -427,6 +541,41 @@ class SyncEngine {
     if (!SYNCABLE_STORES.has(storeName)) return;
 
     void this.queueDeltas(storeName, delta);
+
+    // Schedule background snapshot push so mobpos_stores is also kept fresh automatically!
+    this.scheduleDebouncedSnapshot(15000);
+  }
+
+  /**
+   * Schedules a debounced full snapshot push (pushAllSnapshots) in the background.
+   * Triggered automatically whenever sales, inventory, or safe changes occur.
+   */
+  public scheduleDebouncedSnapshot(delayMs = 15000): void {
+    if (!this.config.autoSyncEnabled || !this.supabase || !this.state.isOnline) return;
+
+    if (this.debouncedSnapshotTimer) {
+      clearTimeout(this.debouncedSnapshotTimer);
+    }
+
+    this.debouncedSnapshotTimer = setTimeout(() => {
+      this.debouncedSnapshotTimer = null;
+      void this.autoPushSnapshotInBackground();
+    }, delayMs);
+  }
+
+  private async autoPushSnapshotInBackground(): Promise<void> {
+    if (!this.supabase || !this.state.isOnline || !this.config.autoSyncEnabled || this.isDraining) {
+      return;
+    }
+
+    try {
+      console.info('[SyncEngine] Background Auto-Snapshot: pushing full stores to mobpos_stores...');
+      await this.pushAllSnapshots();
+      this.lastAutoSnapshotTime = Date.now();
+      console.info('[SyncEngine] Background Auto-Snapshot completed successfully ✅');
+    } catch (err) {
+      console.warn('[SyncEngine] Background Auto-Snapshot non-blocking notice:', err);
+    }
   }
 
   private async queueDeltas(

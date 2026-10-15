@@ -361,6 +361,12 @@ export interface AppSettings {
   cloudSyncEnabled?: boolean;
   /** المزامنة التلقائية اللحظية في الخلفية */
   cloudAutoSync?: boolean;
+  /** رابط خادم Supabase السحابي */
+  supabaseUrl?: string;
+  /** مفتاح الربط العمومي السحابي Anon Key */
+  supabaseAnonKey?: string;
+  /** معرّف المتجر / الفرع السحابي Tenant ID */
+  supabaseTenantId?: string;
 }
 
 // ============ AUDIT LOG TYPES ============

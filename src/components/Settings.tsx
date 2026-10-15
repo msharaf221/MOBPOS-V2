@@ -307,6 +307,11 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
     setShopLogo(settings.shopLogo);
     setAccentColor(settings.accentColor || '#3b82f6');
     setThemeStyle(settings.themeStyle || 'default');
+
+    // Self-healing: hydrate form from IndexedDB if not set
+    if (settings.supabaseUrl && !syncUrl) setSyncUrl(settings.supabaseUrl);
+    if (settings.supabaseAnonKey && !syncKey) setSyncKey(settings.supabaseAnonKey);
+    if (settings.supabaseTenantId && !syncTenant) setSyncTenant(settings.supabaseTenantId);
   }, [settings]);
 
   const [storageInfo, setStorageInfo] = useState({ usage: 0, quota: 0 });
@@ -335,11 +340,16 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
       accentColor,
       themeStyle,
       maintenanceReceiptShowPartPrices: showPartPrices,
+      supabaseUrl: syncUrl || settings.supabaseUrl,
+      supabaseAnonKey: syncKey || settings.supabaseAnonKey,
+      supabaseTenantId: syncTenant || settings.supabaseTenantId,
+      cloudSyncEnabled: syncAutoEnabled,
+      cloudAutoSync: syncAutoEnabled,
       ...overrides,
     };
     onSaveSettings(updated);
     window.dispatchEvent(new CustomEvent(BRANDING_UPDATED_EVENT, { detail: updated }));
-  }, [shopName, shopPhone, shopAddress, receiptFooter, notifSound, autoRefresh, shopLogo, accentColor, themeStyle, showPartPrices, onSaveSettings]);
+  }, [shopName, shopPhone, shopAddress, receiptFooter, notifSound, autoRefresh, shopLogo, accentColor, themeStyle, showPartPrices, syncUrl, syncKey, syncTenant, syncAutoEnabled, settings, onSaveSettings]);
 
   const handleLogoFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files && e.target.files[0];
@@ -1627,7 +1637,14 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                         tenantId: cleanTenant,
                         autoSyncEnabled: syncAutoEnabled,
                       });
-                      setSyncMsg({ kind: 'ok', text: 'تم حفظ إعدادات المزامنة السحابية بنجاح ✅' });
+                      persistBranding({
+                        supabaseUrl: cleanUrl,
+                        supabaseAnonKey: cleanKey,
+                        supabaseTenantId: cleanTenant,
+                        cloudSyncEnabled: syncAutoEnabled,
+                        cloudAutoSync: syncAutoEnabled,
+                      });
+                      setSyncMsg({ kind: 'ok', text: 'تم حفظ إعدادات المزامنة وتأمينها في قاعدة البيانات بنجاح ✅' });
                     }}
                     className="px-4 py-2.5 bg-gray-700 hover:bg-gray-800 text-white font-bold rounded-xl text-xs transition"
                   >

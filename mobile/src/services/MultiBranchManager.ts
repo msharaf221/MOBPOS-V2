@@ -23,7 +23,7 @@ const DEFAULT_BRANCHES: BranchConfig[] = [
     color: '#06b6d4', // Cyan
     supabaseUrl: 'https://tbxyyaumefhdgmpccidq.supabase.co',
     supabaseAnonKey: '',
-    tenantId: 'mv8h9gjda52288ce43198a5bab2d9f89',
+    tenantId: '',
     enabled: true,
     createdAt: new Date().toISOString(),
     status: 'connected',
@@ -36,8 +36,8 @@ const DEFAULT_BRANCHES: BranchConfig[] = [
     color: '#8b5cf6', // Violet
     supabaseUrl: '',
     supabaseAnonKey: '',
-    tenantId: 'branch_maadi_02',
-    enabled: true,
+    tenantId: '',
+    enabled: false,
     createdAt: new Date().toISOString(),
     status: 'offline',
   },
@@ -122,7 +122,10 @@ class MultiBranchManager {
     return this.clients.get(branch.id) || null;
   }
 
-  public setupRealtimeForBranch(branch: BranchConfig, onLiveChange?: () => void): void {
+  public setupRealtimeForBranch(
+    branch: BranchConfig,
+    onLiveChange?: (evt?: { table: string; eventType: string; branchId: string; branchName: string; data?: any }) => void
+  ): void {
     const client = this.getClient(branch);
     if (!client) return;
 
@@ -141,7 +144,15 @@ class MultiBranchManager {
           (payload) => {
             console.log(`[MultiBranch Live] Record update on ${branch.name}:`, payload.eventType);
             this.metricsCache.delete(branch.id);
-            if (onLiveChange) onLiveChange();
+            if (onLiveChange) {
+              onLiveChange({
+                table: 'mobpos_records',
+                eventType: payload.eventType,
+                branchId: branch.id,
+                branchName: branch.name,
+                data: (payload.new as any) || (payload.old as any),
+              });
+            }
           }
         )
         .on(
@@ -150,7 +161,15 @@ class MultiBranchManager {
           (payload) => {
             console.log(`[MultiBranch Live] Snapshot update on ${branch.name}:`, payload.eventType);
             this.metricsCache.delete(branch.id);
-            if (onLiveChange) onLiveChange();
+            if (onLiveChange) {
+              onLiveChange({
+                table: 'mobpos_stores',
+                eventType: payload.eventType,
+                branchId: branch.id,
+                branchName: branch.name,
+                data: (payload.new as any) || (payload.old as any),
+              });
+            }
           }
         )
         .subscribe((status) => {
@@ -166,7 +185,9 @@ class MultiBranchManager {
     }
   }
 
-  public setupAllRealtime(onLiveChange?: () => void): () => void {
+  public setupAllRealtime(
+    onLiveChange?: (evt?: { table: string; eventType: string; branchId: string; branchName: string; data?: any }) => void
+  ): () => void {
     const branches = this.getBranches().filter(b => b.enabled && b.supabaseUrl && b.supabaseAnonKey);
     for (const b of branches) {
       this.setupRealtimeForBranch(b, onLiveChange);
@@ -193,7 +214,38 @@ class MultiBranchManager {
     }
 
     try {
-      const tenantId = branch.tenantId.trim();
+      let activeTenantId = branch.tenantId ? branch.tenantId.trim() : '';
+
+      // Smart Auto-Discovery: If tenantId was not provided, auto-detect from latest records or stores
+      if (!activeTenantId) {
+        try {
+          const { data: sampleRec } = await client
+            .from('mobpos_records')
+            .select('tenant_id')
+            .is('deleted_at', null)
+            .order('updated_at', { ascending: false })
+            .limit(1);
+
+          if (sampleRec && sampleRec.length > 0 && sampleRec[0].tenant_id) {
+            activeTenantId = sampleRec[0].tenant_id;
+            console.info(`[MultiBranch] Auto-discovered tenantId from mobpos_records: ${activeTenantId}`);
+            this.updateBranch(branch.id, { tenantId: activeTenantId });
+          } else {
+            const { data: sampleStore } = await client
+              .from('mobpos_stores')
+              .select('tenant_id')
+              .order('updated_at', { ascending: false })
+              .limit(1);
+            if (sampleStore && sampleStore.length > 0 && sampleStore[0].tenant_id) {
+              activeTenantId = sampleStore[0].tenant_id;
+              console.info(`[MultiBranch] Auto-discovered tenantId from mobpos_stores: ${activeTenantId}`);
+              this.updateBranch(branch.id, { tenantId: activeTenantId });
+            }
+          }
+        } catch (discoverErr) {
+          console.warn('[MultiBranch] Auto-discovery notice:', discoverErr);
+        }
+      }
 
       // 1. Fetch from mobpos_records (delta real-time table)
       let salesRows: any[] = [];
@@ -204,14 +256,46 @@ class MultiBranchManager {
       let custRows: any[] = [];
 
       try {
-        const [resSales, resSafes, resTx, resInv, resMaint, resCust] = await Promise.all([
-          client.from('mobpos_records').select('*').eq('tenant_id', tenantId).eq('store', 'sales').is('deleted_at', null).order('updated_at', { ascending: false }).limit(200),
-          client.from('mobpos_records').select('*').eq('tenant_id', tenantId).eq('store', 'safes').is('deleted_at', null),
-          client.from('mobpos_records').select('*').eq('tenant_id', tenantId).eq('store', 'transactions').is('deleted_at', null).order('updated_at', { ascending: false }).limit(100),
-          client.from('mobpos_records').select('*').eq('tenant_id', tenantId).eq('store', 'inventory').is('deleted_at', null).limit(300),
-          client.from('mobpos_records').select('*').eq('tenant_id', tenantId).eq('store', 'maintenance').is('deleted_at', null).limit(100),
-          client.from('mobpos_records').select('*').eq('tenant_id', tenantId).eq('store', 'customers').is('deleted_at', null).limit(150),
-        ]);
+        const fetchRecords = (tenant: string) => {
+          let sQuery = client.from('mobpos_records').select('*').eq('store', 'sales').is('deleted_at', null).order('updated_at', { ascending: false }).limit(200);
+          let sfQuery = client.from('mobpos_records').select('*').eq('store', 'safes').is('deleted_at', null);
+          let tQuery = client.from('mobpos_records').select('*').eq('store', 'transactions').is('deleted_at', null).order('updated_at', { ascending: false }).limit(100);
+          let iQuery = client.from('mobpos_records').select('*').eq('store', 'inventory').is('deleted_at', null).limit(300);
+          let mQuery = client.from('mobpos_records').select('*').eq('store', 'maintenance').is('deleted_at', null).limit(100);
+          let cQuery = client.from('mobpos_records').select('*').eq('store', 'customers').is('deleted_at', null).limit(150);
+
+          if (tenant) {
+            sQuery = sQuery.eq('tenant_id', tenant);
+            sfQuery = sfQuery.eq('tenant_id', tenant);
+            tQuery = tQuery.eq('tenant_id', tenant);
+            iQuery = iQuery.eq('tenant_id', tenant);
+            mQuery = mQuery.eq('tenant_id', tenant);
+            cQuery = cQuery.eq('tenant_id', tenant);
+          }
+
+          return Promise.all([sQuery, sfQuery, tQuery, iQuery, mQuery, cQuery]);
+        };
+
+        let [resSales, resSafes, resTx, resInv, resMaint, resCust] = await fetchRecords(activeTenantId);
+
+        const countFound = (resSales.data?.length || 0) + (resSafes.data?.length || 0) + (resInv.data?.length || 0);
+
+        // Self-Healing Tenant Check: If nothing was found and activeTenantId was set, verify if records exist under another tenant
+        if (countFound === 0 && activeTenantId) {
+          const { data: anyRec } = await client
+            .from('mobpos_records')
+            .select('tenant_id')
+            .is('deleted_at', null)
+            .order('updated_at', { ascending: false })
+            .limit(1);
+
+          if (anyRec && anyRec.length > 0 && anyRec[0].tenant_id && anyRec[0].tenant_id !== activeTenantId) {
+            activeTenantId = anyRec[0].tenant_id;
+            console.info(`[MultiBranch] Mismatched tenant recovered. Switching to active tenant: ${activeTenantId}`);
+            this.updateBranch(branch.id, { tenantId: activeTenantId });
+            [resSales, resSafes, resTx, resInv, resMaint, resCust] = await fetchRecords(activeTenantId);
+          }
+        }
 
         if (resSales.data && resSales.data.length > 0) salesRows = resSales.data;
         if (resSafes.data && resSafes.data.length > 0) safesRows = resSafes.data;
@@ -270,8 +354,8 @@ class MultiBranchManager {
       // Fallback: If mobpos_records is empty, read from mobpos_stores (full snapshots pushed by desktop POS)
       if (sales.length === 0 && inventory.length === 0 && safes.length === 0) {
         let storeQuery = client.from('mobpos_stores').select('*');
-        if (tenantId) {
-          storeQuery = storeQuery.eq('tenant_id', tenantId);
+        if (activeTenantId) {
+          storeQuery = storeQuery.eq('tenant_id', activeTenantId);
         }
         let { data: storeRows, error: storeErr } = await storeQuery;
 
@@ -280,7 +364,11 @@ class MultiBranchManager {
           const { data: anyStoreRows } = await client.from('mobpos_stores').select('*').limit(20);
           if (anyStoreRows && anyStoreRows.length > 0) {
             storeRows = anyStoreRows;
-            console.info(`[MultiBranch] Auto-detected tenant in mobpos_stores: ${anyStoreRows[0].tenant_id}`);
+            const discoveredTenant = anyStoreRows[0].tenant_id;
+            console.info(`[MultiBranch] Auto-detected tenant in mobpos_stores: ${discoveredTenant}`);
+            if (discoveredTenant && discoveredTenant !== branch.tenantId) {
+              this.updateBranch(branch.id, { tenantId: discoveredTenant });
+            }
           }
         }
 
