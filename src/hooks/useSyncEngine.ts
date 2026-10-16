@@ -17,8 +17,7 @@ export function useSyncEngine() {
   }, []);
 
   const triggerSyncNow = useCallback(async () => {
-    await syncEngine.triggerDrain();
-    await syncEngine.pullCatchUp();
+    return await syncEngine.syncNow();
   }, []);
 
   const updateConfig = useCallback((cfg: Partial<SyncConfig>) => {

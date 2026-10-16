@@ -135,3 +135,30 @@ test('OutboxItem structure conforms to required properties', () => {
   assert.equal(item.recordId, 'p1');
   assert.ok(item.clientUpdatedAt);
 });
+
+test('formatFriendlyErrorMessage translates technical Supabase/PostgREST errors to clear Arabic', () => {
+  // Missing table error
+  const tableErr = syncEngine.formatFriendlyErrorMessage('relation "public.mobpos_stores" does not exist');
+  assert.ok(tableErr.includes('جداول المزامنة غير موجودة'), 'Must notify user about missing tables');
+
+  // 42P01 error code
+  const codeErr = syncEngine.formatFriendlyErrorMessage('error 42P01: undefined table');
+  assert.ok(codeErr.includes('جداول المزامنة غير موجودة'), '42P01 must trigger missing tables message');
+
+  // RLS error
+  const rlsErr = syncEngine.formatFriendlyErrorMessage('new row violates row-level security policy for table "mobpos_records"');
+  assert.ok(rlsErr.includes('صلاحيات المزامنة مقيدة'), 'Must notify user about RLS policies');
+
+  // Network / fetch error
+  const fetchErr = syncEngine.formatFriendlyErrorMessage('TypeError: Failed to fetch');
+  assert.ok(fetchErr.includes('تعذر الاتصال بخادم Supabase'), 'Failed to fetch must notify about network/connection');
+
+  // JWT expiration / format error
+  const jwtErr = syncEngine.formatFriendlyErrorMessage('PGRST301: JWT expired');
+  assert.ok(jwtErr.includes('انتهت صلاحية جلسة الدخول'), 'JWT expired must notify about session expiry');
+
+  // Invalid API key
+  const keyErr = syncEngine.formatFriendlyErrorMessage('Invalid API key provided');
+  assert.ok(keyErr.includes('مفتاح Supabase Anon Key غير صالح'), 'Invalid key must notify about anon key');
+});
+

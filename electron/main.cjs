@@ -41,7 +41,7 @@ const CONTENT_SECURITY_POLICY = [
   "font-src 'self' data:",
   "img-src 'self' data: blob: https:",
   "media-src 'self' data: blob:",
-  "connect-src 'self' http://127.0.0.1:8420 ws://127.0.0.1:8420 https://mobpos.onrender.com https://accounts.google.com https://www.googleapis.com https://*.googleapis.com https://*.supabase.co wss://*.supabase.co",
+  "connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:* http://localhost:* ws://localhost:* https: wss:",
   "frame-src 'self' https://accounts.google.com",
 ].join('; ');
 

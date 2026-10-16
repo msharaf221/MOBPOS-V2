@@ -23,6 +23,7 @@ alter table public.mobpos_stores add column if not exists data jsonb not null de
 alter table public.mobpos_stores add column if not exists owner_id uuid default null;
 alter table public.mobpos_stores add column if not exists updated_at timestamptz not null default now();
 alter table public.mobpos_stores alter column owner_id drop not null;
+alter table public.mobpos_stores drop constraint if exists mobpos_stores_owner_id_fkey;
 alter table public.mobpos_stores replica identity full;
 
 create index if not exists mobpos_stores_tenant_idx
@@ -49,6 +50,7 @@ alter table public.mobpos_records add column if not exists updated_at timestampt
 alter table public.mobpos_records add column if not exists deleted_at timestamptz default null;
 alter table public.mobpos_records add column if not exists owner_id uuid default null;
 alter table public.mobpos_records alter column owner_id drop not null;
+alter table public.mobpos_records drop constraint if exists mobpos_records_owner_id_fkey;
 alter table public.mobpos_records replica identity full;
 
 create index if not exists mobpos_records_lookup_idx

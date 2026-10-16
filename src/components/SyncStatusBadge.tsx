@@ -9,10 +9,14 @@ import {
   Wifi,
   WifiOff,
   Zap,
+  Upload,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { useSyncEngine } from '../hooks/useSyncEngine';
 import { syncEngine } from '../services/SyncEngine';
 import { formatDate } from '../utils/format';
+import { SUPABASE_SCHEMA_SQL } from '../utils/supabaseSchemaSql';
 
 interface SyncStatusBadgeProps {
   onOpenSettings?: () => void;
@@ -29,10 +33,14 @@ export default function SyncStatusBadge({ onOpenSettings }: SyncStatusBadgeProps
     clientId,
     isRealtimeConnected,
     triggerSyncNow,
+    pushAllSnapshots,
   } = useSyncEngine();
 
   const [isOpen, setIsOpen] = useState(false);
   const [isManualSyncing, setIsManualSyncing] = useState(false);
+  const [isUploadingSnapshot, setIsUploadingSnapshot] = useState(false);
+  const [actionFeedback, setActionFeedback] = useState<string | null>(null);
+  const [copiedSql, setCopiedSql] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
 
   // Close popover when clicking outside
@@ -50,10 +58,41 @@ export default function SyncStatusBadge({ onOpenSettings }: SyncStatusBadgeProps
 
   const handleManualSync = async () => {
     setIsManualSyncing(true);
+    setActionFeedback(null);
     try {
-      await triggerSyncNow();
+      const res = await triggerSyncNow();
+      if (res?.error) {
+        setActionFeedback(`تنبيه: ${res.error}`);
+      } else {
+        setActionFeedback('تمت المزامنة اللحظية ورفع اللقطة بنجاح ✅');
+      }
+    } catch (err) {
+      setActionFeedback(err instanceof Error ? err.message : 'فشلت المزامنة');
     } finally {
       setIsManualSyncing(false);
+    }
+  };
+
+  const handleSnapshotUpload = async () => {
+    setIsUploadingSnapshot(true);
+    setActionFeedback(null);
+    try {
+      const count = await pushAllSnapshots();
+      setActionFeedback(`تم رفع لقطة شاملة (${count} مخزن) للسحابة بنجاح ✅`);
+    } catch (err) {
+      setActionFeedback(err instanceof Error ? err.message : 'فشل رفع اللقطة');
+    } finally {
+      setIsUploadingSnapshot(false);
+    }
+  };
+
+  const handleCopySql = async () => {
+    try {
+      await navigator.clipboard.writeText(SUPABASE_SCHEMA_SQL);
+      setCopiedSql(true);
+      setTimeout(() => setCopiedSql(false), 2500);
+    } catch {
+      // ignore
     }
   };
 
@@ -116,12 +155,12 @@ export default function SyncStatusBadge({ onOpenSettings }: SyncStatusBadgeProps
 
   return (
     <div className="relative" ref={popoverRef}>
-      {/* Trigger Button */}
+      {/* Trigger Button with smooth transition */}
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
         aria-label="حالة المزامنة السحابية"
-        className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-medium transition-all ${config.bg} ${config.border} hover:shadow-sm`}
+        className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-medium transition-all duration-300 ease-in-out ${config.bg} ${config.border} hover:shadow-sm select-none cursor-pointer`}
       >
         <span className="relative flex h-2 w-2">
           {status === 'syncing' && (
@@ -148,7 +187,7 @@ export default function SyncStatusBadge({ onOpenSettings }: SyncStatusBadgeProps
 
       {/* Details Popover */}
       {isOpen && (
-        <div className="absolute left-0 mt-2 w-80 sm:w-88 bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700 z-50 p-4 animate-in fade-in zoom-in-95 duration-150">
+        <div className="absolute left-0 mt-2 w-80 sm:w-92 bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700 z-50 p-4 animate-in fade-in zoom-in-95 duration-150">
           {/* Header */}
           <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-gray-700">
             <div className="flex items-center gap-2">
@@ -164,27 +203,41 @@ export default function SyncStatusBadge({ onOpenSettings }: SyncStatusBadgeProps
 
           {/* Error banner if present */}
           {errorMessage && status === 'error' && (
-            <div className="mt-3 p-2.5 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/50 text-xs text-red-700 dark:text-red-300">
-              <p className="font-medium flex items-center gap-1">
-                <AlertCircle size={14} className="shrink-0" />
-                {errorMessage.includes('Expected 3 parts in JWT')
-                  ? 'خطأ بتنسيق التوكن: تم إدخال رمز غير متوافق (مثل Personal Access Token).'
-                  : errorMessage}
-              </p>
-              {errorMessage.includes('Expected 3 parts in JWT') && (
+            <div className="mt-3 p-3 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/50 text-xs text-red-700 dark:text-red-300 space-y-2">
+              <div className="flex items-start gap-1.5">
+                <AlertCircle size={15} className="shrink-0 mt-0.5 text-red-600 dark:text-red-400" />
+                <p className="font-medium leading-relaxed">{errorMessage}</p>
+              </div>
+
+              {(errorMessage.includes('SQL') || errorMessage.includes('جداول')) && (
                 <button
                   type="button"
-                  onClick={() => {
-                    syncEngine.saveConfig({ accessToken: undefined });
-                    syncEngine.reconnect();
-                    void syncEngine.triggerDrain();
-                  }}
-                  className="mt-2 w-full py-1.5 px-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition shadow-sm"
+                  onClick={handleCopySql}
+                  className="w-full py-1.5 px-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition shadow-sm"
                 >
-                  <Zap size={13} />
-                  إصلاح فوري (الاعتماد على Anon Key فقط)
+                  {copiedSql ? <Check size={13} /> : <Copy size={13} />}
+                  {copiedSql ? 'تم نسخ كود SQL المحدث بنجاح ✅' : 'نسخ كود SQL لتشغيله في Supabase'}
                 </button>
               )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  syncEngine.reconnect();
+                  void syncEngine.triggerDrain(true);
+                }}
+                className="w-full py-1 px-2 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 rounded-lg text-[11px] font-medium flex items-center justify-center gap-1.5 transition"
+              >
+                <RefreshCw size={12} />
+                إعادة المحاولة فوراً
+              </button>
+            </div>
+          )}
+
+          {/* Action Feedback message */}
+          {actionFeedback && (
+            <div className="mt-3 p-2.5 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 text-[11px] font-medium text-blue-700 dark:text-blue-300">
+              {actionFeedback}
             </div>
           )}
 
@@ -244,11 +297,21 @@ export default function SyncStatusBadge({ onOpenSettings }: SyncStatusBadgeProps
             <button
               type="button"
               onClick={handleManualSync}
-              disabled={isManualSyncing || !isOnline || status === 'disabled'}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium text-xs transition"
+              disabled={isManualSyncing || isUploadingSnapshot || !isOnline || status === 'disabled'}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium text-xs transition shadow-sm cursor-pointer"
             >
               <RefreshCw size={13} className={isManualSyncing ? 'animate-spin' : ''} />
-              مزامنة الآن
+              مزامنة ورفع لقطة الآن
+            </button>
+
+            <button
+              type="button"
+              onClick={handleSnapshotUpload}
+              disabled={isManualSyncing || isUploadingSnapshot || !isOnline || status === 'disabled'}
+              className="p-2 rounded-xl bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 transition cursor-pointer"
+              title="رفع لقطة شاملة للمخازن (Snapshot)"
+            >
+              <Upload size={15} className={isUploadingSnapshot ? 'animate-bounce' : ''} />
             </button>
 
             {onOpenSettings && (
@@ -258,7 +321,7 @@ export default function SyncStatusBadge({ onOpenSettings }: SyncStatusBadgeProps
                   setIsOpen(false);
                   onOpenSettings();
                 }}
-                className="p-2 rounded-xl bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 transition"
+                className="p-2 rounded-xl bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 transition cursor-pointer"
                 title="إعدادات المزامنة"
               >
                 <SettingsIcon size={16} />

@@ -52,8 +52,8 @@ const CFG_AUTO_SYNC = 'mobpos_sync_auto_enabled';
 const CFG_CLIENT_ID = 'mobpos_device_client_id';
 
 const BATCH_SIZE = 50;
-const INITIAL_BACKOFF_MS = 1500;
-const MAX_BACKOFF_MS = 30000;
+const INITIAL_BACKOFF_MS = 5000;
+const MAX_BACKOFF_MS = 60000;
 const SYNCABLE_STORES = new Set(
   Object.values(indexedDBUtils.STORES).filter(
     s =>
@@ -76,6 +76,9 @@ class SyncEngine {
   private storeDispatcher: StoreDispatcher | null = null;
 
   private isDraining = false;
+  private isUserTriggeredSync = false;
+  private isBackgroundRetrying = false;
+  private consecutiveErrors = 0;
   private backoffMs = INITIAL_BACKOFF_MS;
   private drainTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -303,12 +306,12 @@ class SyncEngine {
     // Runs silent check every 30s to drain pending records and auto-push fresh snapshot
     this.heartbeatTimer = setInterval(() => {
       if (this.state.isOnline && this.state.status !== 'disabled') {
-        if (this.state.pendingCount > 0 && !this.isDraining) {
-          void this.triggerDrain();
+        if (this.state.pendingCount > 0 && !this.isDraining && this.consecutiveErrors < 5) {
+          void this.triggerDrain(false);
         }
 
         // Auto-refresh snapshot every 3 minutes silently so mobpos_stores is never stale
-        if (Date.now() - this.lastAutoSnapshotTime > 180000 && !this.isDraining) {
+        if (Date.now() - this.lastAutoSnapshotTime > 180000 && !this.isDraining && this.consecutiveErrors < 3) {
           void this.autoPushSnapshotInBackground();
         }
       }
@@ -380,6 +383,26 @@ class SyncEngine {
     return !checkLicenseExpired(this.activeLicense.expiresAt, this.activeLicense.lifetime);
   }
 
+  public formatFriendlyErrorMessage(rawMsg: string): string {
+    const lower = rawMsg.toLowerCase();
+    if (lower.includes('does not exist') || lower.includes('42p01') || lower.includes('relation "public.mobpos_')) {
+      return 'جداول المزامنة غير موجودة في قاعدة بيانات Supabase. اضغط على أيقونة الإعدادات وانسخ كود SQL لتشغيله في Supabase SQL Editor.';
+    }
+    if (lower.includes('row-level security') || lower.includes('rls') || lower.includes('permission denied')) {
+      return 'صلاحيات المزامنة مقيدة (RLS). يُرجى تشغيل كود SQL المحدث من الإعدادات لفتح الصلاحيات.';
+    }
+    if (lower.includes('failed to fetch') || lower.includes('networkerror') || lower.includes('econnrefused') || lower.includes('abort')) {
+      return 'تعذر الاتصال بخادم Supabase. تحقق من اتصال الإنترنت أو صحة الرابط.';
+    }
+    if (lower.includes('invalid api key') || lower.includes('apikey') || lower.includes('no api key')) {
+      return 'مفتاح Supabase Anon Key غير صالح. يُرجى مراجعته في الإعدادات.';
+    }
+    if (lower.includes('expected 3 parts in jwt') || lower.includes('invalid jwt') || lower.includes('jwt expired') || lower.includes('pgrst301')) {
+      return 'انتهت صلاحية جلسة الدخول. جرى التبديل تلقائياً للعمل عبر مفتاح Anon.';
+    }
+    return rawMsg;
+  }
+
   private evaluateStatus(): void {
     const isConfigured = Boolean(
       this.config.url &&
@@ -391,10 +414,12 @@ class SyncEngine {
       this.state.status = 'disabled';
     } else if (!this.state.isOnline) {
       this.state.status = 'offline';
-    } else if (this.isDraining) {
+    } else if (this.isDraining && (this.isUserTriggeredSync || !this.isBackgroundRetrying)) {
       this.state.status = 'syncing';
     } else if (this.state.errorMessage) {
       this.state.status = 'error';
+    } else if (this.isDraining) {
+      this.state.status = 'syncing';
     } else {
       this.state.status = 'synced';
     }
@@ -403,8 +428,11 @@ class SyncEngine {
 
   private handleOnline = (): void => {
     this.state.isOnline = true;
+    this.consecutiveErrors = 0;
+    this.isBackgroundRetrying = false;
+    this.backoffMs = INITIAL_BACKOFF_MS;
     this.evaluateStatus();
-    void this.triggerDrain();
+    void this.triggerDrain(false);
     this.setupRealtimeSubscription();
   };
 
@@ -440,29 +468,32 @@ class SyncEngine {
           autoRefreshToken: true,
           detectSessionInUrl: false,
         },
-        global: {
-          headers: validToken
-            ? { Authorization: `Bearer ${validToken}` }
-            : {},
-        },
       });
 
-      // If we have an existing session token, configure it
+      // If we have an existing session token, configure it via auth.setSession
       if (validToken && this.config.refreshToken) {
         void this.supabase.auth.setSession({
           access_token: validToken,
           refresh_token: this.config.refreshToken,
-        }).catch(err => console.warn('[SyncEngine] setSession failed:', err));
+        }).catch(err => {
+          console.warn('[SyncEngine] setSession failed, resetting to clean anon:', err);
+          this.config.accessToken = undefined;
+          this.config.refreshToken = undefined;
+          if (typeof localStorage !== 'undefined') {
+            localStorage.removeItem(CFG_ACCESS_TOKEN);
+            localStorage.removeItem(CFG_REFRESH_TOKEN);
+          }
+        });
       }
 
       this.setupRealtimeSubscription();
       this.evaluateStatus();
       if (this.state.isOnline) {
-        void this.triggerDrain();
+        void this.triggerDrain(false);
       }
     } catch (err) {
       console.error('[SyncEngine] Client init failed:', err);
-      this.state.errorMessage = err instanceof Error ? err.message : 'فشل إعداد عميل Supabase';
+      this.state.errorMessage = err instanceof Error ? this.formatFriendlyErrorMessage(err.message) : 'فشل إعداد عميل Supabase';
       this.evaluateStatus();
     }
   }
@@ -567,6 +598,9 @@ class SyncEngine {
     if (!this.supabase || !this.state.isOnline || !this.config.autoSyncEnabled || this.isDraining) {
       return;
     }
+    if (this.consecutiveErrors >= 3) {
+      return;
+    }
 
     try {
       console.info('[SyncEngine] Background Auto-Snapshot: pushing full stores to mobpos_stores...');
@@ -636,7 +670,8 @@ class SyncEngine {
 
       // Trigger background drain if online
       if (this.state.isOnline && this.state.status !== 'disabled') {
-        void this.triggerDrain();
+        this.consecutiveErrors = 0;
+        void this.triggerDrain(false);
       }
     } catch (err) {
       console.error('[SyncEngine] Failed to save to outbox:', err);
@@ -682,7 +717,45 @@ class SyncEngine {
   // Outbox Drainage Worker (Push to Supabase)
   // ------------------------------------------------------------
 
-  public async triggerDrain(): Promise<void> {
+  public async drainOutboxInternal(): Promise<void> {
+    while (true) {
+      const items = await indexedDBUtils.getAll<OutboxItem>(indexedDBUtils.STORES.syncOutbox);
+      if (items.length === 0) {
+        break;
+      }
+
+      const batch = items.slice(0, BATCH_SIZE);
+      const rows: SyncRecordRow[] = batch.map(it => ({
+        tenant_id: it.tenantId,
+        store: it.store,
+        record_id: it.recordId,
+        data: it.action === 'upsert' ? (it.data || {}) : {},
+        version: 1,
+        client_id: it.clientId,
+        updated_at: it.clientUpdatedAt,
+        deleted_at: it.action === 'delete' ? it.clientUpdatedAt : null,
+      }));
+
+      if (!this.supabase) throw new Error('عميل Supabase غير مهيأ');
+      const { error } = await this.supabase
+        .from('mobpos_records')
+        .upsert(rows, { onConflict: 'tenant_id,store,record_id' });
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      // Successfully uploaded batch: remove from IndexedDB outbox
+      for (const it of batch) {
+        await indexedDBUtils.remove(indexedDBUtils.STORES.syncOutbox, it.id);
+      }
+
+      this.state.pendingCount = items.length - batch.length;
+      this.emitState();
+    }
+  }
+
+  public async triggerDrain(isUserTriggered = false): Promise<void> {
     if (this.isDraining) return;
     if (!this.state.isOnline || !this.supabase) {
       this.evaluateStatus();
@@ -693,75 +766,68 @@ class SyncEngine {
       return;
     }
 
+    if (isUserTriggered) {
+      this.isUserTriggeredSync = true;
+      this.isBackgroundRetrying = false;
+      this.consecutiveErrors = 0;
+      this.state.errorMessage = null;
+      if (this.drainTimer) {
+        clearTimeout(this.drainTimer);
+        this.drainTimer = null;
+      }
+    }
+
     this.isDraining = true;
     this.evaluateStatus();
 
     try {
-      while (true) {
-        const items = await indexedDBUtils.getAll<OutboxItem>(indexedDBUtils.STORES.syncOutbox);
-        if (items.length === 0) {
-          this.state.errorMessage = null;
-          this.backoffMs = INITIAL_BACKOFF_MS;
-          await this.saveLastSyncedTime(new Date());
-          break;
-        }
+      await this.drainOutboxInternal();
 
-        const batch = items.slice(0, BATCH_SIZE);
-        const rows: SyncRecordRow[] = batch.map(it => ({
-          tenant_id: it.tenantId,
-          store: it.store,
-          record_id: it.recordId,
-          data: it.action === 'upsert' ? (it.data || {}) : {},
-          version: 1,
-          client_id: it.clientId,
-          updated_at: it.clientUpdatedAt,
-          deleted_at: it.action === 'delete' ? it.clientUpdatedAt : null,
-        }));
-
-        // Send upsert to Supabase mobpos_records
-        const { error } = await this.supabase
-          .from('mobpos_records')
-          .upsert(rows, { onConflict: 'tenant_id,store,record_id' });
-
-        if (error) {
-          throw new Error(error.message);
-        }
-
-        // Successfully uploaded batch: remove from IndexedDB outbox
-        for (const it of batch) {
-          await indexedDBUtils.remove(indexedDBUtils.STORES.syncOutbox, it.id);
-        }
-
-        this.state.pendingCount = items.length - batch.length;
-        this.emitState();
-      }
+      // Successfully drained
+      this.state.errorMessage = null;
+      this.consecutiveErrors = 0;
+      this.isBackgroundRetrying = false;
+      this.backoffMs = INITIAL_BACKOFF_MS;
+      await this.saveLastSyncedTime(new Date());
     } catch (err) {
       console.warn('[SyncEngine] Drain failed, backing off:', err);
       const rawMsg = err instanceof Error ? err.message : 'فشل رفع البيانات للسحابة';
 
-      // Auto-recovery: If JWT was malformed (e.g. Expected 3 parts in JWT; got 1),
-      // clear the invalid token from localStorage, reset client, and retry immediately with clean anonKey!
-      if (rawMsg.includes('Expected 3 parts in JWT') || rawMsg.includes('invalid JWT')) {
-        console.warn('[SyncEngine] Malformed JWT detected in request, purging token and switching to anon key');
+      // Auto-recovery: If JWT was malformed or expired
+      if (
+        rawMsg.includes('Expected 3 parts in JWT') ||
+        rawMsg.includes('invalid JWT') ||
+        rawMsg.includes('JWT expired') ||
+        rawMsg.includes('PGRST301')
+      ) {
+        console.warn('[SyncEngine] Malformed or expired JWT detected, purging token and switching to anon key');
         if (typeof localStorage !== 'undefined') {
           localStorage.removeItem(CFG_ACCESS_TOKEN);
+          localStorage.removeItem(CFG_REFRESH_TOKEN);
         }
         this.config.accessToken = undefined;
+        this.config.refreshToken = undefined;
         this.state.errorMessage = null;
         this.reconnect();
         return;
       }
 
-      this.state.errorMessage = rawMsg;
-      // Schedule exponential retry
+      this.consecutiveErrors++;
+      this.isBackgroundRetrying = true;
+      this.state.errorMessage = this.formatFriendlyErrorMessage(rawMsg);
+
+      // Schedule exponential retry (max 5 consecutive automatic bursts)
       if (this.drainTimer) clearTimeout(this.drainTimer);
-      this.drainTimer = setTimeout(() => {
-        this.drainTimer = null;
-        void this.triggerDrain();
-      }, this.backoffMs);
-      this.backoffMs = Math.min(this.backoffMs * 2, MAX_BACKOFF_MS);
+      if (this.consecutiveErrors < 5) {
+        this.drainTimer = setTimeout(() => {
+          this.drainTimer = null;
+          void this.triggerDrain(false);
+        }, this.backoffMs);
+        this.backoffMs = Math.min(this.backoffMs * 1.5, MAX_BACKOFF_MS);
+      }
     } finally {
       this.isDraining = false;
+      this.isUserTriggeredSync = false;
       await this.refreshOutboxCount();
       this.evaluateStatus();
     }
@@ -912,31 +978,132 @@ class SyncEngine {
   /** Push full store snapshots to mobpos_stores table */
   public async pushAllSnapshots(): Promise<number> {
     if (!this.supabase) throw new Error('عميل Supabase غير مهيأ');
+    if (!this.state.isOnline) throw new Error('لا يوجد اتصال بالإنترنت');
     await indexedDBUtils.flushPendingWrites();
 
     const tenantId = this.state.tenantId;
     let count = 0;
 
-    for (const store of SYNCABLE_STORES) {
-      const data = await indexedDBUtils.getAll(store);
-      const { error } = await this.supabase
-        .from('mobpos_stores')
-        .upsert(
-          {
-            tenant_id: tenantId,
-            store,
-            data,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: 'tenant_id,store' }
-        );
+    // Prioritize essential business stores
+    const CORE_STORES = [
+      'users',
+      'categories',
+      'inventory',
+      'imeiUnits',
+      'sales',
+      'safes',
+      'transactions',
+      'customers',
+      'maintenance',
+      'suppliers',
+      'purchases',
+    ];
 
-      if (error) throw new Error(`فشل رفع لقطة "${store}": ${error.message}`);
-      count++;
+    const allStores = Array.from(SYNCABLE_STORES);
+    const sortedStores = [
+      ...CORE_STORES.filter(s => SYNCABLE_STORES.has(s)),
+      ...allStores.filter(s => !CORE_STORES.includes(s)),
+    ];
+
+    for (const store of sortedStores) {
+      try {
+        const rawData = await indexedDBUtils.getAll(store);
+        const data = Array.isArray(rawData) ? rawData : [];
+
+        const { error } = await this.supabase
+          .from('mobpos_stores')
+          .upsert(
+            {
+              tenant_id: tenantId,
+              store,
+              data,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: 'tenant_id,store' }
+          );
+
+        if (error) {
+          if (CORE_STORES.includes(store)) {
+            throw new Error(`فشل رفع لقطة "${store}": ${this.formatFriendlyErrorMessage(error.message)}`);
+          } else {
+            console.warn(`[SyncEngine] Non-core store snapshot notice for "${store}":`, error.message);
+            continue;
+          }
+        }
+        count++;
+      } catch (storeErr) {
+        if (CORE_STORES.includes(store)) {
+          throw storeErr;
+        }
+        console.warn(`[SyncEngine] Skipped non-core store "${store}":`, storeErr);
+      }
     }
 
     await this.saveLastSyncedTime(new Date());
     return count;
+  }
+
+  /**
+   * Comprehensive manual sync:
+   * Drains all pending delta records, pulls latest remote changes, and uploads a fresh snapshot to mobpos_stores.
+   */
+  public async syncNow(): Promise<{
+    outboxDrained: boolean;
+    snapshotPushed: boolean;
+    catchUpCount: number;
+    error?: string;
+  }> {
+    if (!this.config.url || !this.config.anonKey) {
+      return { outboxDrained: false, snapshotPushed: false, catchUpCount: 0, error: 'أدخل رابط ومفتاح Supabase أولاً' };
+    }
+    if (!this.state.isOnline) {
+      return { outboxDrained: false, snapshotPushed: false, catchUpCount: 0, error: 'لا يوجد اتصال بالإنترنت' };
+    }
+
+    this.consecutiveErrors = 0;
+    this.isBackgroundRetrying = false;
+    this.state.errorMessage = null;
+    this.isUserTriggeredSync = true;
+    this.isDraining = true;
+    this.evaluateStatus();
+
+    let outboxDrained = false;
+    let snapshotPushed = false;
+    let catchUpCount = 0;
+    let errorMsg: string | undefined;
+
+    try {
+      // 1. Drain pending deltas from outbox
+      await this.drainOutboxInternal();
+      outboxDrained = true;
+
+      // 2. Pull remote catch-up
+      catchUpCount = await this.pullCatchUp();
+
+      // 3. Push full snapshot
+      await this.pushAllSnapshots();
+      snapshotPushed = true;
+
+      this.state.errorMessage = null;
+      await this.saveLastSyncedTime(new Date());
+    } catch (err) {
+      console.error('[SyncEngine] syncNow failed:', err);
+      const raw = err instanceof Error ? err.message : 'فشلت المزامنة';
+      errorMsg = this.formatFriendlyErrorMessage(raw);
+      this.state.errorMessage = errorMsg;
+    } finally {
+      this.isDraining = false;
+      this.isUserTriggeredSync = false;
+      await this.refreshOutboxCount();
+      this.evaluateStatus();
+    }
+
+    return {
+      outboxDrained,
+      snapshotPushed,
+      catchUpCount,
+      error: errorMsg,
+    };
   }
 
   /** Pull full store snapshots from mobpos_stores table and replace local stores */
