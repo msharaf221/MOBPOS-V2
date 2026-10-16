@@ -8,9 +8,12 @@ import {
   Loader2,
   Trash2,
   Save,
+  Copy,
+  Database,
 } from 'lucide-react';
 import type { BranchConfig } from '../types';
 import { createClient } from '@supabase/supabase-js';
+import { SUPABASE_SCHEMA_SQL } from '../utils/supabaseSchemaSql';
 
 const COLOR_PRESETS = [
   '#06b6d4', // Cyan
@@ -50,6 +53,7 @@ export const BranchEditModal: React.FC<BranchEditModalProps> = ({
 
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [copiedSql, setCopiedSql] = useState(false);
 
   const handleTestConnection = async () => {
     if (!supabaseUrl.trim() || !supabaseAnonKey.trim()) {
@@ -299,6 +303,24 @@ export const BranchEditModal: React.FC<BranchEditModalProps> = ({
                   <span>{testResult.msg}</span>
                 </div>
               )}
+
+              {/* Quick Copy Supabase SQL button */}
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(SUPABASE_SCHEMA_SQL);
+                    setCopiedSql(true);
+                    setTimeout(() => setCopiedSql(false), 2500);
+                  } catch {
+                    alert('تم نسخ الكود');
+                  }
+                }}
+                className="w-full mt-2 py-2 px-3 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 font-bold text-[11px] flex items-center justify-center gap-1.5 transition border border-cyan-500/25 active:scale-95"
+              >
+                {copiedSql ? <CheckCircle2 size={13} className="text-emerald-400" /> : <Copy size={13} />}
+                <span>{copiedSql ? 'تم نسخ كود SQL بنجاح ✅' : '📋 نسخ كود تهيئة Supabase SQL'}</span>
+              </button>
             </div>
           </div>
         </div>

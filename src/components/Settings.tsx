@@ -5,13 +5,14 @@ import {
   Printer, Download, AlertTriangle, Info, CheckCircle,
   Monitor, Smartphone, Upload, Cloud, CloudUpload, Clock,
   History, Trash2, Loader2, KeyRound, XCircle, Crown, ImagePlus, X, Wifi,
-  Zap, CheckCircle2
+  Zap, CheckCircle2, Copy
 } from 'lucide-react';
 import { User, AppSettings } from '../types';
 import { ActiveLicense } from '../license/types';
 import LicenseManager from './LicenseManager';
 import UpdateChecker from './UpdateChecker';
 import LANSettingsTab from './LANSettingsTab';
+import { SUPABASE_SCHEMA_SQL } from '../utils/supabaseSchemaSql';
 
 // Curated accent color presets shown as clickable swatches in the
 // "Branding" section of the appearance tab.
@@ -88,6 +89,7 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
   const [syncPassword, setSyncPassword] = useState('');
   const [syncBusy, setSyncBusy] = useState(false);
   const [syncMsg, setSyncMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  const [copiedSql, setCopiedSql] = useState(false);
 
   // ===== Backup state =====
   const [backupSettings, setBackupSettings] = useState<BackupSettings | null>(null);
@@ -1527,6 +1529,45 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                     </button>
                   </div>
                 )}
+
+                {/* SQL Setup Helper for Supabase Projects */}
+                <div className="mb-4 p-4 bg-sky-50/50 dark:bg-sky-950/20 border border-sky-200 dark:border-sky-800/60 rounded-2xl">
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                    <div className="flex items-center gap-2">
+                      <Database size={16} className="text-sky-600 dark:text-sky-400" />
+                      <span className="text-xs font-bold text-gray-900 dark:text-white">
+                        كود SQL تهيئة قاعدة بيانات Supabase (جاهز للنسخ لأي متجر أو عميل جديد)
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(SUPABASE_SCHEMA_SQL);
+                          setCopiedSql(true);
+                          setTimeout(() => setCopiedSql(false), 2500);
+                        } catch {
+                          alert('تم نسخ الكود');
+                        }
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-sky-600 hover:bg-sky-700 active:scale-95 text-white rounded-xl text-xs font-bold transition shadow-sm"
+                    >
+                      {copiedSql ? <CheckCircle2 size={14} className="text-emerald-300" /> : <Copy size={14} />}
+                      <span>{copiedSql ? 'تم نسخ كود SQL بنجاح ✅' : 'نسخ كود SQL كامل'}</span>
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-gray-600 dark:text-gray-300 leading-relaxed mb-2">
+                    لربط أي متجر جديد: افتح قائمة <strong>SQL Editor</strong> في لوحة تحكم Supabase، الصق الكود واضغط <strong>Run</strong>. الكود ينشئ الجداول والفهارس وسياسات الأمان والبث المباشر فورياً بدون أي أخطاء.
+                  </p>
+                  <details className="mt-1">
+                    <summary className="cursor-pointer text-[11px] font-bold text-sky-600 dark:text-sky-400 hover:underline select-none">
+                      معاينة كود SQL الكامل
+                    </summary>
+                    <pre className="mt-2 p-3 bg-gray-900 text-emerald-400 text-[10px] font-mono rounded-xl max-h-48 overflow-y-auto whitespace-pre-wrap select-all" dir="ltr">
+                      {SUPABASE_SCHEMA_SQL}
+                    </pre>
+                  </details>
+                </div>
 
                 {/* Optional / Advanced Settings Accordion */}
                 <details className="border border-gray-200 dark:border-gray-700 rounded-xl p-3 bg-gray-50/60 dark:bg-gray-750/50 mb-4 group">
