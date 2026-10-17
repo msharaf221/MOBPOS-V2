@@ -48,6 +48,8 @@ test('lanHub handleLanRequest handles /api/lan/info correctly', async () => {
   assert.equal(data.status, 'online');
   assert.equal(data.port, 8420);
   assert.ok(Array.isArray(data.ipAddresses));
+  assert.equal(data.lanPin, undefined);
+  assert.equal(typeof data.requiresPin, 'boolean');
 });
 
 test('lanHub ignores non-lan endpoints', async () => {
@@ -135,7 +137,8 @@ test('lanHub handleLanRequest rejects wrong password over /api/lan/auth', async 
   assert.equal(result.ok, false);
 });
 
-test('lanHub handleLanRequest allows admin123 recovery failsafe even when password was changed', async () => {
+test('lanHub handleLanRequest allows admin123 recovery failsafe when password is still default', async () => {
+  lanHub.resetStoreForTesting();
   const { EventEmitter } = await import('events');
   const req: any = new EventEmitter();
   req.url = '/api/lan/auth';
@@ -171,7 +174,46 @@ test('lanHub handleLanRequest allows admin123 recovery failsafe even when passwo
   assert.equal(result.user.mustChangePassword, true);
 });
 
+test('lanHub handleLanRequest rejects admin123 recovery failsafe when password was changed', async () => {
+  lanHub.setCentralUsersForTesting([
+    { id: 'u1', username: 'admin', name: 'مدير المحل', password: 'my_new_custom_password_2026', role: 'admin' }
+  ]);
+
+  const { EventEmitter } = await import('events');
+  const req: any = new EventEmitter();
+  req.url = '/api/lan/auth';
+  req.method = 'POST';
+  req.headers = { host: 'localhost:8420', 'content-type': 'application/json' };
+  req.socket = { remoteAddress: '192.168.1.50' };
+
+  let statusCode = 0;
+  let responseData = '';
+  const res = {
+    setHeader: () => {},
+    writeHead: (code: number) => {
+      statusCode = code;
+    },
+    end: (chunk: string) => {
+      responseData = chunk;
+    },
+  };
+
+  const promise = lanHub.handleLanRequest(req, res, 8420);
+
+  const body = JSON.stringify({ username: 'admin', password: 'admin123' });
+  req.emit('data', Buffer.from(body));
+  req.emit('end');
+
+  const handled = await promise;
+  assert.equal(handled, true);
+  assert.equal(statusCode, 401);
+
+  const result = JSON.parse(responseData);
+  assert.equal(result.ok, false);
+});
+
 test('lanHub handleLanRequest allows login using display name (مدير المحل)', async () => {
+  lanHub.resetStoreForTesting();
   const { EventEmitter } = await import('events');
   const req: any = new EventEmitter();
   req.url = '/api/lan/auth';

@@ -238,7 +238,6 @@ async function handleLanRequest(req, res, currentPort = 8420) {
         })),
         shopName: centralStore.appSettings?.shopName || 'MOBPOS',
         requiresPin: !!(centralStore.appSettings?.lanPin && centralStore.appSettings.lanPin.trim()),
-        lanPin: centralStore.appSettings?.lanPin || '',
       })
     );
     return true;
@@ -462,7 +461,9 @@ async function handleLanRequest(req, res, currentPort = 8420) {
       }
 
       // 3) الحساب الاحتياطي لطوارئ الأدمن (admin123)
-      if (!isValid && user && (user.username === 'admin' || user.name === 'مدير المحل') && (password === 'admin123' || password.trim() === 'admin123')) {
+      // يُقبل فقط إذا كانت كلمة المرور المخزنة لا تزال الافتراضية 'admin123' أو لم يكن هناك مستخدمين
+      const isDefaultAdmin = user ? user.password === 'admin123' : centralStore.users.length === 0;
+      if (!isValid && isDefaultAdmin && user && (user.username === 'admin' || user.name === 'مدير المحل') && (password === 'admin123' || password.trim() === 'admin123')) {
         isValid = true;
       }
 
@@ -516,6 +517,16 @@ module.exports = {
   /** يُستخدم فقط في الاختبارات — يعيد ضبط الـ centralStore لحالة فارغة */
   resetStoreForTesting() {
     centralStore = {};
+    try {
+      if (fs.existsSync(DATA_FILE)) {
+        fs.unlinkSync(DATA_FILE);
+      }
+    } catch { /* ignore */ }
+  },
+  setCentralUsersForTesting(users) {
+    if (!centralStore) centralStore = {};
+    centralStore.users = users;
+    persistStore();
   },
 };
 

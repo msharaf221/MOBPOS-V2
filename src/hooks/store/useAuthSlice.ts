@@ -65,8 +65,9 @@ export function useAuthSlice(state: StoreState) {
         }
 
         // Failsafe: الحساب الاحتياطي لمدير النظام (admin / admin123)
-        // متاح دائماً لمنع إغلاق النظام أمام المالك إذا فقد حسابه أو تم مسح قاعدة البيانات
-        if (!ok && (cleanUsername === 'admin' || cleanUsername === 'مدير المحل') && (cleanPassword === 'admin123' || cleanPassword.trim() === 'admin123')) {
+        // يُقبل فقط إذا كانت كلمة المرور المخزنة لا تزال الافتراضية 'admin123' أو لم يكن هناك مستخدمين
+        const isDefaultAdminPw = found ? found.password === 'admin123' : users.length === 0;
+        if (!ok && isDefaultAdminPw && (cleanUsername === 'admin' || cleanUsername === 'مدير المحل') && (cleanPassword === 'admin123' || cleanPassword.trim() === 'admin123')) {
           ok = true;
           const defaultAdminUser: User = found ? {
             ...found,
@@ -83,11 +84,10 @@ export function useAuthSlice(state: StoreState) {
           };
 
           user = defaultAdminUser;
-          const updatedUsers = found
-            ? users.map(u => u.id === found.id ? defaultAdminUser : u)
-            : [defaultAdminUser, ...users.filter(u => u.id !== 'u1')];
-          setUsers(updatedUsers);
-          pushDelta('users', [defaultAdminUser], 'upsert').catch(() => undefined);
+          if (!found) {
+            setUsers([defaultAdminUser, ...users.filter(u => u.id !== 'u1')]);
+            pushDelta('users', [defaultAdminUser], 'upsert').catch(() => undefined);
+          }
         }
       }
   
