@@ -30,21 +30,26 @@ export const LICENSE_PUBLIC_KEY: JsonWebKey = {
 export const ACTIVATION_SERVER_URL: string = 'https://mobpos.onrender.com';
 
 /**
- * توكن عميل سيرفر التفعيل (اختياري) — يطابق ACTIVATION_TOKEN على السيرفر (لحماية /activate و /verify).
+ * توكن عميل سيرفر التفعيل — يطابق ACTIVATION_TOKEN على السيرفر (لحماية /activate و /verify).
  *
  * ⚠️ ملاحظة أمنية هامة:
  * هذا التوكن يُوزّع مع كود العميل في المتصفح والـ EXE، لذا فهو ليس سراً إدارياً حقيقياً.
- * الأمان الفعلي لنظام التراخيص يعتمد على التوقيع الرقمي بالمفتاح غير القابل للتزوير (ECDSA P-256)
+ * الأمان الفعلي لنظام التراخيص يعتمد على التوقيع الرقمي (ECDSA P-256)
  * والربط العتادي بالجهاز (Machine Token + Device Fingerprint).
- * العمليات الإدارية الحساسة (/revoke و /release) محمية بـ ADMIN_TOKEN منفصل على السيرفر ولا توجد في كود العميل إطلاقاً.
+ * العمليات الإدارية (/revoke و /release) محمية بـ ADMIN_TOKEN على السيرفر فقط.
+ *
+ * يُفضّل حقنه وقت البناء عبر VITE_ACTIVATION_SERVER_TOKEN ولا تُثبّت سراً في المستودع.
  */
-export const ACTIVATION_SERVER_TOKEN: string = 'mobpos-act-2026-7f3Kp9Qz';
+export const ACTIVATION_SERVER_TOKEN: string =
+  (typeof import.meta !== 'undefined' &&
+    (import.meta as ImportMeta & { env?: Record<string, string> }).env?.VITE_ACTIVATION_SERVER_TOKEN) ||
+  '';
 
 // مفاتيح التخزين المحلي
 export const STORAGE_KEYS = {
   activeLicense: 'msp_active_license_v2',
   masterPasswordHash: 'msp_master_pw_v2',
-  signingKey: 'msp_signing_key_v2',   // المفتاح الخاص (في متصفح المالك فقط)
-  masterKeysList: 'msp_master_keys_v2', // سجل المفاتيح المولّدة (في متصفح المالك فقط)
-  lastServerVerify: 'msp_last_server_verify', // آخر إعادة تحقق مع سيرفر التفعيل (throttle)
+  signingKey: 'msp_signing_key_v2',
+  masterKeysList: 'msp_master_keys_v2',
+  lastServerVerify: 'msp_last_server_verify',
 };
