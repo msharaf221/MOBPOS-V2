@@ -1,8 +1,8 @@
 import { useCallback } from 'react';
 import { StoreState } from './types';
-import { validText, isFiniteNumber } from './helpers';
+import { validText, isFiniteNumber, denyUnlessRole } from './helpers';
 import { hashPasswordForStorage, verifyLoginPassword, needsRehash } from '../../utils/passwords';
-import { isLanClient, authenticateLanUser, pushDelta } from '../../utils/lanSync';
+import { isLanClient, authenticateLanUser, pushDelta, clearLanSession } from '../../utils/lanSync';
 import { auditEvents } from '../../utils/auditLogger';
 import { User, Supplier } from '../../types';
 
@@ -114,6 +114,7 @@ export function useAuthSlice(state: StoreState) {
   
 
     const logout = useCallback(() => {
+      clearLanSession();
       if (currentUser) {
         addAuditLog(auditEvents.authLogin(currentUser, currentUser.username, true));
       }
@@ -153,6 +154,11 @@ export function useAuthSlice(state: StoreState) {
   
 
     const updateUsers = useCallback((nextUsers: User[]) => {
+      const denied = denyUnlessRole(currentUser, 'admin', 'إدارة المستخدمين متاحة لمدير النظام فقط');
+      if (denied) {
+        console.warn(`[useAuthSlice] ${denied.error}`);
+        return;
+      }
       if (!Array.isArray(nextUsers) || nextUsers.length === 0) return;
       const ids = new Set<string>();
       const usernames = new Set<string>();

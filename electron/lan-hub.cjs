@@ -157,10 +157,75 @@ function readJsonBody(req, limit = 50 * 1024 * 1024) {
   });
 }
 
+// جلسات أجهزة الشبكة المصرح لها بالكتابة (12 ساعة صلاحية)
+const lanSessions = new Map(); // token -> { userId, username, role, createdAt, expiresAt }
+const LAN_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+
+function createLanSession(user) {
+  const token = `ls_${crypto.randomBytes(24).toString('hex')}`;
+  const now = Date.now();
+  lanSessions.set(token, {
+    userId: user?.id,
+    username: user?.username,
+    role: user?.role,
+    createdAt: now,
+    expiresAt: now + LAN_SESSION_TTL_MS,
+  });
+  return token;
+}
+
+function isLoopbackAddress(ip) {
+  if (!ip || typeof ip !== 'string') return false;
+  return (
+    ip === '127.0.0.1' ||
+    ip === '::1' ||
+    ip === '::ffff:127.0.0.1' ||
+    ip.startsWith('127.') ||
+    ip === 'localhost'
+  );
+}
+
+function extractLanToken(req) {
+  const authHeader = req.headers['authorization'];
+  if (authHeader && typeof authHeader === 'string') {
+    const match = authHeader.match(/^Bearer\s+(.+)$/i);
+    if (match) return match[1].trim();
+  }
+  const xSession = req.headers['x-lan-session'];
+  if (xSession && typeof xSession === 'string') {
+    return xSession.trim();
+  }
+  return null;
+}
+
+function verifyLanSession(req) {
+  const remoteIp = req.socket?.remoteAddress;
+  if (isLoopbackAddress(remoteIp)) {
+    return { ok: true, isLoopback: true };
+  }
+
+  const token = extractLanToken(req);
+  if (!token) {
+    return { ok: false, error: 'مطلوب رمز جلسة صالح (Session Token)' };
+  }
+
+  const session = lanSessions.get(token);
+  if (!session) {
+    return { ok: false, error: 'جلسة الشبكة غير صالحة أو منتهية' };
+  }
+
+  if (Date.now() > session.expiresAt) {
+    lanSessions.delete(token);
+    return { ok: false, error: 'انتهت صلاحية جلسة الشبكة' };
+  }
+
+  return { ok: true, session };
+}
+
 function setCorsHeaders(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Client-Id');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Client-Id, X-Lan-Session');
 }
 
 /**
@@ -280,6 +345,12 @@ async function handleLanRequest(req, res, currentPort = 8420) {
     }
 
     if (req.method === 'POST') {
+      const auth = verifyLanSession(req);
+      if (!auth.ok) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: auth.error }));
+        return true;
+      }
       try {
         const body = await readJsonBody(req);
         if (body && typeof body === 'object') {
@@ -306,6 +377,12 @@ async function handleLanRequest(req, res, currentPort = 8420) {
 
   // 4. مزامنة جزئية ذرية (Delta Sync)
   if (pathname === '/api/lan/sync' && req.method === 'POST') {
+    const auth = verifyLanSession(req);
+    if (!auth.ok) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: auth.error }));
+      return true;
+    }
     try {
       const payload = await readJsonBody(req);
       const { storeName, items, deltaType } = payload; // deltaType: 'upsert' | 'delete' | 'replace'
@@ -489,10 +566,13 @@ async function handleLanRequest(req, res, currentPort = 8420) {
           : !!(user.mustChangePassword || user.password === 'admin123' || password === 'admin123' || password.trim() === 'admin123'),
       };
 
+      const sessionToken = createLanSession(sessionUser);
+
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(
         JSON.stringify({
           ok: true,
+          sessionToken,
           user: sessionUser,
           users: centralStore.users,
         })
@@ -516,12 +596,16 @@ module.exports = {
   broadcast,
   /** يُستخدم فقط في الاختبارات — يعيد ضبط الـ centralStore لحالة فارغة */
   resetStoreForTesting() {
+    lanSessions.clear();
     centralStore = {};
     try {
       if (fs.existsSync(DATA_FILE)) {
         fs.unlinkSync(DATA_FILE);
       }
     } catch { /* ignore */ }
+  },
+  createLanSessionForTesting(user) {
+    return createLanSession(user);
   },
   setCentralUsersForTesting(users) {
     if (!centralStore) centralStore = {};

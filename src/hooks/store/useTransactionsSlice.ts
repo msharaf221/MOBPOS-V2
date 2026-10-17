@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { StoreState } from './types';
 import { StoreUpdates } from '../../services/types';
 import { useStoreDispatcher } from './useStoreDispatcher';
-import { validText, isFiniteNumber, roundMoney, MAX_TEXT_LENGTH } from './helpers';
+import { validText, isFiniteNumber, roundMoney, MAX_TEXT_LENGTH, denyUnlessRole } from './helpers';
 import { Transaction } from '../../types';
 
 export function useTransactionsSlice(state: StoreState) {
@@ -44,6 +44,9 @@ export function useTransactionsSlice(state: StoreState) {
 
     
     const deleteTransaction = useCallback((id: string): { ok: boolean; error?: string } => {
+      const denied = denyUnlessRole(currentUser, 'manager', 'حذف المعاملات متاح للمشرفين والمديرين فقط');
+      if (denied) return denied;
+
       const trans = transactions.find(t => t.id === id);
       if (!trans) return { ok: false, error: 'الحركة غير موجودة' };
       if (trans.type !== 'income' && trans.type !== 'expense') {
@@ -57,7 +60,7 @@ export function useTransactionsSlice(state: StoreState) {
       dispatch(updates);
       
       return { ok: true };
-    }, [transactions, dispatch]);
+    }, [currentUser, transactions, dispatch]);
 
   
 

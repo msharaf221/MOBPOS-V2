@@ -44,6 +44,47 @@ export function isLanClient(): boolean {
   return true;
 }
 
+const LAN_SESSION_STORAGE_KEY = 'mobpos_lan_session_token';
+
+/** الحصول على توكن جلسة الشبكة المخزن */
+export function getLanSessionToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return sessionStorage.getItem(LAN_SESSION_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/** حفظ توكن جلسة الشبكة بعد المصادقة الناجحة */
+export function saveLanSessionToken(token: string): void {
+  if (typeof window === 'undefined' || !token) return;
+  try {
+    sessionStorage.setItem(LAN_SESSION_STORAGE_KEY, token);
+  } catch {
+    // تجاهل في حالة القيود
+  }
+}
+
+/** مسح توكن جلسة الشبكة عند تسجيل الخروج */
+export function clearLanSession(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    sessionStorage.removeItem(LAN_SESSION_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+function getLanAuthHeaders(): Record<string, string> {
+  const token = getLanSessionToken();
+  if (!token) return {};
+  return {
+    Authorization: `Bearer ${token}`,
+    'X-Lan-Session': token,
+  };
+}
+
 /** سحب كافة البيانات المركزية من الخادم */
 export async function fetchCentralData(): Promise<Record<string, any> | null> {
   try {
@@ -61,7 +102,10 @@ export async function pushCentralData(allData: Record<string, unknown>): Promise
   try {
     const res = await fetch('/api/lan/data', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...getLanAuthHeaders(),
+      },
       body: JSON.stringify(allData),
     });
     return res.ok;
@@ -80,7 +124,10 @@ export async function pushDelta(
   try {
     const res = await fetch('/api/lan/sync', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...getLanAuthHeaders(),
+      },
       body: JSON.stringify({ storeName, items, deltaType }),
     });
     return res.ok;
@@ -94,7 +141,7 @@ export async function pushDelta(
 export async function authenticateLanUser(
   username: string,
   password: string
-): Promise<{ ok: boolean; user?: User; users?: User[]; error?: string }> {
+): Promise<{ ok: boolean; user?: User; users?: User[]; sessionToken?: string; error?: string }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 5000); // 5 ثوان كحد أقصى
   try {
@@ -106,6 +153,9 @@ export async function authenticateLanUser(
     });
     clearTimeout(timer);
     const data = await res.json();
+    if (data && data.ok && typeof data.sessionToken === 'string') {
+      saveLanSessionToken(data.sessionToken);
+    }
     return data;
   } catch (err: unknown) {
     clearTimeout(timer);
