@@ -3,7 +3,7 @@
  * Enables multi-store atomic persistence without double-writing through
  * each useIndexedDB hook's individual schedulePersist.
  */
-import type { Identifiable } from './applyDeltas';
+import type { Identifiable } from './applyDeltas.ts';
 
 export type StoreSnapshot = Identifiable[];
 

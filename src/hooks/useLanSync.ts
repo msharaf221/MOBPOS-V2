@@ -21,7 +21,7 @@ import {
   pushDelta,
   connectLanStream,
 } from '../utils/lanSync';
-import { applyStoreDelta, type Identifiable } from './store/applyDeltas';
+import { applyStoreDelta, type Identifiable, type DeltaType } from './store/applyDeltas';
 
 /** Minimal store surface required by the LAN bridge */
 export interface LanSyncStore {
@@ -170,7 +170,7 @@ export function useLanSync(enabled: boolean, store: LanSyncStore): void {
 
         // Functional update for upsert / delete / increment
         (setter as (fn: (prev: Identifiable[]) => Identifiable[]) => void)(prev =>
-          applyStoreDelta(prev, deltaType, items, storeName)
+          applyStoreDelta(prev, deltaType as DeltaType, items, storeName)
         );
       },
       onFullDataReplaced: () => {
