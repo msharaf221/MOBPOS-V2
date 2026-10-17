@@ -109,8 +109,31 @@ export default function Layout({
   
   shopName
 }: LayoutProps) {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(() => (typeof window !== 'undefined' ? window.innerWidth >= 768 : true));
+  const [isMobile, setIsMobile] = useState(() => (typeof window !== 'undefined' ? window.innerWidth < 768 : false));
   const [showNotifications, setShowNotifications] = useState(false);
+
+  useEffect(() => {
+    const handleResize = () => {
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      if (mobile) {
+        setSidebarOpen(false);
+      } else {
+        setSidebarOpen(true);
+      }
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const handleNav = (pageId: string) => {
+    onNavigate(pageId);
+    if (isMobile) {
+      setSidebarOpen(false);
+    }
+  };
 
   // Branding settings (logo / accent color / theme style). Read directly so
   // Layout has live access without needing extra prop-drilling through App.tsx.
@@ -173,7 +196,7 @@ export default function Layout({
   // Clicking an alert marks it read and jumps to the page it points at.
   const handleNotificationClick = (notif: Notification) => {
     if (!notif.isRead) onMarkNotificationRead(notif.id);
-    if (notif.link) onNavigate(notif.link);
+    if (notif.link) handleNav(notif.link);
     setShowNotifications(false);
   };
 
@@ -182,17 +205,31 @@ export default function Layout({
       {/* شريط العنوان المخصص — يظهر داخل تطبيق سطح المكتب فقط */}
       <TitleBar shopName={shopName} shopLogo={brandingSettings.shopLogo} />
 
-      <div className="flex flex-1 min-h-0 bg-gray-100 dark:bg-gray-900">
+      <div className="flex flex-1 min-h-0 bg-gray-100 dark:bg-gray-900 relative">
+        {/* Mobile Scrim / Backdrop */}
+        {isMobile && sidebarOpen && (
+          <div
+            className="fixed inset-0 bg-black/60 backdrop-blur-xs z-40 md:hidden transition-opacity"
+            onClick={() => setSidebarOpen(false)}
+            aria-hidden="true"
+          />
+        )}
+
         {/* Sidebar */}
         <aside className={`
-          ${sidebarOpen ? 'w-64' : 'w-20'} 
+          ${isMobile
+            ? `fixed inset-y-0 right-0 z-50 w-72 shadow-2xl transform transition-transform duration-300 ease-in-out ${
+                sidebarOpen ? 'translate-x-0' : 'translate-x-full pointer-events-none'
+              }`
+            : `${sidebarOpen ? 'w-64' : 'w-20'} relative z-10 transition-all duration-300`
+          }
           bg-gradient-to-b from-blue-900 to-blue-800 dark:from-gray-800 dark:to-gray-900
-          text-white transition-all duration-300 flex flex-col
+          text-white flex flex-col h-full shrink-0
         `}>
           {/* Logo */}
           <div className="p-4 border-b border-blue-700 dark:border-gray-700">
             <div className="flex items-center justify-between">
-              {sidebarOpen && (
+              {(sidebarOpen || isMobile) && (
                 <h1 className="text-xl font-bold flex items-center gap-2 min-w-0">
                   {brandingSettings.shopLogo ? (
                     <img src={brandingSettings.shopLogo} alt={shopName} className="w-7 h-7 rounded-lg object-cover shrink-0" />
@@ -202,12 +239,23 @@ export default function Layout({
                   <span className="truncate">{shopName}</span>
                 </h1>
               )}
-              <button
-                onClick={() => setSidebarOpen(!sidebarOpen)}
-                className="p-2 rounded-lg hover:bg-blue-700 dark:hover:bg-gray-700 transition"
-              >
-                {sidebarOpen ? <ChevronLeft size={20} /> : <Menu size={20} />}
-              </button>
+              {isMobile ? (
+                <button
+                  onClick={() => setSidebarOpen(false)}
+                  className="p-2 rounded-lg hover:bg-blue-700 dark:hover:bg-gray-700 transition"
+                  aria-label="إغلاق القائمة"
+                >
+                  <X size={20} />
+                </button>
+              ) : (
+                <button
+                  onClick={() => setSidebarOpen(!sidebarOpen)}
+                  className="p-2 rounded-lg hover:bg-blue-700 dark:hover:bg-gray-700 transition"
+                  aria-label={sidebarOpen ? 'تصغير القائمة' : 'توسيع القائمة'}
+                >
+                  {sidebarOpen ? <ChevronLeft size={20} /> : <Menu size={20} />}
+                </button>
+              )}
             </div>
           </div>
 
@@ -231,7 +279,7 @@ export default function Layout({
               return (
                 <button
                   key={item.id}
-                  onClick={() => onNavigate(item.id)}
+                  onClick={() => handleNav(item.id)}
                   className={`
                     w-full flex items-center gap-3 px-4 py-3 transition-all
                     ${isActive 
@@ -242,18 +290,18 @@ export default function Layout({
                     }
                   `}
                 >
-                  <Icon size={22} />
-                  {sidebarOpen && (
+                  <Icon size={22} className="shrink-0" />
+                  {(sidebarOpen || isMobile) && (
                     <span className="flex-1 text-right">{item.label}</span>
                   )}
-                  {sidebarOpen && isLocked && <Lock size={14} className="opacity-60" />}
+                  {(sidebarOpen || isMobile) && isLocked && <Lock size={14} className="opacity-60" />}
                 </button>
               );
             })}
           </nav>
 
           {/* License Info */}
-          {sidebarOpen && license && (
+          {(sidebarOpen || isMobile) && license && (
             <div className="px-4 py-3 border-t border-blue-700 dark:border-gray-700">
               <div className="bg-white/10 rounded-xl p-3 text-center">
                 <div className="flex items-center justify-center gap-1 mb-1">
@@ -283,12 +331,12 @@ export default function Layout({
           {/* User Info */}
           <div className="p-4 border-t border-blue-700 dark:border-gray-700">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-blue-600 dark:bg-gray-600 flex items-center justify-center">
+              <div className="w-10 h-10 rounded-full bg-blue-600 dark:bg-gray-600 flex items-center justify-center shrink-0">
                 {currentUser.name.charAt(0)}
               </div>
-              {sidebarOpen && (
-                <div className="flex-1">
-                  <p className="font-medium">{currentUser.name}</p>
+              {(sidebarOpen || isMobile) && (
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium truncate">{currentUser.name}</p>
                   <p className="text-sm text-blue-200 dark:text-gray-400">
                     {currentUser.role === 'admin' ? 'مدير' : currentUser.role === 'manager' ? 'مشرف' : 'موظف'}
                   </p>
@@ -299,13 +347,23 @@ export default function Layout({
         </aside>
 
         {/* Main Content */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
           {/* Header */}
           <header className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
-            <div className="flex items-center justify-between px-6 py-4">
-              <h2 className="text-xl font-bold text-gray-800 dark:text-white">
-                {menuItems.find(m => m.id === currentPage)?.label || 'لوحة التحكم'}
-              </h2>
+            <div className="flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4">
+              <div className="flex items-center gap-3 min-w-0">
+                {/* Mobile hamburger menu */}
+                <button
+                  onClick={() => setSidebarOpen(true)}
+                  className="p-2 -mr-2 rounded-lg text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition md:hidden shrink-0"
+                  aria-label="القائمة الرئيسية"
+                >
+                  <Menu size={22} />
+                </button>
+                <h2 className="text-lg sm:text-xl font-bold text-gray-800 dark:text-white truncate">
+                  {menuItems.find(m => m.id === currentPage)?.label || 'لوحة التحكم'}
+                </h2>
+              </div>
 
               <div className="flex items-center gap-3">
                 {/* Cloud Sync Status */}

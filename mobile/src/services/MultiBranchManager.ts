@@ -12,6 +12,24 @@ import type {
 } from '../types';
 
 const STORAGE_KEY_BRANCHES = 'mobpos_companion_branches_v1';
+const BRANCH_FETCH_TIMEOUT_MS = 18_000;
+const METRICS_CACHE_TTL_MS = 30_000;
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  ms = BRANCH_FETCH_TIMEOUT_MS,
+  errorMsg = 'انتهت مهلة الاتصال بالفرع'
+): Promise<T> {
+  let timer: any;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(errorMsg));
+    }, ms);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    clearTimeout(timer);
+  });
+}
 
 // Default initial branch configuration
 const DEFAULT_BRANCHES: BranchConfig[] = [
@@ -34,7 +52,7 @@ class MultiBranchManager {
   private clients: Map<string, SupabaseClient> = new Map();
   private channels: Map<string, ReturnType<SupabaseClient['channel']>> = new Map();
   private listeners: Set<() => void> = new Set();
-  private metricsCache: Map<string, BranchMetrics> = new Map();
+  private metricsCache: Map<string, { metrics: BranchMetrics; timestamp: number }> = new Map();
 
   public getBranches(): BranchConfig[] {
     if (typeof localStorage === 'undefined') return DEFAULT_BRANCHES;
@@ -199,7 +217,7 @@ class MultiBranchManager {
    * Merges baseline snapshots from `mobpos_stores` with recent deltas from `mobpos_records`.
    * Normalizes desktop models to mobile types with 100% schema alignment.
    */
-  public async fetchBranchMetrics(branch: BranchConfig): Promise<BranchMetrics> {
+  public async fetchBranchMetrics(branch: BranchConfig, forceRefresh = false): Promise<BranchMetrics> {
     const client = this.getClient(branch);
 
     if (!client) {
@@ -210,8 +228,17 @@ class MultiBranchManager {
       return this.getEmptyMetrics(branch.id, branch.name, branch.color);
     }
 
+    if (!forceRefresh) {
+      const cached = this.metricsCache.get(branch.id);
+      if (cached && Date.now() - cached.timestamp < METRICS_CACHE_TTL_MS) {
+        return cached.metrics;
+      }
+    }
+
     try {
-      let activeTenantId = branch.tenantId ? branch.tenantId.trim() : '';
+      const metrics = await withTimeout(
+        (async (): Promise<BranchMetrics> => {
+          let activeTenantId = branch.tenantId ? branch.tenantId.trim() : '';
 
       // 1. Smart Auto-Discovery of Tenant ID if missing
       if (!activeTenantId) {
@@ -579,30 +606,34 @@ class MultiBranchManager {
       });
       const hourlySales = Object.entries(hourlyBuckets).map(([hour, total]) => ({ hour, total }));
 
-      const metrics: BranchMetrics = {
-        branchId: branch.id,
-        branchName: branch.name,
-        branchColor: branch.color,
-        todaySalesTotal,
-        todayProfitTotal,
-        todayInvoicesCount: todaySales.length,
-        todayCashCollected,
-        todayExpensesTotal,
-        totalSafesBalance,
-        lowStockCount,
-        activeMaintenanceCount,
-        totalCustomerDebts,
-        hourlySales,
-        recentSales: normalizedSales.slice(0, 100),
-        recentTransactions: normalizedTransactions.slice(0, 100),
-        safesList: normalizedSafes,
-        inventoryList: normalizedInventory,
-        maintenanceList: normalizedMaintenance,
-        customersList: normalizedCustomers,
-        lastSyncedAt: new Date().toISOString(),
-      };
+          return {
+            branchId: branch.id,
+            branchName: branch.name,
+            branchColor: branch.color,
+            todaySalesTotal,
+            todayProfitTotal,
+            todayInvoicesCount: todaySales.length,
+            todayCashCollected,
+            todayExpensesTotal,
+            totalSafesBalance,
+            lowStockCount,
+            activeMaintenanceCount,
+            totalCustomerDebts,
+            hourlySales,
+            recentSales: normalizedSales.slice(0, 100),
+            recentTransactions: normalizedTransactions.slice(0, 100),
+            safesList: normalizedSafes,
+            inventoryList: normalizedInventory,
+            maintenanceList: normalizedMaintenance,
+            customersList: normalizedCustomers,
+            lastSyncedAt: new Date().toISOString(),
+          };
+        })(),
+        BRANCH_FETCH_TIMEOUT_MS,
+        `انتهت مهلة الاتصال بالفرع (${branch.name}) بعد 18 ثانية`
+      );
 
-      this.metricsCache.set(branch.id, metrics);
+      this.metricsCache.set(branch.id, { metrics, timestamp: Date.now() });
       this.updateBranch(branch.id, {
         status: 'connected',
         lastSyncAt: metrics.lastSyncedAt,
@@ -617,8 +648,9 @@ class MultiBranchManager {
         errorMessage: errMsg,
       });
       // Return cached metrics if available, or clean empty metrics (NEVER fake mock data)
-      if (this.metricsCache.has(branch.id)) {
-        return this.metricsCache.get(branch.id)!;
+      const cached = this.metricsCache.get(branch.id);
+      if (cached) {
+        return cached.metrics;
       }
       return this.getEmptyMetrics(branch.id, branch.name, branch.color);
     }
@@ -626,8 +658,12 @@ class MultiBranchManager {
 
   /**
    * Aggregates metrics across all enabled branches.
+   * Uses Promise.allSettled so a dead/slow branch never blocks healthy branches.
    */
-  public async fetchAggregateMetrics(branches: BranchConfig[]): Promise<{
+  public async fetchAggregateMetrics(
+    branches: BranchConfig[],
+    forceRefresh = false
+  ): Promise<{
     combined: BranchMetrics;
     perBranch: BranchMetrics[];
   }> {
@@ -637,7 +673,20 @@ class MultiBranchManager {
       return { combined: empty, perBranch: [] };
     }
 
-    const perBranch = await Promise.all(enabled.map(b => this.fetchBranchMetrics(b)));
+    const settled = await Promise.allSettled(
+      enabled.map(b => this.fetchBranchMetrics(b, forceRefresh))
+    );
+
+    const perBranch: BranchMetrics[] = settled.map((res, idx) => {
+      if (res.status === 'fulfilled') {
+        return res.value;
+      }
+      const b = enabled[idx];
+      console.error(`[MultiBranch] Branch failed during aggregation: ${b.name}`, res.reason);
+      const cached = this.metricsCache.get(b.id);
+      if (cached) return cached.metrics;
+      return this.getEmptyMetrics(b.id, b.name, b.color);
+    });
 
     const combined: BranchMetrics = {
       branchId: 'all',
