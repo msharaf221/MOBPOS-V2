@@ -383,7 +383,7 @@ async function importAllData(data: Record<string, unknown[]>): Promise<void> {
 // ============================================================
 
 /** نافذة دمج الكتابات المتتابعة. صغيرة كفاية إنها ماتحسّش، وكبيرة كفاية إنها تلم الضغطات المتلاحقة. */
-const WRITE_COALESCE_MS = 40;
+const WRITE_COALESCE_MS = 64;
 
 type PendingWriteJob = () => Promise<void> | null;
 

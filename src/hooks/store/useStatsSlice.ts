@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback } from 'react';
 import { StoreState } from './types';
 import { summarizeReturns, returnsInPeriod } from '../../utils/returns';
 import { buildImeiStockIndex, isSellableUnit } from '../../utils/stockCounts';
@@ -8,7 +8,7 @@ import { InventoryItem } from '../../types';
 export function useStatsSlice(state: StoreState) {
     const { customers, inventory, imeiUnits, sales, saleReturns, maintenance, safes, stockWastes } = state;
 
-    const getStatistics = useMemo(() => {
+    const getStatistics = useCallback(() => {
       const today = new Date();
       // Compare by LOCAL calendar day — using toISOString() here would shift
       // the day boundary by the timezone offset and corrupt "today" stats.

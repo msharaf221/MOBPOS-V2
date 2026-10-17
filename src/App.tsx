@@ -375,7 +375,7 @@ export default function App() {
       case 'dashboard':
         return (
           <Dashboard
-            statistics={store.getStatistics}
+            statistics={store.getStatistics()}
             sales={store.sales}
             maintenance={store.maintenance}
             categories={store.categories}
@@ -579,7 +579,7 @@ export default function App() {
       default:
         return (
           <Dashboard
-            statistics={store.getStatistics}
+            statistics={store.getStatistics()}
             sales={store.sales}
             maintenance={store.maintenance}
             categories={store.categories}

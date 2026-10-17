@@ -352,6 +352,50 @@ export default function POS({
     searchRef.current?.focus();
   }, [cart, getAvailableIMEIs, showToast, triggerHighlight]);
 
+  // ===== فهارس البحث والباركود السريعة (O(1) Scan & Fast Filter) =====
+  const { barcodeMap, codeMap, nameMap, imeiMap, searchIndex } = useMemo(() => {
+    const bMap = new Map<string, InventoryItem>();
+    const cMap = new Map<string, InventoryItem>();
+    const nMap = new Map<string, InventoryItem>();
+    const itemById = new Map<string, InventoryItem>();
+    const sIndex: Array<{ item: InventoryItem; searchStr: string }> = [];
+
+    for (const item of inventory) {
+      itemById.set(item.id, item);
+
+      if (item.barcode) {
+        const b = item.barcode.trim();
+        bMap.set(b, item);
+        bMap.set(b.toLowerCase(), item);
+      }
+      if (item.code) {
+        cMap.set(item.code.trim().toLowerCase(), item);
+      }
+      if (item.name) {
+        nMap.set(item.name.trim().toLowerCase(), item);
+      }
+
+      const nameLower = (item.name || '').toLowerCase();
+      const codeLower = (item.code || '').toLowerCase();
+      const barcodeStr = item.barcode || '';
+      sIndex.push({
+        item,
+        searchStr: `${nameLower} ${codeLower} ${barcodeStr}`
+      });
+    }
+
+    const iMap = new Map<string, { unit: IMEIUnit; parentItem: InventoryItem }>();
+    for (const u of imeiUnits) {
+      if (!isSellableUnit(u)) continue;
+      const parent = itemById.get(u.inventoryId);
+      if (!parent) continue;
+      if (u.imei1) iMap.set(u.imei1.trim().toLowerCase(), { unit: u, parentItem: parent });
+      if (u.imei2) iMap.set(u.imei2.trim().toLowerCase(), { unit: u, parentItem: parent });
+    }
+
+    return { barcodeMap: bMap, codeMap: cMap, nameMap: nMap, imeiMap: iMap, searchIndex: sIndex };
+  }, [inventory, imeiUnits]);
+
   // Core Smart Barcode / Code / IMEI Handler
   const processBarcodeScan = useCallback((rawInput: string) => {
     const trimmed = rawInput.trim();
@@ -376,53 +420,41 @@ export default function POS({
 
     const cleanCode = targetBarcode.toLowerCase();
 
-    // 1. Direct match on IMEI number
-    const matchingImeiUnit = imeiUnits.find(
-      u => (u.imei1.toLowerCase() === cleanCode || u.imei2?.toLowerCase() === cleanCode) && isSellableUnit(u)
-    );
-    if (matchingImeiUnit) {
-      const parentItem = inventory.find(i => i.id === matchingImeiUnit.inventoryId);
-      if (parentItem) {
-        addToCart(parentItem, matchingImeiUnit, 1);
-        return;
-      }
-    }
-
-    // 2. Exact match on Product Barcode
-    const matchingByBarcode = inventory.find(
-      i => i.barcode && i.barcode.trim() === targetBarcode
-    );
-    if (matchingByBarcode) {
-      addToCart(matchingByBarcode, undefined, multiplier);
+    // 1. Direct O(1) match on IMEI number
+    const imeiMatch = imeiMap.get(cleanCode);
+    if (imeiMatch) {
+      addToCart(imeiMatch.parentItem, imeiMatch.unit, 1);
       return;
     }
 
-    // 3. Exact match on Product Code
-    const matchingByCode = inventory.find(
-      i => i.code && i.code.trim().toLowerCase() === cleanCode
-    );
-    if (matchingByCode) {
-      addToCart(matchingByCode, undefined, multiplier);
+    // 2. Direct O(1) match on Product Barcode
+    const barcodeMatch = barcodeMap.get(targetBarcode) || barcodeMap.get(cleanCode);
+    if (barcodeMatch) {
+      addToCart(barcodeMatch, undefined, multiplier);
       return;
     }
 
-    // 4. Exact match on Product Name
-    const matchingByName = inventory.find(
-      i => i.name.trim().toLowerCase() === cleanCode
-    );
-    if (matchingByName) {
-      addToCart(matchingByName, undefined, multiplier);
+    // 3. Direct O(1) match on Product Code
+    const codeMatch = codeMap.get(cleanCode);
+    if (codeMatch) {
+      addToCart(codeMatch, undefined, multiplier);
+      return;
+    }
+
+    // 4. Direct O(1) match on Product Name
+    const nameMatch = nameMap.get(cleanCode);
+    if (nameMatch) {
+      addToCart(nameMatch, undefined, multiplier);
       return;
     }
 
     // 5. If only 1 product matches partial name/code/barcode
-    const partialMatches = inventory.filter(i =>
-      i.name.toLowerCase().includes(cleanCode) ||
-      i.code.toLowerCase().includes(cleanCode) ||
-      (i.barcode && i.barcode.includes(targetBarcode))
+    const partialMatches = searchIndex.filter(entry =>
+      entry.searchStr.includes(cleanCode) ||
+      (targetBarcode && entry.searchStr.includes(targetBarcode))
     );
     if (partialMatches.length === 1) {
-      addToCart(partialMatches[0], undefined, multiplier);
+      addToCart(partialMatches[0].item, undefined, multiplier);
       return;
     }
 
@@ -442,7 +474,7 @@ export default function POS({
     });
     setShowQuickAddModal(true);
     setSearchTerm('');
-  }, [activeMultiplier, addToCart, categories, imeiUnits, inventory, showToast]);
+  }, [activeMultiplier, addToCart, barcodeMap, categories, codeMap, imeiMap, nameMap, searchIndex, showToast]);
 
   // Global Hardware Barcode Scanner Listener
   // Hardware scanners type very rapidly (<45ms per character) followed by Enter or Tab
@@ -646,18 +678,16 @@ export default function POS({
   // Filter products for catalog
   const filteredProducts = useMemo(() => {
     const term = searchTerm.toLowerCase().trim();
-    return inventory.filter(item => {
-      const matchesCategory = selectedCategory === 'all' || item.categoryId === selectedCategory;
-      if (!matchesCategory) return false;
+    if (!term && selectedCategory === 'all') return inventory;
 
-      if (!term) return true;
-      return (
-        item.name.toLowerCase().includes(term) ||
-        (item.code || '').toLowerCase().includes(term) ||
-        ((item.barcode || '').includes(term))
-      );
-    });
-  }, [inventory, selectedCategory, searchTerm]);
+    return searchIndex
+      .filter(({ item, searchStr }) => {
+        if (selectedCategory !== 'all' && item.categoryId !== selectedCategory) return false;
+        if (!term) return true;
+        return searchStr.includes(term);
+      })
+      .map(({ item }) => item);
+  }, [inventory, searchIndex, selectedCategory, searchTerm]);
 
   // ===== حدّ شبكة الأصناف (load more) =====
   // الشبكة كانت ترسم كل المنتجات المطابقة في الـ DOM — مع كتالوج كبير ده كان
