@@ -32,3 +32,29 @@ export const defaultAppSettings: AppSettings = {
   accentColor: '#3b82f6',
   themeStyle: 'default'
 };
+
+
+/** أدوار التطبيق من الأقل للأعلى صلاحية */
+export type AppRole = 'staff' | 'manager' | 'admin';
+
+const ROLE_RANK: Record<AppRole, number> = { staff: 1, manager: 2, admin: 3 };
+
+export function hasMinRole(
+  user: { role?: string } | null | undefined,
+  min: AppRole
+): boolean {
+  if (!user || typeof user.role !== 'string') return false;
+  const rank = ROLE_RANK[user.role as AppRole];
+  if (!rank) return false;
+  return rank >= ROLE_RANK[min];
+}
+
+/** يرفض العملية إن لم تتحقق الصلاحية — للاستخدام داخل الـ slices */
+export function denyUnlessRole(
+  user: { role?: string } | null | undefined,
+  min: AppRole,
+  message = 'ليس لديك صلاحية لتنفيذ هذه العملية'
+): { ok: false; error: string } | null {
+  if (hasMinRole(user, min)) return null;
+  return { ok: false, error: message };
+}
