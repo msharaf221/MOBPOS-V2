@@ -17,12 +17,14 @@ interface SafesTabProps {
   safes: Safe[];
   transactions: Transaction[];
   hideAmounts: boolean;
+  onOpenQuickAction?: () => void;
 }
 
 export const SafesTab: React.FC<SafesTabProps> = ({
   safes,
   transactions,
   hideAmounts,
+  onOpenQuickAction,
 }) => {
   const [filterType, setFilterType] = useState<'all' | 'expense' | 'income'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -98,6 +100,18 @@ export const SafesTab: React.FC<SafesTabProps> = ({
           <span>مجموع النقدية الحقيقية في أدراج الكاشير والخزائن والمحافظ الإلكترونية</span>
         </p>
       </div>
+
+      {/* Quick Action Button */}
+      {onOpenQuickAction && (
+        <button
+          type="button"
+          onClick={onOpenQuickAction}
+          className="w-full py-3 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:opacity-95 text-slate-950 font-black text-xs shadow-lg shadow-amber-500/20 active:scale-[0.985] transition flex items-center justify-center gap-2"
+        >
+          <ArrowDownLeft size={16} />
+          <span>تسجيل مصروف أو توريد نقدية 💵</span>
+        </button>
+      )}
 
       {/* Safes Breakdown Grid */}
       <div className="space-y-2">

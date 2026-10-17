@@ -761,6 +761,307 @@ class MultiBranchManager {
       lastSyncedAt: undefined,
     };
   }
+
+  /**
+   * Pushes granular records directly to `mobpos_records` on the branch's Supabase instance.
+   * Broadcasts immediately via Supabase Realtime to Desktop Electron and all mobile devices!
+   */
+  public async pushRecordsToBranch(
+    branch: BranchConfig,
+    records: Array<{ store: string; recordId: string; data: any; isDelete?: boolean }>
+  ): Promise<{ success: boolean; error?: string }> {
+    const client = this.getClient(branch);
+    if (!client) {
+      return { success: false, error: 'الفرع غير مهيأ بالربط السحابي (Supabase)' };
+    }
+
+    const tenantId = branch.tenantId ? branch.tenantId.trim() : 'default';
+    const nowIso = new Date().toISOString();
+    const clientId = `mob_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+
+    const rows = records.map(r => ({
+      tenant_id: tenantId,
+      store: r.store,
+      record_id: r.recordId,
+      data: r.isDelete ? {} : (r.data || {}),
+      version: 1,
+      client_id: clientId,
+      updated_at: nowIso,
+      deleted_at: r.isDelete ? nowIso : null,
+    }));
+
+    try {
+      const { error } = await client
+        .from('mobpos_records')
+        .upsert(rows, { onConflict: 'tenant_id,store,record_id' });
+
+      if (error) {
+        console.error(`[MultiBranch] Failed to push records to ${branch.name}:`, error);
+        return { success: false, error: error.message };
+      }
+
+      // Invalidate cache immediately so next read fetches fresh state
+      this.metricsCache.delete(branch.id);
+      this.notify();
+      return { success: true };
+    } catch (e: any) {
+      console.error(`[MultiBranch] Exception pushing records to ${branch.name}:`, e);
+      return { success: false, error: e?.message || 'خطأ أثناء إرسال البيانات للسحابة' };
+    }
+  }
+
+  /**
+   * Executes an atomic sale from Mobile:
+   * 1. Records sale invoice in `mobpos_records` (`sales`)
+   * 2. Updates safe balance and logs cash transaction (`safes`, `transactions`)
+   * 3. Deducts sold quantities from inventory (`inventory`)
+   * 4. Updates customer debt balance if applicable (`customers`)
+   */
+  public async submitSale(
+    branch: BranchConfig,
+    sale: SaleRecord,
+    options?: {
+      safe?: Safe;
+      deductions?: Array<{ item: InventoryItem; quantity: number }>;
+      customer?: Customer;
+    }
+  ): Promise<{ success: boolean; error?: string }> {
+    const recordsToPush: Array<{ store: string; recordId: string; data: any }> = [];
+
+    // 1. Sale invoice
+    recordsToPush.push({
+      store: 'sales',
+      recordId: sale.id,
+      data: {
+        id: sale.id,
+        invoiceNumber: sale.invoiceNumber,
+        date: sale.date || new Date().toISOString(),
+        createdAt: sale.createdAt || new Date().toISOString(),
+        total: sale.total,
+        discount: sale.discount || 0,
+        finalTotal: sale.finalTotal,
+        paid: sale.paidAmount ?? sale.finalTotal,
+        paidAmount: sale.paidAmount ?? sale.finalTotal,
+        remaining: sale.remainingAmount || 0,
+        remainingAmount: sale.remainingAmount || 0,
+        profit: sale.profit || 0,
+        paymentMethod: sale.paymentMethod || 'نقدي (كاش)',
+        safeId: sale.safeId,
+        safeName: sale.safeName,
+        cashierName: sale.cashierName || 'كاشير الموبايل',
+        customerId: sale.customerId,
+        customerName: sale.customerName,
+        customerPhone: sale.customerPhone,
+        items: sale.items.map(it => ({
+          id: it.id,
+          inventoryId: it.id,
+          name: it.name,
+          quantity: it.quantity,
+          price: it.price,
+          unitPrice: it.price,
+          cost: it.cost || 0,
+          costPrice: it.cost || 0,
+          imei: it.imei,
+        })),
+        branchId: branch.id,
+        branchName: branch.name,
+      },
+    });
+
+    // 2. Safe balance and transaction
+    const cashCollected = Number(sale.paidAmount ?? sale.finalTotal) || 0;
+    if (cashCollected > 0 && options?.safe) {
+      const updatedSafe: Safe = {
+        ...options.safe,
+        balance: (Number(options.safe.balance) || 0) + cashCollected,
+      };
+      recordsToPush.push({
+        store: 'safes',
+        recordId: options.safe.id,
+        data: updatedSafe,
+      });
+
+      const txId = `tx_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      recordsToPush.push({
+        store: 'transactions',
+        recordId: txId,
+        data: {
+          id: txId,
+          type: 'sale',
+          amount: cashCollected,
+          safeId: options.safe.id,
+          safeName: options.safe.name,
+          description: `مبيعات فاتورة #${sale.invoiceNumber || sale.id.slice(0, 8)}`,
+          date: sale.date || new Date().toISOString(),
+          userName: sale.cashierName || 'كاشير الموبايل',
+          branchId: branch.id,
+          branchName: branch.name,
+        },
+      });
+    }
+
+    // 3. Inventory deduction
+    if (options?.deductions && options.deductions.length > 0) {
+      for (const d of options.deductions) {
+        const newQty = Math.max(0, (Number(d.item.quantity) || 0) - d.quantity);
+        recordsToPush.push({
+          store: 'inventory',
+          recordId: d.item.id,
+          data: {
+            ...d.item,
+            quantity: newQty,
+            updatedAt: new Date().toISOString(),
+          },
+        });
+      }
+    }
+
+    // 4. Customer balance update if remaining debt exists
+    const remaining = Number(sale.remainingAmount) || 0;
+    if (remaining > 0 && options?.customer) {
+      const newCustomerBalance = (Number(options.customer.balance) || 0) + remaining;
+      recordsToPush.push({
+        store: 'customers',
+        recordId: options.customer.id,
+        data: {
+          ...options.customer,
+          balance: newCustomerBalance,
+        },
+      });
+    }
+
+    return await this.pushRecordsToBranch(branch, recordsToPush);
+  }
+
+  /**
+   * Submits a financial transaction (Expense or Cash Inflow) from Mobile.
+   */
+  public async submitTransaction(
+    branch: BranchConfig,
+    tx: {
+      type: 'expense' | 'deposit';
+      amount: number;
+      safe: Safe;
+      description: string;
+      category?: string;
+      userName?: string;
+    }
+  ): Promise<{ success: boolean; error?: string }> {
+    const txId = `tx_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const nowIso = new Date().toISOString();
+    const isOutflow = tx.type === 'expense';
+    const amountVal = Math.abs(Number(tx.amount) || 0);
+
+    const newSafeBalance = (Number(tx.safe.balance) || 0) + (isOutflow ? -amountVal : amountVal);
+
+    const records = [
+      {
+        store: 'transactions',
+        recordId: txId,
+        data: {
+          id: txId,
+          type: tx.type,
+          amount: amountVal,
+          safeId: tx.safe.id,
+          safeName: tx.safe.name,
+          description: tx.description,
+          category: tx.category || (isOutflow ? 'مصروفات عامة' : 'إيداع نقدي'),
+          date: nowIso,
+          userName: tx.userName || 'تطبيق الموبايل',
+          branchId: branch.id,
+          branchName: branch.name,
+        },
+      },
+      {
+        store: 'safes',
+        recordId: tx.safe.id,
+        data: {
+          ...tx.safe,
+          balance: newSafeBalance,
+        },
+      },
+    ];
+
+    return await this.pushRecordsToBranch(branch, records);
+  }
+
+  /**
+   * Submits or updates a maintenance repair ticket from Mobile.
+   */
+  public async submitMaintenanceOrder(
+    branch: BranchConfig,
+    order: MaintenanceOrder,
+    safeForDeposit?: Safe
+  ): Promise<{ success: boolean; error?: string }> {
+    const records: Array<{ store: string; recordId: string; data: any }> = [
+      {
+        store: 'maintenance',
+        recordId: order.id,
+        data: {
+          ...order,
+          branchId: branch.id,
+          branchName: branch.name,
+        },
+      },
+    ];
+
+    // If order was delivered and finalPrice was collected into a safe:
+    if (order.status === 'delivered' && (Number(order.finalPrice) || 0) > 0 && safeForDeposit) {
+      const price = Number(order.finalPrice);
+      const newBal = (Number(safeForDeposit.balance) || 0) + price;
+      const txId = `tx_maint_${Date.now()}`;
+
+      records.push(
+        {
+          store: 'safes',
+          recordId: safeForDeposit.id,
+          data: {
+            ...safeForDeposit,
+            balance: newBal,
+          },
+        },
+        {
+          store: 'transactions',
+          recordId: txId,
+          data: {
+            id: txId,
+            type: 'sale',
+            amount: price,
+            safeId: safeForDeposit.id,
+            safeName: safeForDeposit.name,
+            description: `إيراد تسليم صيانة #${order.ticketNumber || order.id.slice(0, 8)} (${order.deviceModel})`,
+            category: 'صيانة',
+            date: new Date().toISOString(),
+            userName: 'تطبيق الموبايل',
+            branchId: branch.id,
+            branchName: branch.name,
+          },
+        }
+      );
+    }
+
+    return await this.pushRecordsToBranch(branch, records);
+  }
+
+  /**
+   * Creates or updates a product in inventory from Mobile.
+   */
+  public async submitInventoryItem(
+    branch: BranchConfig,
+    item: InventoryItem
+  ): Promise<{ success: boolean; error?: string }> {
+    return await this.pushRecordsToBranch(branch, [
+      {
+        store: 'inventory',
+        recordId: item.id,
+        data: {
+          ...item,
+          branchId: branch.id,
+          branchName: branch.name,
+        },
+      },
+    ]);
+  }
 }
 
 export const multiBranchManager = new MultiBranchManager();

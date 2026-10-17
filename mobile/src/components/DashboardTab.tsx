@@ -17,6 +17,7 @@ import {
   Zap,
 } from 'lucide-react';
 import type { BranchMetrics, SaleRecord } from '../types';
+import type { NavTab } from './BottomNav';
 import { formatCurrency, formatNumber, formatTimeAgo } from '../utils/format';
 
 interface DashboardTabProps {
@@ -25,9 +26,10 @@ interface DashboardTabProps {
   isAllBranches: boolean;
   hideAmounts: boolean;
   onSelectSale: (sale: SaleRecord) => void;
-  onNavigateToTab: (tab: 'sales' | 'safes' | 'inventory' | 'settings') => void;
+  onNavigateToTab: (tab: NavTab) => void;
   onOpenMaintenanceModal: () => void;
   onOpenDebtsModal: () => void;
+  onOpenQuickAction?: () => void;
 }
 
 export const DashboardTab: React.FC<DashboardTabProps> = ({
@@ -39,6 +41,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
   onNavigateToTab,
   onOpenMaintenanceModal,
   onOpenDebtsModal,
+  onOpenQuickAction,
 }) => {
   const maxHourly = Math.max(...metrics.hourlySales.map(h => h.total), 1);
   const avgOrderValue = metrics.todayInvoicesCount > 0
@@ -163,6 +166,45 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Quick Action Shortcuts Bar */}
+      <div className="grid grid-cols-3 gap-2">
+        <button
+          type="button"
+          onClick={() => onNavigateToTab('pos')}
+          className="p-3 rounded-2xl bg-gradient-to-r from-cyan-500/20 to-blue-500/20 border border-cyan-500/30 text-white flex flex-col items-center justify-center gap-1.5 active:scale-95 transition shadow-sm"
+        >
+          <div className="w-9 h-9 rounded-xl bg-cyan-500 text-slate-950 flex items-center justify-center shadow-md shadow-cyan-500/30">
+            <Zap size={18} className="fill-slate-950" />
+          </div>
+          <span className="text-xs font-black text-cyan-300">كاشير بيع ⚡</span>
+          <span className="text-[9px] text-slate-400">باركود وسلة</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onOpenQuickAction?.()}
+          className="p-3 rounded-2xl bg-gradient-to-r from-emerald-500/20 to-teal-500/20 border border-emerald-500/30 text-white flex flex-col items-center justify-center gap-1.5 active:scale-95 transition shadow-sm"
+        >
+          <div className="w-9 h-9 rounded-xl bg-emerald-500 text-slate-950 flex items-center justify-center shadow-md shadow-emerald-500/30">
+            <Wallet size={18} />
+          </div>
+          <span className="text-xs font-black text-emerald-300">مصروف / إيداع</span>
+          <span className="text-[9px] text-slate-400">حركة خزينة فورية</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={onOpenMaintenanceModal}
+          className="p-3 rounded-2xl bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/30 text-white flex flex-col items-center justify-center gap-1.5 active:scale-95 transition shadow-sm"
+        >
+          <div className="w-9 h-9 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center shadow-md shadow-amber-500/30">
+            <Wrench size={18} />
+          </div>
+          <span className="text-xs font-black text-amber-300">أجهزة صيانة</span>
+          <span className="text-[9px] text-slate-400">استلام وتسليم</span>
+        </button>
       </div>
 
       {/* Secondary KPI Grid (3 Bento Cards) */}

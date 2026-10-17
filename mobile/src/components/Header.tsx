@@ -7,6 +7,7 @@ import {
   RefreshCw,
   Zap,
   Plus,
+  Settings,
 } from 'lucide-react';
 import type { BranchConfig } from '../types';
 
@@ -19,6 +20,7 @@ interface HeaderProps {
   onToggleHideAmounts: () => void;
   isRefreshing: boolean;
   onRefresh: () => void;
+  onOpenSettings?: () => void;
   lastSyncedAt?: string;
 }
 
@@ -31,6 +33,7 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleHideAmounts,
   isRefreshing,
   onRefresh,
+  onOpenSettings,
 }) => {
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
@@ -194,6 +197,19 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <RefreshCw size={16} className={isRefreshing ? 'animate-spin text-sky-400' : ''} />
           </button>
+
+          {/* Settings Button */}
+          {onOpenSettings && (
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              aria-label="الإعدادات والفروع"
+              title="إعدادات الفروع والسحابة"
+              className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-cyan-400 transition"
+            >
+              <Settings size={16} />
+            </button>
+          )}
         </div>
       </div>
     </header>

@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Tag,
   Building2,
+  Plus,
 } from 'lucide-react';
 import type { InventoryItem } from '../types';
 import { formatCurrency, formatNumber } from '../utils/format';
@@ -14,11 +15,13 @@ import { formatCurrency, formatNumber } from '../utils/format';
 interface InventoryTabProps {
   inventory: InventoryItem[];
   hideAmounts: boolean;
+  onOpenAddProduct?: () => void;
 }
 
 export const InventoryTab: React.FC<InventoryTabProps> = ({
   inventory,
   hideAmounts,
+  onOpenAddProduct,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterMode, setFilterMode] = useState<'all' | 'lowStock' | 'imei'>('all');
@@ -65,23 +68,36 @@ export const InventoryTab: React.FC<InventoryTabProps> = ({
 
   return (
     <div className="space-y-3.5 pb-28 animate-in fade-in duration-200">
-      {/* Search Input with clear button */}
-      <div className="relative">
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={e => setSearchQuery(e.target.value)}
-          placeholder="ابحث عن موبايل، إكسسوار، سيريال، باركود..."
-          className="w-full pr-10 pl-10 py-3.5 rounded-2xl bg-slate-900/90 border border-white/[0.08] text-white placeholder-slate-500 text-xs focus:outline-none focus:border-cyan-500/50 shadow-lg font-sans transition"
-        />
-        <Search size={17} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
-        {searchQuery && (
+      {/* Search Input with clear button & Add Product Button */}
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="ابحث عن موبايل، إكسسوار، سيريال، باركود..."
+            className="w-full pr-10 pl-10 py-3.5 rounded-2xl bg-slate-900/90 border border-white/[0.08] text-white placeholder-slate-500 text-xs focus:outline-none focus:border-cyan-500/50 shadow-lg font-sans transition"
+          />
+          <Search size={17} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-1"
+            >
+              <span className="text-xs">✕</span>
+            </button>
+          )}
+        </div>
+
+        {onOpenAddProduct && (
           <button
             type="button"
-            onClick={() => setSearchQuery('')}
-            className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-1"
+            onClick={onOpenAddProduct}
+            className="p-3.5 rounded-2xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold shadow-lg shadow-cyan-500/20 active:scale-95 transition shrink-0"
+            title="إضافة صنف جديد"
           >
-            <span className="text-xs">✕</span>
+            <Plus size={18} />
           </button>
         )}
       </div>

@@ -13,6 +13,8 @@ import { InvoiceDetailModal } from './components/InvoiceDetailModal';
 import { BranchEditModal } from './components/BranchEditModal';
 import { MaintenanceModal } from './components/MaintenanceModal';
 import { DebtsModal } from './components/DebtsModal';
+import { POSTab } from './components/POSTab';
+import { QuickActionModal } from './components/QuickActionModal';
 
 export default function App() {
   const [branches, setBranches] = useState<BranchConfig[]>(() => multiBranchManager.getBranches());
@@ -59,6 +61,7 @@ export default function App() {
   });
   const [isMaintenanceModalOpen, setIsMaintenanceModalOpen] = useState(false);
   const [isDebtsModalOpen, setIsDebtsModalOpen] = useState(false);
+  const [isQuickActionOpen, setIsQuickActionOpen] = useState(false);
 
   // Load and refresh metrics
   const refreshMetrics = useCallback(async () => {
@@ -230,6 +233,7 @@ export default function App() {
           onToggleHideAmounts={toggleHideAmounts}
           isRefreshing={isRefreshing}
           onRefresh={refreshMetrics}
+          onOpenSettings={() => setActiveTab('settings')}
           lastSyncedAt={metrics.lastSyncedAt}
         />
 
@@ -245,6 +249,21 @@ export default function App() {
               onNavigateToTab={setActiveTab}
               onOpenMaintenanceModal={() => setIsMaintenanceModalOpen(true)}
               onOpenDebtsModal={() => setIsDebtsModalOpen(true)}
+              onOpenQuickAction={() => setIsQuickActionOpen(true)}
+            />
+          )}
+
+          {activeTab === 'pos' && (
+            <POSTab
+              metrics={metrics}
+              branches={branches}
+              selectedBranchId={selectedBranchId}
+              hideAmounts={hideAmounts}
+              onSaleComplete={sale => {
+                setSelectedSale(sale);
+                refreshMetrics();
+              }}
+              onOpenSettings={() => setActiveTab('settings')}
             />
           )}
 
@@ -261,6 +280,7 @@ export default function App() {
               safes={metrics.safesList}
               transactions={metrics.recentTransactions}
               hideAmounts={hideAmounts}
+              onOpenQuickAction={() => setIsQuickActionOpen(true)}
             />
           )}
 
@@ -268,6 +288,7 @@ export default function App() {
             <InventoryTab
               inventory={metrics.inventoryList}
               hideAmounts={hideAmounts}
+              onOpenAddProduct={() => setIsQuickActionOpen(true)}
             />
           )}
 
@@ -314,6 +335,10 @@ export default function App() {
           isOpen={isMaintenanceModalOpen}
           onClose={() => setIsMaintenanceModalOpen(false)}
           hideAmounts={hideAmounts}
+          branches={branches}
+          selectedBranchId={selectedBranchId}
+          safesList={metrics.safesList}
+          onRefresh={refreshMetrics}
         />
 
         <DebtsModal
@@ -321,6 +346,20 @@ export default function App() {
           isOpen={isDebtsModalOpen}
           onClose={() => setIsDebtsModalOpen(false)}
           hideAmounts={hideAmounts}
+          branches={branches}
+          selectedBranchId={selectedBranchId}
+          safesList={metrics.safesList}
+          onRefresh={refreshMetrics}
+        />
+
+        <QuickActionModal
+          isOpen={isQuickActionOpen}
+          onClose={() => setIsQuickActionOpen(false)}
+          metrics={metrics}
+          branches={branches}
+          selectedBranchId={selectedBranchId}
+          hideAmounts={hideAmounts}
+          onSuccess={refreshMetrics}
         />
       </div>
     </div>
