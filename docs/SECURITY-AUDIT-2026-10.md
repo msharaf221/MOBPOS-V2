@@ -7,25 +7,34 @@ Phase: أمان (after هيكلة)
 
 | # | Severity | Finding | Status |
 |---|----------|---------|--------|
-| 1 | **Critical** | Default `admin` / `admin123` accepted even after password was changed (could reset to plaintext) | **Fixed** in `useAuthSlice` + `lan-hub` — only when stored password is still the plain default or no users exist |
-| 2 | **High** | `/api/lan/info` returned `lanPin` in cleartext to any LAN client | **Fixed** — response only includes `requiresPin: boolean` |
-| 3 | **High** | `ACTIVATION_SERVER_TOKEN` hardcoded in `src/license/keys.ts` and shipped in client builds | **Fixed** — read from `VITE_ACTIVATION_SERVER_TOKEN` at build time; default empty |
-| 4 | Medium | LAN write endpoints (`POST /api/lan/data`, `/api/lan/sync`) have no session auth; CORS `*` | Open — planned session token after `/api/lan/auth` |
-| 5 | Medium | Most business mutations lack role checks (UI gates only for users/settings/audit) | Open — enforce `currentUser.role` in sensitive slices |
-| 6 | Low | PIN login maps to an admin user on LAN | Documented risk — treat PIN as staff-level or disable when not needed |
-| 7 | Info | Password storage uses PBKDF2-SHA256 (150k iters) + per-user salt; legacy rehash on login | Good |
-| 8 | Info | Electron: `contextIsolation`, `sandbox`, no `nodeIntegration`; limited preload bridge | Good |
-| 9 | Info | Activation server: mandatory `ADMIN_TOKEN` + `ACTIVATION_TOKEN`, rate limit, machine token | Good (ops must set env secrets) |
+| 1 | **Critical** | Default `admin` / `admin123` after password change | **Fixed** — only when stored password still plain default |
+| 2 | **High** | `/api/lan/info` leaked `lanPin` | **Fixed** — `requiresPin` only |
+| 3 | **High** | Hardcoded `ACTIVATION_SERVER_TOKEN` | **Fixed** — `VITE_ACTIVATION_SERVER_TOKEN` |
+| 4 | Medium | LAN write endpoints unauthenticated | **Fixed** — session token after `/api/lan/auth`; localhost bypass for host |
+| 5 | Medium | Mutations without role checks | **Fixed** — `hasMinRole` on updateUsers, resetAllData, deleteTransaction (+ existing deleteSafe) |
+| 6 | Low | PIN login maps to admin on LAN | Documented |
+| 7–9 | Info | PBKDF2, Electron isolation, activation server | Good |
 
-## Operator actions required
+## LAN sessions
 
-1. **Rotate** the old activation client token on the live server (`ACTIVATION_TOKEN`) — the previous value was in git history.
-2. Set build env: `VITE_ACTIVATION_SERVER_TOKEN=<new token matching server>`.
-3. Ensure every shop has changed the default admin password (forced via `mustChangePassword` when still default).
-4. Prefer a strong LAN PIN only on trusted networks; do not rely on PIN as admin equivalent long-term.
+- After successful `POST /api/lan/auth`, server returns `sessionToken` (12h TTL).
+- Client stores it in `sessionStorage` and sends `Authorization: Bearer` + `X-Lan-Session` on `/api/lan/data` and `/api/lan/sync`.
+- Requests from `127.0.0.1` / `::1` (host Electron) skip the check so the primary machine can still broadcast.
+- Logout calls `clearLanSession()`.
 
-## Next security work
+## Role guards (store layer)
 
-- Issue short-lived LAN session tokens after `/api/lan/auth` and require them on mutating routes.
-- Role checks inside store slices for delete safe, reset data, user management, finance deletes.
-- Optional: bind LAN hub to private interface only / reject non-LAN IPs.
+| Operation | Min role |
+|-----------|----------|
+| `updateUsers` | admin |
+| `resetAllData` | admin |
+| `deleteSafe` | admin (existing) |
+| `deleteTransaction` | manager |
+
+UI nav filters remain in `Layout.tsx` (staff / manager / admin page sets).
+
+## Operator actions
+
+1. Rotate server `ACTIVATION_TOKEN` (old value was in git history).
+2. Build with `VITE_ACTIVATION_SERVER_TOKEN=<matching token>`.
+3. Ensure shops changed default admin password.
