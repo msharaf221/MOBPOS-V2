@@ -37,6 +37,7 @@ export function useSyncEngine() {
     signInWithPassword: (email: string, pass: string) => syncEngine.signInWithPassword(email, pass),
     signOut: () => syncEngine.signOut(),
     pushAllSnapshots: () => syncEngine.pushAllSnapshots(),
+    pushStoreSnapshots: (stores: string[]) => syncEngine.pushStoreSnapshots(stores),
     pullAllSnapshots: () => syncEngine.pullAllSnapshots(),
   };
 }

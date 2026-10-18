@@ -162,3 +162,24 @@ test('formatFriendlyErrorMessage translates technical Supabase/PostgREST errors 
   assert.ok(keyErr.includes('مفتاح Supabase Anon Key غير صالح'), 'Invalid key must notify about anon key');
 });
 
+test('pushStoreSnapshots validates offline / uninitialized supabase properly', async () => {
+  // When supabase is not configured or offline, it should throw or return 0 safely
+  await assert.rejects(
+    async () => {
+      await syncEngine.pushStoreSnapshots(['sales', 'safes']);
+    },
+    {
+      message: /عميل Supabase غير مهيأ|لا يوجد اتصال بالإنترنت/,
+    }
+  );
+});
+
+test('scheduleDebouncedSnapshot safely handles store names and repeated invocations', () => {
+  assert.doesNotThrow(() => {
+    syncEngine.scheduleDebouncedSnapshot('sales');
+    syncEngine.scheduleDebouncedSnapshot('safes');
+    syncEngine.scheduleDebouncedSnapshot('inventory');
+  });
+});
+
+

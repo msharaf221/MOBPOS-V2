@@ -64,20 +64,20 @@ export default function App() {
   const [isQuickActionOpen, setIsQuickActionOpen] = useState(false);
 
   // Load and refresh metrics
-  const refreshMetrics = useCallback(async () => {
+  const refreshMetrics = useCallback(async (force = false) => {
     setIsRefreshing(true);
     try {
       const currentBranches = multiBranchManager.getBranches();
       setBranches(currentBranches);
 
       if (selectedBranchId === 'all') {
-        const res = await multiBranchManager.fetchAggregateMetrics(currentBranches);
+        const res = await multiBranchManager.fetchAggregateMetrics(currentBranches, force);
         setMetrics(res.combined);
         setPerBranchMetrics(res.perBranch);
       } else {
         const singleBranch = currentBranches.find(b => b.id === selectedBranchId);
         if (singleBranch) {
-          const branchRes = await multiBranchManager.fetchBranchMetrics(singleBranch);
+          const branchRes = await multiBranchManager.fetchBranchMetrics(singleBranch, force);
           setMetrics(branchRes);
           setPerBranchMetrics([branchRes]);
         }
@@ -103,7 +103,7 @@ export default function App() {
   useEffect(() => {
     const unsubRealtime = multiBranchManager.setupAllRealtime(evt => {
       console.log('[Mobile Realtime] Live push received -> refreshing metrics', evt);
-      refreshMetrics().catch(() => undefined);
+      refreshMetrics(true).catch(() => undefined);
 
       if (evt) {
         if (evt.table === 'mobpos_records' && evt.data?.store === 'sales') {
@@ -123,9 +123,16 @@ export default function App() {
             subtitle: `${evt.branchName || 'الفرع'} • تم تحديث الرصيد لحظياً`,
           });
         } else if (evt.table === 'mobpos_stores') {
+          const storeName = evt.data?.store;
+          let title = '🔄 تم تحديث المتجر تلقائياً';
+          if (storeName === 'sales') title = '⚡ تم تحديث المبيعات فورياً';
+          else if (storeName === 'safes') title = '💰 تم تحديث الخزينة فورياً';
+          else if (storeName === 'inventory') title = '📦 تم تحديث المخزون فورياً';
+          else if (storeName === 'maintenance') title = '🔧 تم تحديث الصيانة فورياً';
+
           setLiveToast({
             id: String(Date.now()),
-            title: `🔄 تم استلام لقطة شاملة للمتجر`,
+            title,
             subtitle: `${evt.branchName || 'الفرع'} • مزامنة تلقائية ناجحة`,
           });
         }
@@ -174,6 +181,10 @@ export default function App() {
     });
   };
 
+  const handleManualRefresh = useCallback(() => {
+    refreshMetrics(true).catch(() => undefined);
+  }, [refreshMetrics]);
+
   const handleSaveBranch = (
     branchData: Omit<BranchConfig, 'id' | 'createdAt'>,
     existingId?: string
@@ -183,7 +194,7 @@ export default function App() {
     } else {
       multiBranchManager.addBranch(branchData);
     }
-    refreshMetrics();
+    refreshMetrics(true);
   };
 
   const handleDeleteBranch = (id: string) => {
@@ -191,12 +202,12 @@ export default function App() {
     if (selectedBranchId === id) {
       setSelectedBranchId('all');
     }
-    refreshMetrics();
+    refreshMetrics(true);
   };
 
   const handleToggleBranchEnabled = (id: string, enabled: boolean) => {
     multiBranchManager.updateBranch(id, { enabled });
-    refreshMetrics();
+    refreshMetrics(true);
   };
 
   return (
@@ -232,7 +243,7 @@ export default function App() {
           hideAmounts={hideAmounts}
           onToggleHideAmounts={toggleHideAmounts}
           isRefreshing={isRefreshing}
-          onRefresh={refreshMetrics}
+          onRefresh={handleManualRefresh}
           onOpenSettings={() => setActiveTab('settings')}
           lastSyncedAt={metrics.lastSyncedAt}
         />
@@ -261,7 +272,7 @@ export default function App() {
               hideAmounts={hideAmounts}
               onSaleComplete={sale => {
                 setSelectedSale(sale);
-                refreshMetrics();
+                refreshMetrics(true);
               }}
               onOpenSettings={() => setActiveTab('settings')}
             />
@@ -338,7 +349,7 @@ export default function App() {
           branches={branches}
           selectedBranchId={selectedBranchId}
           safesList={metrics.safesList}
-          onRefresh={refreshMetrics}
+          onRefresh={handleManualRefresh}
         />
 
         <DebtsModal
@@ -349,7 +360,7 @@ export default function App() {
           branches={branches}
           selectedBranchId={selectedBranchId}
           safesList={metrics.safesList}
-          onRefresh={refreshMetrics}
+          onRefresh={handleManualRefresh}
         />
 
         <QuickActionModal
@@ -359,7 +370,7 @@ export default function App() {
           branches={branches}
           selectedBranchId={selectedBranchId}
           hideAmounts={hideAmounts}
-          onSuccess={refreshMetrics}
+          onSuccess={handleManualRefresh}
         />
       </div>
     </div>
