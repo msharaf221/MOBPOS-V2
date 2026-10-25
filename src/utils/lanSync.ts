@@ -64,6 +64,10 @@ export function saveLanSessionToken(token: string): void {
   } catch {
     // تجاهل في حالة القيود
   }
+  // 🔴 FIX: إشعار بقية الأنظمة (useLanSync) أن الجلسة أصبحت جاهزة لسحب البيانات
+  try {
+    window.dispatchEvent(new CustomEvent('mobpos:lan-session-ready'));
+  } catch { /* ignore */ }
 }
 
 /** مسح توكن جلسة الشبكة عند تسجيل الخروج */
@@ -85,10 +89,29 @@ function getLanAuthHeaders(): Record<string, string> {
   };
 }
 
-/** سحب كافة البيانات المركزية من الخادم */
+/** 🔴 FIX: معرّف ثابت لهذا العميل ليستخدمه الخادم في كبت الصدى (echo suppression) */
+function getLanClientId(): string {
+  if (typeof window === 'undefined') return 'web-unknown';
+  const KEY = 'mobpos_lan_client_id';
+  try {
+    let id = localStorage.getItem(KEY);
+    if (!id) {
+      id = `client_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+      localStorage.setItem(KEY, id);
+    }
+    return id;
+  } catch {
+    return 'web-unknown';
+  }
+}
+
+/** سحب كافة البيانات المركزية من الخادم (يتطلب جلسة صالحة الآن) */
 export async function fetchCentralData(): Promise<Record<string, any> | null> {
   try {
-    const res = await fetch('/api/lan/data');
+    // 🔴 SECURITY: الخادم يقفل الآن قراءة /api/lan/data — تُرسل رؤوس الجلسة
+    const res = await fetch('/api/lan/data', {
+      headers: { Accept: 'application/json', ...getLanAuthHeaders() },
+    });
     if (!res.ok) return null;
     return await res.json();
   } catch (err) {
@@ -104,10 +127,15 @@ export async function pushCentralData(allData: Record<string, unknown>): Promise
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'X-Client-Id': getLanClientId(),
         ...getLanAuthHeaders(),
       },
       body: JSON.stringify(allData),
     });
+    if (res.status === 401) {
+      // انتهت الجلسة — نمسحها ليعيد التطبيق إرسال المستخدم لتسجيل الدخول
+      clearLanSession();
+    }
     return res.ok;
   } catch (err) {
     console.error('[lanSync] Failed to push central data:', err);
@@ -126,10 +154,14 @@ export async function pushDelta(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'X-Client-Id': getLanClientId(),
         ...getLanAuthHeaders(),
       },
       body: JSON.stringify({ storeName, items, deltaType }),
     });
+    if (res.status === 401) {
+      clearLanSession();
+    }
     return res.ok;
   } catch (err) {
     console.error('[lanSync] Failed to push delta:', err);
@@ -141,7 +173,7 @@ export async function pushDelta(
 export async function authenticateLanUser(
   username: string,
   password: string
-): Promise<{ ok: boolean; user?: User; users?: User[]; sessionToken?: string; error?: string }> {
+): Promise<{ ok: boolean; user?: User; sessionToken?: string; error?: string }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 5000); // 5 ثوان كحد أقصى
   try {
@@ -178,7 +210,11 @@ export function connectLanStream(callbacks: {
         eventSource.close();
       }
 
-      eventSource = new EventSource('/api/lan/stream');
+      // 🔴 SECURITY: الخادم يطالب الآن برمز جلسة للاشتراك في القناة.
+      // EventSource لا يمكنه إرسال رؤوس → الرمز يُمرَّر في query param.
+      const token = getLanSessionToken();
+      const streamUrl = token ? `/api/lan/stream?token=${encodeURIComponent(token)}` : '/api/lan/stream';
+      eventSource = new EventSource(streamUrl);
 
       eventSource.onopen = () => {
         callbacks.onStatusChange?.(true);
@@ -208,9 +244,9 @@ export function connectLanStream(callbacks: {
           eventSource.close();
           eventSource = null;
         }
-        // إعادة المحاولة بعد 4 ثوانٍ
+        // إعادة المحاولة بعد 4 ثوانٍ (أو 15 ثانية إن لم تكن هناك جلسة بعد)
         if (reconnectTimer) clearTimeout(reconnectTimer);
-        reconnectTimer = setTimeout(setup, 4000);
+        reconnectTimer = setTimeout(setup, token ? 4000 : 15000);
       };
     } catch (err) {
       console.error('[lanSync] Failed to establish EventSource:', err);
@@ -219,7 +255,15 @@ export function connectLanStream(callbacks: {
 
   setup();
 
+  // 🔴 FIX: عند جاهزية جلسة جديدة (تسجيل دخول) نعيد الاتصال بالقناة فوراً
+  const onSessionReady = () => {
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    setup();
+  };
+  window.addEventListener('mobpos:lan-session-ready', onSessionReady);
+
   return () => {
+    window.removeEventListener('mobpos:lan-session-ready', onSessionReady);
     if (reconnectTimer) clearTimeout(reconnectTimer);
     if (eventSource) {
       eventSource.close();

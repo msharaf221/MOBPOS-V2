@@ -33,10 +33,9 @@ export function useAuthSlice(state: StoreState) {
           if (lanAuth.ok && lanAuth.user) {
             user = lanAuth.user as User;
             ok = true;
-            // تحديث المستخدمين المحليين بقائمة السيرفر الحية
-            if (Array.isArray(lanAuth.users) && lanAuth.users.length > 0) {
-              setUsers(lanAuth.users as User[]);
-            }
+            // 🔴 SECURITY: الخادم لم يعد يرسل قائمة المستخدمين في رد المصادقة
+            // (كانت تحتوي هاشات كلمات المرور). القائمة تصل عبر مزامنة البيانات
+            // بعد الجلسة (SSE + fetchCentralData) بدلاً من نقطة الدخول.
           }
         } catch {
           // شبكة منقطعة أو تعذر الاتصال بالخادم الرئيسي

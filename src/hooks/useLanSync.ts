@@ -127,9 +127,12 @@ export function useLanSync(enabled: boolean, store: LanSyncStore): void {
     if (!enabled || store.isLoading) return;
 
     let cleanupStream: (() => void) | null = null;
+    const cleanupFns: Array<() => void> = [];
     const setters = buildSetters(store);
 
     if (isLanClient()) {
+      // 🔴 SECURITY: القراءة تحتاج جلسة الآن — لو مفيش جلسة بعد (قبل تسجيل الدخول)
+      // fetchCentralData سترجع null وهنا ننتظر حدث جاهزية الجلسة لإعادة السحب.
       fetchCentralData()
         .then(centralData => {
           if (centralData) applyCentralSnapshot(store, centralData);
@@ -156,6 +159,20 @@ export function useLanSync(enabled: boolean, store: LanSyncStore): void {
         auditLogs: store.auditLogs,
         appSettings: store.appSettings,
       }).catch(e => console.warn('[useLanSync] pushCentralData error:', e));
+    }
+
+    // 🔴 SECURITY: بعد حفظ جلسة جديدة (mobpos:lan-session-ready) يعيد عميل LAN
+    // سحب نسخة كاملة من بيانات السيرفر مباشرة (كان مستني إعادة تركيب الواجهة).
+    if (isLanClient()) {
+      const onSessionReady = () => {
+        fetchCentralData()
+          .then(centralData => {
+            if (centralData) applyCentralSnapshot(store, centralData);
+          })
+          .catch(e => console.warn('[useLanSync] session-ready refetch error:', e));
+      };
+      window.addEventListener('mobpos:lan-session-ready', onSessionReady);
+      cleanupFns.push(() => window.removeEventListener('mobpos:lan-session-ready', onSessionReady));
     }
 
     cleanupStream = connectLanStream({
@@ -189,6 +206,7 @@ export function useLanSync(enabled: boolean, store: LanSyncStore): void {
 
     return () => {
       if (cleanupStream) cleanupStream();
+      cleanupFns.forEach(fn => fn());
     };
     // We intentionally depend only on enabled + isLoading so we don't
     // re-subscribe on every store mutation.

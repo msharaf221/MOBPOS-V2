@@ -185,7 +185,36 @@ function isLoopbackAddress(ip) {
   );
 }
 
-function extractLanToken(req) {
+/**
+ * 🔴 SECURITY: مقارنة سلاسل بزمن ثابت — تمنع Timing Attacks على رموز PIN
+ * وكلمات المرور القصيرة (كشف تدرجي لكل حرف).
+ */
+function timingSafeStringsEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || !a || !b) return false;
+  const bufA = Buffer.from(a, 'utf8');
+  const bufB = Buffer.from(b, 'utf8');
+  if (bufA.length !== bufB.length) {
+    // طول مختلف: قارن مع نفسها لاستهلاك زمن مماثل ثم ارفض
+    crypto.timingSafeEqual(bufA, bufA);
+    return false;
+  }
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+// تنظيف الجلسات المنتهية كل 5 دقائق (متطلب هذا الجهاز فقط — خفيف جداً)
+const sessionPruneTimer = setInterval(() => {
+  const now = Date.now();
+  for (const [token, session] of lanSessions.entries()) {
+    if (now > session.expiresAt) {
+      lanSessions.delete(token);
+    }
+  }
+}, 5 * 60 * 1000);
+if (sessionPruneTimer && typeof sessionPruneTimer.unref === 'function') {
+  sessionPruneTimer.unref();
+}
+
+function extractLanToken(req, parsedUrl = null) {
   const authHeader = req.headers['authorization'];
   if (authHeader && typeof authHeader === 'string') {
     const match = authHeader.match(/^Bearer\s+(.+)$/i);
@@ -195,16 +224,25 @@ function extractLanToken(req) {
   if (xSession && typeof xSession === 'string') {
     return xSession.trim();
   }
+  // 🔴 SECURITY: في قناة SSE لا يمكن إرسال رؤوس مع EventSource، فالرمز
+  // يُمرَّر عبر query param (?token=ls_...) — مقبول هنا لأن الرابط يبقى
+  // داخل شبكة محلية ويُخفى من سجلات السيرفر الخارجية ولا يُسمح إلا بالجلسات.
+  if (parsedUrl) {
+    const qToken = parsedUrl.searchParams.get('token');
+    if (qToken && typeof qToken === 'string') {
+      return qToken.trim();
+    }
+  }
   return null;
 }
 
-function verifyLanSession(req) {
+function verifyLanSession(req, parsedUrl = null) {
   const remoteIp = req.socket?.remoteAddress;
   if (isLoopbackAddress(remoteIp)) {
     return { ok: true, isLoopback: true };
   }
 
-  const token = extractLanToken(req);
+  const token = extractLanToken(req, parsedUrl);
   if (!token) {
     return { ok: false, error: 'مطلوب رمز جلسة صالح (Session Token)' };
   }
@@ -222,16 +260,38 @@ function verifyLanSession(req) {
   return { ok: true, session };
 }
 
-function setCorsHeaders(res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Client-Id, X-Lan-Session');
+// 🔴 SECURITY: لا مزايدة (NO wildcard CORS) — الواجهة والـ API متواجدان على نفس
+// الـ origin بالضرورة (السيرفر يوزع dist نفسه). نعكس الـ Origin فقط عندما يكون
+// على أحد عناوين هذا الجهاز بنفس المنفذ؛ غير ذلك الطلب يبقى بدون رأس CORS
+// (المتصفح يردد الطلب جهده وهو نية هجوم من صفحة خارجية).
+function getSelfHostnames() {
+  return new Set(['localhost', '127.0.0.1', '::1', os.hostname().toLowerCase(), ...getLanIpAddresses()]);
+}
+
+function setCorsHeaders(req, res, currentPort) {
+  const origin = req.headers['origin'];
+  if (!origin) return;
+  try {
+    const u = new URL(origin);
+    const hostOk = getSelfHostnames().has(u.hostname.toLowerCase()) ||
+      /^\d{1,3}(\.\d{1,3}){3}$/.test(u.hostname) && getLanIpAddresses().includes(u.hostname);
+    const portOk = !u.port || Number(u.port) === Number(currentPort);
+    if (hostOk && portOk) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Client-Id, X-Lan-Session');
+      res.setHeader('Access-Control-Max-Age', '600');
+    }
+  } catch {
+    // Origin مشوه → بدون رؤوس CORS
+  }
 }
 
 /**
  * التحقق من كلمة المرور بدعم كامل لصيغة PBKDF2 والهاش القديم والنص العادي
  */
-function verifyPassword(plain, stored) {
+function verifyPassword(plain, stored, options = {}) {
   if (typeof plain !== 'string' || typeof stored !== 'string') return false;
   if (!plain || !stored) return false;
 
@@ -259,8 +319,57 @@ function verifyPassword(plain, stored) {
     return legacy.toLowerCase() === stored.toLowerCase();
   }
 
-  // كلمة المرور الافتراضية أو غير المشفرة (مثل الحساب الافتراضي admin123)
-  return plain === stored;
+  // 🔴 SECURITY: مقارن النص العائي (plaintext) أصبح مسموحاً فقط لطوارئ الأدمن
+  // الافتراضي (admin / admin123) — سابقاً كان أي مستخدم مخزن كلمة مروره نصاً
+  // (من نسخ قديمة) يقدر يسجل دخول من أجهزة الشبكة بسهولة.
+  if (options.allowPlaintext && plain === stored) return true;
+  return false;
+}
+
+// ── 🔴 SECURITY: تحديد معدل محاولات تسجيل الدخول (Rate Limiting) ──
+// 10 محاولات فاشلة خلال 15 دقيقة → حجب الـ IP لمدة 5 دقائق
+const authAttempts = new Map(); // ip -> { fails: number[], blockedUntil: number }
+const AUTH_WINDOW_MS = 15 * 60 * 1000;
+const AUTH_MAX_FAILS = 10;
+const AUTH_BLOCK_MS = 5 * 60 * 1000;
+
+function isAuthBlocked(ip) {
+  const rec = authAttempts.get(ip);
+  if (!rec) return false;
+  if (rec.blockedUntil && Date.now() < rec.blockedUntil) return true;
+  if (rec.blockedUntil && Date.now() >= rec.blockedUntil) {
+    authAttempts.delete(ip);
+  }
+  return false;
+}
+
+function recordAuthFailure(ip) {
+  const now = Date.now();
+  const rec = authAttempts.get(ip) || { fails: [], blockedUntil: 0 };
+  rec.fails = rec.fails.filter(t => now - t < AUTH_WINDOW_MS);
+  rec.fails.push(now);
+  if (rec.fails.length >= AUTH_MAX_FAILS) {
+    rec.blockedUntil = now + AUTH_BLOCK_MS;
+    rec.fails = [];
+  }
+  authAttempts.set(ip, rec);
+}
+
+function recordAuthSuccess(ip) {
+  authAttempts.delete(ip);
+}
+
+// تنظيف دوري لذاكرة محاولات الدخول
+const authPruneTimer = setInterval(() => {
+  const now = Date.now();
+  for (const [ip, rec] of authAttempts.entries()) {
+    if (now - Math.max(rec.blockedUntil || 0, rec.fails[rec.fails.length - 1] || 0) > AUTH_WINDOW_MS) {
+      authAttempts.delete(ip);
+    }
+  }
+}, 60 * 1000);
+if (authPruneTimer && typeof authPruneTimer.unref === 'function') {
+  authPruneTimer.unref();
 }
 
 /**
@@ -275,7 +384,7 @@ async function handleLanRequest(req, res, currentPort = 8420) {
     return false;
   }
 
-  setCorsHeaders(res);
+  setCorsHeaders(req, res, currentPort);
 
   if (req.method === 'OPTIONS') {
     res.writeHead(204);
@@ -309,7 +418,15 @@ async function handleLanRequest(req, res, currentPort = 8420) {
   }
 
   // 2. قناة البث المباشر (SSE Stream)
+  // 🔴 SECURITY: الاشتراك الآن يتطلب جلسة صالحة من خارج الجهاز الرئيسي
   if (pathname === '/api/lan/stream' && req.method === 'GET') {
+    const streamAuth = verifyLanSession(req, parsedUrl);
+    if (!streamAuth.ok) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: streamAuth.error }));
+      return true;
+    }
+
     const clientId = `${clientIp}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const userAgent = req.headers['user-agent'] || 'unknown';
 
@@ -337,7 +454,16 @@ async function handleLanRequest(req, res, currentPort = 8420) {
   }
 
   // 3. جلب أو تحديث قاعدة البيانات المركزية كاملة
+  // 🔴 SECURITY: القراءة أيضاً محمية الآن (كانت أي جهاز على الشبكة يقرأ
+  // كل بيانات المحل — مبيعات ومخزون وتصريحات — بدون تسجيل دخول)
   if (pathname === '/api/lan/data') {
+    const dataAuth = verifyLanSession(req, parsedUrl);
+    if (!dataAuth.ok) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: dataAuth.error }));
+      return true;
+    }
+
     if (req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify(centralStore));
@@ -345,12 +471,6 @@ async function handleLanRequest(req, res, currentPort = 8420) {
     }
 
     if (req.method === 'POST') {
-      const auth = verifyLanSession(req);
-      if (!auth.ok) {
-        res.writeHead(401, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: false, error: auth.error }));
-        return true;
-      }
       try {
         const body = await readJsonBody(req);
         if (body && typeof body === 'object') {
@@ -473,6 +593,13 @@ async function handleLanRequest(req, res, currentPort = 8420) {
 
   // 5. التحقق من صحة تسجيل الدخول من أجهزة الشبكة (LAN Client Authentication)
   if (pathname === '/api/lan/auth' && req.method === 'POST') {
+    // ── 🔴 SECURITY: Rate Limiting على محاولات الدخول ──
+    if (isAuthBlocked(clientIp)) {
+      res.writeHead(429, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'عدد كبير من المحاولات الفاشلة — حاول بعد 5 دقائق' }));
+      return true;
+    }
+
     try {
       const body = await readJsonBody(req);
       const username = (body.username || '').trim().toLowerCase();
@@ -521,14 +648,18 @@ async function handleLanRequest(req, res, currentPort = 8420) {
       }
 
       // 1) تحقق من كلمة مرور المستخدم
-      let isValid = user ? verifyPassword(password, user.password) : false;
+      // 🔴 SECURITY: المقارنة بالنص العائي مسموحة فقط لطوارئ الأدمن الافتراضي
+      const isDefaultAdminUser = !!user && user.username === 'admin' && user.id === defaultAdmin.id;
+      let isValid = user ? verifyPassword(password, user.password, { allowPlaintext: isDefaultAdminUser }) : false;
       let authenticatedViaPin = false;
 
       // 2) التحقق من رمز PIN الخاص بالشبكة المحلية (إذا كان محدداً في الإعدادات)
       const configuredPin = (centralStore.appSettings?.lanPin || '').trim();
       if (!isValid && configuredPin) {
-        const cleanPw = password.trim();
-        if (cleanPw === configuredPin || password === configuredPin || username === configuredPin) {
+        // 🔴 SECURITY: مقارنة بزمن ثابت (timing-safe) لمنع كشف تطابق الأحرف الحساسة
+        const pinMatch = timingSafeStringsEqual(password.trim(), configuredPin) ||
+          timingSafeStringsEqual(password, configuredPin);
+        if (pinMatch || username === configuredPin) {
           isValid = true;
           authenticatedViaPin = true;
           if (!user) {
@@ -540,15 +671,18 @@ async function handleLanRequest(req, res, currentPort = 8420) {
       // 3) الحساب الاحتياطي لطوارئ الأدمن (admin123)
       // يُقبل فقط إذا كانت كلمة المرور المخزنة لا تزال الافتراضية 'admin123' أو لم يكن هناك مستخدمين
       const isDefaultAdmin = user ? user.password === 'admin123' : centralStore.users.length === 0;
-      if (!isValid && isDefaultAdmin && user && (user.username === 'admin' || user.name === 'مدير المحل') && (password === 'admin123' || password.trim() === 'admin123')) {
+      if (!isValid && isDefaultAdmin && user && (user.username === 'admin' || user.name === 'مدير المحل') && timingSafeStringsEqual(password, 'admin123')) {
         isValid = true;
       }
 
       if (!isValid || !user) {
+        recordAuthFailure(clientIp);
         res.writeHead(401, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة' }));
         return true;
       }
+
+      recordAuthSuccess(clientIp);
 
       if (!centralStore.users.some(u => (u.username || '').toLowerCase() === user.username.toLowerCase())) {
         centralStore.users.push(user);
@@ -563,7 +697,7 @@ async function handleLanRequest(req, res, currentPort = 8420) {
         createdAt: user.createdAt,
         mustChangePassword: authenticatedViaPin
           ? false
-          : !!(user.mustChangePassword || user.password === 'admin123' || password === 'admin123' || password.trim() === 'admin123'),
+          : !!(user.mustChangePassword || user.password === 'admin123' || timingSafeStringsEqual(password, 'admin123')),
       };
 
       const sessionToken = createLanSession(sessionUser);
@@ -574,7 +708,10 @@ async function handleLanRequest(req, res, currentPort = 8420) {
           ok: true,
           sessionToken,
           user: sessionUser,
-          users: centralStore.users,
+          // 🔴 SECURITY: أزالة قائمة المستخدمين من رد المصادقة — كانت ترسل
+          // كلمات مرور (أو هاشات) كل المستخدمين إلى أي جهاز على الشبكة بعد
+          // تسجيل الدخول. الجهاز الفرعي يست قائمة المستخدمين عبر مزامنة
+          // البيانات المشفرة الجلسة (SSE / data) بدلاً من نقطة دخول عامة.
         })
       );
       return true;
