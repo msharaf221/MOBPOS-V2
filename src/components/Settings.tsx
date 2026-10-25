@@ -84,6 +84,8 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
   const [syncKey, setSyncKey] = useState(() => syncEngine.loadConfig().anonKey);
   const [syncAccessToken, setSyncAccessToken] = useState(() => syncEngine.loadConfig().accessToken || '');
   const [syncTenant, setSyncTenant] = useState(() => syncEngine.loadConfig().tenantId || '');
+  // 🔴 SECURITY: سر عزل المستأجر (اختياري) — يعمل فقط مع مخطط RLS الصارم (Step 8)
+  const [syncTenantSecret, setSyncTenantSecret] = useState(() => syncEngine.loadConfig().tenantSecret || '');
   const [syncAutoEnabled, setSyncAutoEnabled] = useState(() => syncEngine.loadConfig().autoSyncEnabled);
   const [syncEmail, setSyncEmail] = useState('');
   const [syncPassword, setSyncPassword] = useState('');
@@ -1505,6 +1507,23 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                       className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-800 dark:text-white font-mono text-xs"
                     />
                   </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                      🔐 سر المتجر (Tenant Secret) — اختياري
+                    </label>
+                    <input
+                      type="password"
+                      dir="ltr"
+                      value={syncTenantSecret}
+                      onChange={e => setSyncTenantSecret(e.target.value)}
+                      placeholder="سر قوي 32+ حرفاً — يُشترط مع مخطط RLS الصارم فقط"
+                      className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-800 dark:text-white font-mono text-xs"
+                    />
+                    <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-1 leading-relaxed">
+                      إذا نفذت «الخطوة 8 — عزل المستأجرين الصارم» من سكربت المخطط، أدخل نفس السر في كل الأجهزة.
+                      اتركت الحقل فاضياً لو لسه على السياسات المفتوحة (allow_all).
+                    </p>
+                  </div>
                 </div>
 
                 {/* Token Alert if non-JWT token is present */}
@@ -1627,6 +1646,7 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                                 url: syncUrl.trim().replace(/\/+$/, ''),
                                 anonKey: syncKey.trim().replace(/^['"]|['"]$/g, ''),
                                 tenantId: syncTenant.trim() || undefined,
+                                tenantSecret: syncTenantSecret.trim() || undefined,
                               });
                               const res = await sync.signInWithPassword(syncEmail, syncPassword);
                               if (res.ok) {
@@ -1666,6 +1686,7 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                       const cleanKey = syncKey.trim().replace(/^['"]|['"]$/g, '');
                       const cleanToken = isValidJwt(syncAccessToken) ? syncAccessToken.trim() : undefined;
                       const cleanTenant = syncTenant.trim() || undefined;
+                      const cleanTenantSecret = syncTenantSecret.trim() || undefined;
 
                       setSyncUrl(cleanUrl);
                       setSyncKey(cleanKey);
@@ -1676,6 +1697,7 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                         anonKey: cleanKey,
                         accessToken: cleanToken,
                         tenantId: cleanTenant,
+                        tenantSecret: cleanTenantSecret,
                         autoSyncEnabled: syncAutoEnabled,
                       });
                       persistBranding({

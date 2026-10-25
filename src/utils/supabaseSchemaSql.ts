@@ -126,4 +126,90 @@ end $$;
 
 -- Step 7: Reload PostgREST Schema Cache
 notify pgrst, 'reload schema';
+
+
+
+-- ============================================================
+-- Step 8 (اختياري لكن يوصى به): عزل المستأجرين الصارم بسر المستأجر
+-- Strict Tenant-Secret Isolation (Opt-in)
+-- ============================================================
+-- النسخة الافتراضية أعلاه (allow_all) تعمل مع أي شخص يملك Anon Key.
+-- هذي الخطوة تضيف طبقة حماية حقيقية بسر فريد لكل مستأجر (Tenant Secret):
+--  1) نفّذ هذا السكربت في Supabase SQL Editor.
+--  2) من إعدادات الفرع/المزامنة أدخل نفس السر في حقل "سر المتجر (Tenant Secret)"
+--     بالديسكتوب وكل أجهزة الجوال المعنية بنفس المستأجر.
+--  3) أي طلب بدون الرأس x-tenant-secret الصحيح سيُرفض 403 حتى لو امتلك Anon Key.
+-- ملاحظة: بعد تفعيلها تأكد أن كل الأجهزة حدّثت السر قبل حذف السياسات الأقدم.
+
+-- 8-A. جدول هاشات أسرار المستأجرين (لا يُخزَّن السر الخام أبداً)
+create table if not exists public.mobpos_tenant_secrets (
+  tenant_id   text primary key,
+  secret_hash text not null,          -- sha256(secret) hex — 64 chars
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+
+alter table public.mobpos_tenant_secrets enable row level security;
+
+-- قفل تام: لا تقرأ أي هاشات عبر الـ API مباشرة (فقط دالة security definer أدناه)
+drop policy if exists "mobpos_tenant_secrets_no_direct_access" on public.mobpos_tenant_secrets;
+create policy "mobpos_tenant_secrets_no_direct_access"
+  on public.mobpos_tenant_secrets
+  for all
+  to anon, authenticated
+  using (false)
+  with check (false);
+
+-- إدراج/تحديث سر مستأجر: نفّذه مرة واحدة لكل مستأجر مع سر قوي (32+ حرفاً)
+-- create or replace function public.fn_set_tenant_secret(raw_secret text) ... أدرج يدوياً:
+--   insert into public.mobpos_tenant_secrets(tenant_id, secret_hash)
+--   values ('default-tenant', encode(sha256('YOUR_STRONG_SECRET'::bytea), 'hex'))
+--   on conflict (tenant_id) do update set secret_hash = excluded.secret_hash, updated_at = now();
+
+-- 8-B. دالة التحقق (Security Definer — تقرأ الهاشات رغم قفل RLS وتقارن مع رأس الطلب)
+create or replace function public.fn_verify_tenant_secret(request_tenant_id text)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+stable
+as $$
+declare
+  provided_secret text;
+begin
+  select coalesce(nullif(current_setting('request.headers', true), '')::jsonb ->> 'x-tenant-secret', '')
+    into provided_secret;
+  if provided_secret is null or length(provided_secret) = 0 then
+    return false;
+  end if;
+  return exists (
+    select 1 from public.mobpos_tenant_secrets s
+    where s.tenant_id = request_tenant_id
+      and s.secret_hash = encode(sha256(provided_secret::bytea), 'hex')
+  );
+end;
+$$;
+
+-- 8-C. سياسات صارمة على جدولي المزامنة (تستبدل allow_all)
+drop policy if exists "mobpos_stores_allow_all" on public.mobpos_stores;
+drop policy if exists "mobpos_stores_policy" on public.mobpos_stores;
+create policy "mobpos_stores_tenant_secret"
+  on public.mobpos_stores
+  for all
+  to anon, authenticated, service_role
+  using (fn_verify_tenant_secret(tenant_id))
+  with check (fn_verify_tenant_secret(tenant_id));
+
+drop policy if exists "mobpos_records_allow_all" on public.mobpos_records;
+drop policy if exists "mobpos_records_policy" on public.mobpos_records;
+create policy "mobpos_records_tenant_secret"
+  on public.mobpos_records
+  for all
+  to anon, authenticated, service_role
+  using (fn_verify_tenant_secret(tenant_id))
+  with check (fn_verify_tenant_secret(tenant_id));
+
+-- 8-D. تحديث كاش PostgREST بعد تعريض الدوال والسياسات
+notify pgrst, 'reload schema';
+
 `;
