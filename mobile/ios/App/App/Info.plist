@@ -24,6 +24,9 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- 🔴 FIX: صلاحية الكاميرا المفقودة — بدونها getUserMedia يُرفض على iOS والماسح لا يعمل -->
+	<key>NSCameraUsageDescription</key>
+	<string>يحتاج تطبيق MOBPOS Companion للوصول إلى الكاميرا لمسح باركود الصنف وسيريال الجهاز (IMEI) أثناء البيع والاستلام.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  قواعد استخراج البيانات على Android 12+ (dataExtractionRules):
+  نمنع النسخ الاحتياطي السحابي (cloud-backup) والنقل للجهاز (device-transfer)
+  بالكامل، لأن localStorage يحتوي مفاتيح ربط Supabase الخاصة بالفروع.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+        <exclude domain="root" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+        <exclude domain="root" />
+    </device-transfer>
+</data-extraction-rules>

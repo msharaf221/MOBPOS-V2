@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  قواعد النسخ الاحتياطي لـ Android 11 وما قبله (fullBackupContent):
+  نستثني كل محتوى ذاكرة التطبيق من الـ adb backup، لأن localStorage
+  يحتوي مفاتيح ربط Supabase الخاصة بالفروع (URL / Anon Key / Tenant ID).
+-->
+<full-backup-content>
+    <exclude domain="file" />
+    <exclude domain="database" />
+    <exclude domain="sharedpref" />
+    <exclude domain="external" />
+    <exclude domain="root" />
+</full-backup-content>
