@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Flashlight, Camera, Keyboard, AlertCircle } from 'lucide-react';
 import { playBeep, triggerHaptic } from '../utils/sound';
+import type { IScannerControls } from '@zxing/browser';
 
 interface CameraScannerModalProps {
   isOpen: boolean;
@@ -24,6 +25,8 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const isScanningRef = useRef(false);
+  // 🔴 FIX: مرجع للتحكم في قارئ ZXing البديل (iOS WKWebView بلا BarcodeDetector)
+  const zxingControlsRef = useRef<IScannerControls | null>(null);
 
   useEffect(() => {
     if (!isOpen) {
@@ -82,6 +85,11 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
 
   const stopCamera = () => {
     isScanningRef.current = false;
+    // إيقاف قارئ ZXing لو كان يعمل بالوضع البديل
+    try {
+      zxingControlsRef.current?.stop();
+    } catch { /* ignore */ }
+    zxingControlsRef.current = null;
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
@@ -142,6 +150,28 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
       } catch (e) {
         console.info('[BarcodeDetector] Not available, falling back', e);
       }
+    }
+
+    // ── 🔴 FIX: الوضع البديل (ZXing) لأجهزة iOS WKWebView التي لا تدعم
+    // BarcodeDetector — كان الماسح يفتح الكاميرا فقط دون أي نتيجة أبداً. ──
+    try {
+      const { BrowserMultiFormatReader } = await import('@zxing/browser');
+      const reader = new BrowserMultiFormatReader();
+      const videoEl = videoRef.current;
+      if (!videoEl || !isScanningRef.current) return;
+
+      zxingControlsRef.current = await reader.decodeFromVideoElement(videoEl, (result) => {
+        if (!result) return;
+        const raw = result.getText().trim();
+        if (!raw || !isScanningRef.current) return;
+        playBeep();
+        triggerHaptic('medium');
+        onScan(raw);
+        onClose();
+      });
+    } catch (zxingErr) {
+      console.warn('[ZXing] Fallback scanner failed, enabling manual input:', zxingErr);
+      setShowManualInput(true);
     }
   };
 
