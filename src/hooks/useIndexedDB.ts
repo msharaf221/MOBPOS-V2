@@ -233,6 +233,26 @@ async function remove(storeName: string, id: string): Promise<void> {
   });
 }
 
+/** قراءة سجل واحد بالمفتاح مباشرة (أسرع بكثير من getAll+find على مخزن كبير) */
+async function get<T>(storeName: string, id: string): Promise<T | null> {
+  return runTransaction(storeName, 'readonly', transaction => {
+    const request = transaction.objectStore(storeName).get(id);
+    return new Promise<T | null>((resolve, reject) => {
+      request.onerror = () => reject(request.error || new Error('تعذر قراءة السجل'));
+      request.onsuccess = () => resolve((request.result as T) ?? null);
+    });
+  });
+}
+
+/** حذف مجموعة مفاتيح في معاملة واحدة — يستخدم لتفريغ الـ outbox على دفعات */
+async function removeMany(storeName: string, ids: string[]): Promise<void> {
+  if (!ids.length) return;
+  await runTransaction(storeName, 'readwrite', transaction => {
+    const store = transaction.objectStore(storeName);
+    ids.forEach(id => store.delete(id));
+  });
+}
+
 async function clearStore(storeName: string): Promise<void> {
   await runTransaction(storeName, 'readwrite', transaction => {
     transaction.objectStore(storeName).clear();
@@ -764,9 +784,11 @@ export async function runAtomicTransaction(
 export const indexedDBUtils = {
   openDB,
   getAll,
+  get,
   put,
   putMany,
   remove,
+  removeMany,
   clearStore,
   clearAllData,
   getSetting,

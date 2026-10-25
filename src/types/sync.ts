@@ -11,6 +11,8 @@ export interface SyncConfig {
   refreshToken?: string; // Supabase Auth refresh token
   userEmail?: string;    // Supabase Auth account email
   tenantId?: string;     // Unique store/license partition
+  /** سر عزل المستأجر (اختياري) يُرَفق كرأس x-tenant-secret — شغّيل فقط مع مخطط RLS الصارم */
+  tenantSecret?: string;
   autoSyncEnabled: boolean; // Auto sync on/off toggle
 }
 

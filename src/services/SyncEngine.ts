@@ -47,6 +47,8 @@ const CFG_KEY = 'mobpos_sync_key';
 const CFG_ACCESS_TOKEN = 'mobpos_sync_access_token';
 const CFG_REFRESH_TOKEN = 'mobpos_sync_refresh_token';
 const CFG_USER_EMAIL = 'mobpos_sync_user_email';
+
+const CFG_TENANT_SECRET = 'mobpos_sync_tenant_secret';
 const CFG_TENANT = 'mobpos_sync_tenant';
 const CFG_AUTO_SYNC = 'mobpos_sync_auto_enabled';
 const CFG_CLIENT_ID = 'mobpos_device_client_id';
@@ -151,6 +153,7 @@ class SyncEngine {
       refreshToken: (localStorage.getItem(CFG_REFRESH_TOKEN) || '').trim() || undefined,
       userEmail: (localStorage.getItem(CFG_USER_EMAIL) || '').trim() || undefined,
       tenantId: this.resolveTenantId(),
+      tenantSecret: (localStorage.getItem(CFG_TENANT_SECRET) || '').trim() || undefined,
       autoSyncEnabled: localStorage.getItem(CFG_AUTO_SYNC) !== 'false',
     };
   }
@@ -170,6 +173,7 @@ class SyncEngine {
     if (cfg.refreshToken !== undefined) localStorage.setItem(CFG_REFRESH_TOKEN, cfg.refreshToken.trim());
     if (cfg.userEmail !== undefined) localStorage.setItem(CFG_USER_EMAIL, cfg.userEmail.trim());
     if (cfg.tenantId !== undefined) localStorage.setItem(CFG_TENANT, cfg.tenantId.trim());
+    if (cfg.tenantSecret !== undefined) localStorage.setItem(CFG_TENANT_SECRET, cfg.tenantSecret.trim());
     if (cfg.autoSyncEnabled !== undefined) localStorage.setItem(CFG_AUTO_SYNC, cfg.autoSyncEnabled ? 'true' : 'false');
 
     this.config = this.loadConfig();
@@ -312,7 +316,11 @@ class SyncEngine {
     // Runs silent check every 30s to drain pending records and auto-push fresh snapshot
     this.heartbeatTimer = setInterval(() => {
       if (this.state.isOnline && this.state.status !== 'disabled') {
-        if (this.state.pendingCount > 0 && !this.isDraining && this.consecutiveErrors < 5) {
+        // 🔴 FIX: إزالة قيد consecutiveErrors<5 — كان يجعل نبض الخلفية يتوقف عن
+        // إعادة المحاولة للأبد بعد 5 أخطاء متتالية (مثلاً انقطاع ليلي طويل)،
+        // فتلازم السجلات معلقة حتى إعادة تشغيل التطبيق يدوياً. الـ backoff الداخلي
+        // الخاص بـ triggerDrain كفيل بمنع الضغط على الشبكة.
+        if (this.state.pendingCount > 0 && !this.isDraining) {
           void this.triggerDrain(false);
         }
 
@@ -471,11 +479,18 @@ class SyncEngine {
     try {
       const validToken = isValidJwt(this.config.accessToken) ? this.config.accessToken!.trim() : undefined;
 
+      // 🔴 SECURITY: مع مخطط RLS الصارم (الخطوة 8) يُرفق سر المستأجر كرأس ثابت
+      // على كل الطلبات والـ Realtime حتى يمنح Supabase الوصول لمستأجرنا فقط.
+      const tenantSecret = this.config.tenantSecret || undefined;
+
       this.supabase = createClient(this.config.url, this.config.anonKey, {
         auth: {
           persistSession: true,
           autoRefreshToken: true,
           detectSessionInUrl: false,
+        },
+        global: {
+          headers: tenantSecret ? { 'x-tenant-secret': tenantSecret } : {},
         },
       });
 
@@ -797,7 +812,9 @@ class SyncEngine {
         store: it.store,
         record_id: it.recordId,
         data: it.action === 'upsert' ? (it.data || {}) : {},
-        version: 1,
+        // 🔴 FIX: ترقية الإصدار من نسخة السجل المحلي بدل تثبيت version:1 دائماً،
+        // حتى تُوثَّق تسلسلات التعديل وترتيب التعارضات في mobpos_records.
+        version: (Number((it.data as { version?: number } | undefined)?.version) || 0) + 1,
         client_id: it.clientId,
         updated_at: it.clientUpdatedAt,
         deleted_at: it.action === 'delete' ? it.clientUpdatedAt : null,
@@ -812,10 +829,11 @@ class SyncEngine {
         throw new Error(error.message);
       }
 
-      // Successfully uploaded batch: remove from IndexedDB outbox
-      for (const it of batch) {
-        await indexedDBUtils.remove(indexedDBUtils.STORES.syncOutbox, it.id);
-      }
+      // Successfully uploaded batch: remove from IndexedDB outbox in ONE transaction
+      await indexedDBUtils.removeMany(
+        indexedDBUtils.STORES.syncOutbox,
+        batch.map(it => it.id)
+      );
 
       this.state.pendingCount = items.length - batch.length;
       this.emitState();
@@ -957,12 +975,16 @@ class SyncEngine {
       // 2. Conflict Resolution: Last-Write-Wins (LWW)
       const existing = await this.getLocalRecord(row.store, row.record_id);
       if (existing) {
-        const localUpdated = (existing.updated_at as string) || (existing.createdAt as string);
+        // 🔴 FIX: المقارنة فقط عندما يوجد updated_at صريح على الجهاز. سابقاً كان
+        // يستخدم createdAt كاحتياطي — فيتجاهل تحديثات السحابة لسجل أُنشئ محلياً
+        // (createdAt أقدم طبيعياً من أي تحديث قادم) فتضيع التعديلات عن الجهاز.
+        // لو مفيش updated_at محلي → نسخة السحابة هي الأحدث ويجب تُطبَّق.
+        const localUpdated = existing.updated_at as string | undefined;
         if (localUpdated && row.updated_at) {
           const localTime = new Date(localUpdated).getTime();
           const remoteTime = new Date(row.updated_at).getTime();
           // If local record is newer, local wins
-          if (localTime > remoteTime) {
+          if (localTime > remoteTime && !Number.isNaN(localTime) && !Number.isNaN(remoteTime)) {
             return;
           }
         }
@@ -1000,8 +1022,10 @@ class SyncEngine {
 
   private async getLocalRecord(storeName: string, id: string): Promise<Record<string, unknown> | null> {
     try {
-      const records = await indexedDBUtils.getAll<{ id: string; [key: string]: unknown }>(storeName);
-      return records.find(r => r.id === id) || null;
+      // 🔴 FIX: قراءة مباشرة بالمفتاح بدل getAll+find — كانت تُحمّل المخزن بالكامل
+      // (قد يكون آلاف السجلات) عند كل حدث realtime واحد.
+      const rec = await indexedDBUtils.get<{ id: string; [key: string]: unknown }>(storeName, id);
+      return (rec as Record<string, unknown>) || null;
     } catch {
       return null;
     }
@@ -1015,29 +1039,43 @@ class SyncEngine {
     if (!this.supabase || !this.state.isOnline) return 0;
     const tenantId = this.state.tenantId;
 
-    let query = this.supabase
-      .from('mobpos_records')
-      .select('*')
-      .eq('tenant_id', tenantId)
-      .order('updated_at', { ascending: true })
-      .limit(500);
-
-    if (this.state.lastSyncedAt) {
-      query = query.gt('updated_at', this.state.lastSyncedAt.toISOString());
-    }
-
-    const { data, error } = await query;
-    if (error || !data) return 0;
-
+    // 🔴 FIX: ترقيم الصفحات — سابقاً limit(500) بلا تنقل بين الصفحات يعني
+    // أن الجهاز المتأخر جداً (أكثر من 500 تغيير) لا يستلم باقي التحديثات أبداً.
+    const PAGE_SIZE = 500;
+    let cursor = this.state.lastSyncedAt ? this.state.lastSyncedAt.toISOString() : null;
     let appliedCount = 0;
-    for (const row of data as SyncRecordRow[]) {
-      await this.handleIncomingRemoteRow(row);
-      appliedCount++;
-    }
 
-    if (data.length > 0) {
-      const latest = (data[data.length - 1] as SyncRecordRow).updated_at;
-      if (latest) await this.saveLastSyncedTime(new Date(latest));
+    while (true) {
+      let query = this.supabase
+        .from('mobpos_records')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .order('updated_at', { ascending: true })
+        .limit(PAGE_SIZE);
+
+      if (cursor) {
+        query = query.gt('updated_at', cursor);
+      }
+
+      const { data, error } = await query;
+      if (error || !data) break;
+
+      const rows = data as SyncRecordRow[];
+      for (const row of rows) {
+        await this.handleIncomingRemoteRow(row);
+        appliedCount++;
+      }
+
+      if (rows.length > 0) {
+        const latest = rows[rows.length - 1]?.updated_at;
+        if (latest) {
+          cursor = latest;
+          await this.saveLastSyncedTime(new Date(latest));
+        }
+      }
+
+      // صفحة غير مكتملة → وصلنا لآخر البيانات
+      if (rows.length < PAGE_SIZE) break;
     }
 
     return appliedCount;

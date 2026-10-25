@@ -30,6 +30,7 @@ import { demoAppSettings, getDemoShowcaseData } from './data/demoShowcase';
 import { isLanClient, fetchLanServerInfo } from './utils/lanSync';
 import { useLanSync } from './hooks/useLanSync';
 import { syncEngine } from './services/SyncEngine';
+import { applyStoreDelta } from './hooks/store/applyDeltas';
 
 const isDevDemo =
   import.meta.env.DEV &&
@@ -96,17 +97,17 @@ export default function App() {
       const setter = storeSetters[storeName];
       if (!setter) return;
 
+      // 🔴 FIX: تُطبَّق الدلتا عبر applyStoreDelta المشترك (نفس القواعد المستخدمة
+      // في useStoreDispatcher وجسر LAN sync) بدل منطق مكرر يدوي داخله انحراف،
+      // مع الحفاظ على الـ functional update حتى لا تُكتَرش الدِلتا المتتابعة.
+      const setRecords = setter as unknown as (
+        fn: (prev: Identifiable[]) => Identifiable[]
+      ) => void;
+
       if (action.type === 'delete' && action.id) {
-        (setter as unknown as (fn: (prev: Identifiable[]) => Identifiable[]) => void)(prev =>
-          prev.filter(it => it.id !== action.id)
-        );
+        setRecords(prev => applyStoreDelta(prev, 'delete', [{ id: action.id }], storeName));
       } else if (action.type === 'upsert' && action.item) {
-        const newItem = action.item as Identifiable;
-        (setter as unknown as (fn: (prev: Identifiable[]) => Identifiable[]) => void)(prev => {
-          const map = new Map(prev.map(it => [it.id, it]));
-          map.set(newItem.id, { ...(map.get(newItem.id) || {}), ...newItem });
-          return Array.from(map.values());
-        });
+        setRecords(prev => applyStoreDelta(prev, 'upsert', [action.item], storeName));
       } else if (action.type === 'replace' && Array.isArray(action.items)) {
         setter(action.items);
       }
