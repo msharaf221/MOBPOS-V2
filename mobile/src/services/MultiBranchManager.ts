@@ -15,6 +15,29 @@ const STORAGE_KEY_BRANCHES = 'mobpos_companion_branches_v1';
 const BRANCH_FETCH_TIMEOUT_MS = 18_000;
 const METRICS_CACHE_TTL_MS = 30_000;
 
+/** معرّف الجهاز الثابت للإيكوا suppression في المزامنة (بدل توليد واحد لكل عملية) */
+const DEVICE_CLIENT_ID_KEY = 'mobpos_companion_device_client_id';
+function getDeviceClientId(): string {
+  try {
+    let id = localStorage.getItem(DEVICE_CLIENT_ID_KEY);
+    if (!id) {
+      id = `mob_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+      localStorage.setItem(DEVICE_CLIENT_ID_KEY, id);
+    }
+    return id;
+  } catch {
+    return `mob_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+  }
+}
+
+/**
+ * 🔴 FIX: عزل المستأجرين (Tenant Isolation).
+ * معرّف الموحّد المطابق للديسكتوب (`default-tenant`) يُستخدم كاحتياطي فقط؛
+ * لكن عمليات الكتابة (بيع / مصروف / صيانة) تُرفض الآن إذا كان مسار tenant
+ * مفقوداً لتجنب كتابة البيانات تحت مستأجر خاطئ.
+ */
+const UNIFIED_DEFAULT_TENANT = 'default-tenant';
+
 function withTimeout<T>(
   promise: Promise<T>,
   ms = BRANCH_FETCH_TIMEOUT_MS,
@@ -90,7 +113,12 @@ class MultiBranchManager {
   public updateBranch(id: string, updates: Partial<BranchConfig>): void {
     const branches = this.getBranches().map(b => (b.id === id ? { ...b, ...updates } : b));
     this.saveBranches(branches);
-    if (updates.supabaseUrl !== undefined || updates.supabaseAnonKey !== undefined) {
+    if (
+      updates.supabaseUrl !== undefined ||
+      updates.supabaseAnonKey !== undefined ||
+      // 🔴 FIX: الجلسة/العميل لهما رأس السر — أي تغيير فيه يفرض إعادة إنشاء العميل
+      updates.tenantSecret !== undefined
+    ) {
       const oldCh = this.channels.get(id);
       if (oldCh) void oldCh.unsubscribe();
       this.channels.delete(id);
@@ -125,8 +153,12 @@ class MultiBranchManager {
     if (!cleanUrl.startsWith('http') || cleanKey.length < 20) return null;
 
     if (!this.clients.has(branch.id)) {
+      // 🔴 SECURITY: مع مخطط RLS الصارم (Step 8) يُرفَق سر المستأجر كرأس ثابت
+      // على كل الاستعلامات والـ Realtime حتى يعرض Supabase مستأجر هذا الفرع فقط.
+      const tenantSecret = (branch.tenantSecret || '').trim();
       const client = createClient(cleanUrl, cleanKey, {
         auth: { persistSession: false, autoRefreshToken: false },
+        global: tenantSecret ? { headers: { 'x-tenant-secret': tenantSecret } } : {},
       });
       this.clients.set(branch.id, client);
     }
@@ -147,12 +179,24 @@ class MultiBranchManager {
     }
 
     try {
+      const tenantFilter = branch.tenantId ? branch.tenantId.trim() : '';
+      if (!tenantFilter) {
+        console.info(`[MultiBranch Live] Skipping realtime for ${branch.name}: no Tenant ID configured`);
+        return;
+      }
+      const deviceClientId = getDeviceClientId();
       const channel = client
         .channel(`branch_${branch.id}_live_${Date.now()}`)
         .on(
           'postgres_changes',
-          { event: '*', schema: 'public', table: 'mobpos_records' },
+          // 🔴 FIX: فلترة tenant_id — السابق كان يستقبل أحداث كل المستأجرين على المشروع
+          { event: '*', schema: 'public', table: 'mobpos_records', filter: `tenant_id=eq.${tenantFilter}` },
           (payload) => {
+            // تجاهل صدى تعديلات هذا الجهاز نفسه
+            const rowClientId = (payload.new as { client_id?: string } | null)?.client_id
+              ?? (payload.old as { client_id?: string } | null)?.client_id;
+            if (rowClientId && rowClientId === deviceClientId) return;
+
             console.log(`[MultiBranch Live] Record update on ${branch.name}:`, payload.eventType);
             this.metricsCache.delete(branch.id);
             if (onLiveChange) {
@@ -168,7 +212,7 @@ class MultiBranchManager {
         )
         .on(
           'postgres_changes',
-          { event: '*', schema: 'public', table: 'mobpos_stores' },
+          { event: '*', schema: 'public', table: 'mobpos_stores', filter: `tenant_id=eq.${tenantFilter}` },
           (payload) => {
             console.log(`[MultiBranch Live] Snapshot update on ${branch.name}:`, payload.eventType);
             this.metricsCache.delete(branch.id);
@@ -240,37 +284,42 @@ class MultiBranchManager {
         (async (): Promise<BranchMetrics> => {
           let activeTenantId = branch.tenantId ? branch.tenantId.trim() : '';
 
-      // 1. Smart Auto-Discovery of Tenant ID if missing
-      if (!activeTenantId) {
-        try {
-          const { data: sampleStore } = await client
-            .from('mobpos_stores')
-            .select('tenant_id')
-            .order('updated_at', { ascending: false })
-            .limit(1);
+          // 1. اكتشاف Tenant آمن: فقط إذا كانت القاعدة تحتوي على مستأجر واحد بالضبط.
+          // 🔴 FIX: السابق كان يتبنى "أول tenant يُلقى" مباشرة حتى لو المشروع مشترك
+          // بين عدة محلات — ما كان قد يعرض بيانات محل آخر. الآن الاعتماد التلقائي
+          // يحدث فقط في حالة المستأجر الوحيد، وإلا نطلب تحديد المعرف يدوياً.
+          if (!activeTenantId) {
+            try {
+              const tenantIds = new Set<string>();
+              try {
+                const { data: sRows } = await client.from('mobpos_stores').select('tenant_id').limit(50);
+                (sRows || []).forEach((r: { tenant_id?: string }) => r?.tenant_id && tenantIds.add(String(r.tenant_id)));
+              } catch { /* الجدول قد لا يكون موجوداً بعد */ }
+              try {
+                const { data: rRows } = await client
+                  .from('mobpos_records')
+                  .select('tenant_id')
+                  .is('deleted_at', null)
+                  .limit(50);
+                (rRows || []).forEach((r: { tenant_id?: string }) => r?.tenant_id && tenantIds.add(String(r.tenant_id)));
+              } catch { /* بديل دون فشل */ }
 
-          if (sampleStore && sampleStore.length > 0 && sampleStore[0].tenant_id) {
-            activeTenantId = sampleStore[0].tenant_id;
-            console.info(`[MultiBranch] Auto-discovered tenantId from mobpos_stores: ${activeTenantId}`);
-            this.updateBranch(branch.id, { tenantId: activeTenantId });
-          } else {
-            const { data: sampleRec } = await client
-              .from('mobpos_records')
-              .select('tenant_id')
-              .is('deleted_at', null)
-              .order('updated_at', { ascending: false })
-              .limit(1);
-
-            if (sampleRec && sampleRec.length > 0 && sampleRec[0].tenant_id) {
-              activeTenantId = sampleRec[0].tenant_id;
-              console.info(`[MultiBranch] Auto-discovered tenantId from mobpos_records: ${activeTenantId}`);
-              this.updateBranch(branch.id, { tenantId: activeTenantId });
+              if (tenantIds.size === 1) {
+                const [discovered] = Array.from(tenantIds);
+                activeTenantId = discovered;
+                console.info(`[MultiBranch] Auto-discovered sole tenantId: ${activeTenantId}`);
+                this.updateBranch(branch.id, { tenantId: activeTenantId });
+              } else if (tenantIds.size > 1) {
+                this.updateBranch(branch.id, {
+                  status: 'error',
+                  errorMessage: 'يوجد أكثر من معرف متجر في هذا المشروع — مراجعة "معرف المتجر" (Tenant ID) في إعدادات الفرع',
+                });
+                return this.getEmptyMetrics(branch.id, branch.name, branch.color);
+              }
+            } catch (discoverErr) {
+              console.warn('[MultiBranch] Auto-discovery warning:', discoverErr);
             }
           }
-        } catch (discoverErr) {
-          console.warn('[MultiBranch] Auto-discovery warning:', discoverErr);
-        }
-      }
 
       // Raw store containers
       const rawStores: Record<string, any[]> = {
@@ -291,21 +340,11 @@ class MultiBranchManager {
         if (activeTenantId) {
           storeQuery = storeQuery.eq('tenant_id', activeTenantId);
         }
-        let { data: storeRows, error: storeErr } = await storeQuery;
+        const { data: storeRows, error: storeErr } = await storeQuery;
 
-        // Self-Healing Tenant: if no rows found for provided activeTenantId, check if any exists
-        if ((!storeRows || storeRows.length === 0) && !storeErr) {
-          const { data: anyStoreRows } = await client.from('mobpos_stores').select('*').limit(20);
-          if (anyStoreRows && anyStoreRows.length > 0) {
-            storeRows = anyStoreRows;
-            const discoveredTenant = anyStoreRows[0].tenant_id;
-            if (discoveredTenant && discoveredTenant !== branch.tenantId) {
-              activeTenantId = discoveredTenant;
-              console.info(`[MultiBranch] Auto-healed tenant from mobpos_stores: ${discoveredTenant}`);
-              this.updateBranch(branch.id, { tenantId: discoveredTenant });
-            }
-          }
-        }
+        // 🔴 FIX: إزالة "الشفاء الذاتي" غير المفلتر الذي كان يتبنى بيانات أي tenant آخر
+        // عندما يكون tenant الفرع فارغاً أو لا يحتوي بيانات. الآن بدون tenant محدد
+        // نعرض رسالة واضحة بدل عرض بيانات غريبة.
 
         if (storeRows && storeRows.length > 0) {
           for (const row of storeRows) {
@@ -320,7 +359,9 @@ class MultiBranchManager {
 
       // 3. Fetch Real-time Deltas from mobpos_records and overlay on top of baseline
       try {
-        let deltaQuery = client.from('mobpos_records').select('*').is('deleted_at', null).order('updated_at', { ascending: false }).limit(600);
+        // 🔴 FIX: استثناء .is('deleted_at', null) — كانت الـ tombstones (سجلات الحذف)
+        // تُفلتر خارج الاستعلام، فلا أُحذف أي سجل من عرض الموبايل أبداً بعد حذفه بالديسكتوب.
+        let deltaQuery = client.from('mobpos_records').select('*').order('updated_at', { ascending: false }).limit(600);
         if (activeTenantId) {
           deltaQuery = deltaQuery.eq('tenant_id', activeTenantId);
         }
@@ -332,11 +373,19 @@ class MultiBranchManager {
             const storeName = row.store;
             const recordData = row.data;
             const recordId = row.record_id || recordData?.id;
-            if (!storeName || !recordData || !recordId) continue;
+            if (!storeName || !recordId) continue;
 
             if (!rawStores[storeName]) {
               rawStores[storeName] = [];
             }
+
+            // حذف ناعم: نشيل السجل من العرض بدل إعادة إضافته
+            if (row.deleted_at) {
+              const dIdx = rawStores[storeName].findIndex((item: any) => item.id === recordId);
+              if (dIdx >= 0) rawStores[storeName].splice(dIdx, 1);
+              continue;
+            }
+            if (!recordData) continue;
 
             const existingIdx = rawStores[storeName].findIndex((item: any) => item.id === recordId);
             if (existingIdx >= 0) {
@@ -565,10 +614,11 @@ class MultiBranchManager {
       });
 
       const todaySalesTotal = todaySales.reduce((acc, s) => acc + (Number(s.finalTotal) || 0), 0);
-      const todayProfitTotal = todaySales.reduce((acc, s) => {
-        if (s.profit && Number(s.profit) > 0) return acc + Number(s.profit);
-        return acc + Math.round(Number(s.finalTotal) * 0.18);
-      }, 0);
+      // 🔴 FIX: إزالة "الربح الوهمي" — كان يعرض 18% من الإجمالي كربح حقيقي لو حقل الربح مش موجود
+      const todayProfitTotal = todaySales.reduce(
+        (acc, s) => acc + (s.profit && Number(s.profit) > 0 ? Number(s.profit) : 0),
+        0
+      );
 
       const todayCashCollected = todaySales.reduce((acc, s) => acc + (Number(s.paidAmount) || 0), 0);
 
@@ -775,16 +825,24 @@ class MultiBranchManager {
       return { success: false, error: 'الفرع غير مهيأ بالربط السحابي (Supabase)' };
     }
 
-    const tenantId = branch.tenantId ? branch.tenantId.trim() : 'default';
+    const tenantId = branch.tenantId ? branch.tenantId.trim() : '';
+    if (!tenantId) {
+      console.error(`[MultiBranch] Cannot push to ${branch.name}: missing Tenant ID`);
+      return {
+        success: false,
+        error: 'يرجى تحديد معرف المتجر (Tenant ID) من إعدادات الفرع قبل إرسال البيانات للسحابة',
+      };
+    }
     const nowIso = new Date().toISOString();
-    const clientId = `mob_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const clientId = getDeviceClientId();
 
     const rows = records.map(r => ({
       tenant_id: tenantId,
       store: r.store,
       record_id: r.recordId,
       data: r.isDelete ? {} : (r.data || {}),
-      version: 1,
+      // 🔴 FIX: ترقية الإصدار بدل تثبيت version:1 دائماً حتى تُوثَّق التعارضات
+      version: (Number((r as { version?: number }).version) || 0) + 1,
       client_id: clientId,
       updated_at: nowIso,
       deleted_at: r.isDelete ? nowIso : null,
@@ -811,6 +869,72 @@ class MultiBranchManager {
   }
 
   /**
+   * 🔴 FIX: جلب الحالة الحالية للسجل من السحابة قبل الحساب على الجهاز
+   * (Read-Modify-Write) — السابق كان يحسب أرضيات الخزنة وكميات المخزون
+   * من الكاش المحلي القديم، مما يسبب ضياع تحديثات مالية عند البيع المتزامن
+   * من الديسكتوب والموبايل.
+   */
+  private async fetchFreshRecords(
+    branch: BranchConfig,
+    store: string,
+    recordIds: string[]
+  ): Promise<Map<string, { data: Record<string, any>; version: number }>> {
+    const fresh = new Map<string, { data: Record<string, any>; version: number }>();
+    const client = this.getClient(branch);
+    const tenantId = branch.tenantId ? branch.tenantId.trim() : '';
+    if (!client || !tenantId || recordIds.length === 0) return fresh;
+
+    try {
+      const builder = client
+        .from('mobpos_records')
+        .select('record_id, data, version')
+        .eq('tenant_id', tenantId)
+        .eq('store', store)
+        .is('deleted_at', null)
+        .in('record_id', recordIds)
+        .order('updated_at', { ascending: false });
+
+      const result = await withTimeout(
+        builder as unknown as Promise<{
+          data: Array<{ record_id: string; data: Record<string, any>; version?: number }> | null;
+          error: { message: string } | null;
+        }>
+      ) as { data: Array<{ record_id: string; data: Record<string, any>; version?: number }> | null; error: { message: string } | null };
+      const { data, error } = result;
+
+      if (error || !data) return fresh;
+      for (const row of data) {
+        if (!row?.record_id || !row.data) continue;
+        // الاستعلام مرتب تنازلياً بالتحديث — أول نجاح لكل معرف هو الأحدث
+        if (!fresh.has(row.record_id)) {
+          fresh.set(row.record_id, { data: row.data, version: Number(row.version) || 0 });
+        }
+      }
+    } catch (err) {
+      console.warn(`[MultiBranch] fetchFreshRecords(${store}) failed, falling back to cached values:`, err);
+    }
+    return fresh;
+  }
+
+  /** يدمج سجلاً طازجاً من السحابة على الكائن الممرر إن وجدت نسخة أحدث */
+  private applyFreshData<T extends Record<string, any>>(
+    cached: T,
+    fresh: { data: Record<string, any>; version: number } | undefined,
+    numericKeys: string[]
+  ): { merged: T; version: number } {
+    if (!fresh) return { merged: cached, version: Number((cached as any).version) || 0 };
+    const merged: Record<string, any> = { ...cached };
+    for (const key of numericKeys) {
+      const rawVal = fresh.data[key];
+      if (rawVal !== undefined && rawVal !== null && rawVal !== '') {
+        merged[key] = Number(rawVal) || 0;
+      }
+    }
+    // أي حقول أخرى موجودة في النسخة السحابية (لدمج الحالة بشكل عام)
+    return { merged: { ...merged, ...fresh.data } as T, version: fresh.version };
+  }
+
+  /**
    * Executes an atomic sale from Mobile:
    * 1. Records sale invoice in `mobpos_records` (`sales`)
    * 2. Updates safe balance and logs cash transaction (`safes`, `transactions`)
@@ -827,6 +951,23 @@ class MultiBranchManager {
     }
   ): Promise<{ success: boolean; error?: string }> {
     const recordsToPush: Array<{ store: string; recordId: string; data: any }> = [];
+    const tenantId = branch.tenantId ? branch.tenantId.trim() : '';
+    if (!tenantId) {
+      return {
+        success: false,
+        error: 'يرجى تحديد معرف المتجر (Tenant ID) من إعدادات الفرع قبل البيع بالسحابة',
+      };
+    }
+
+    // ── Read-Modify-Write: جلب الحالة الحالية من السحابة قبل الحساب ──
+    const safeId = options?.safe?.id;
+    const customerId = options?.customer?.id;
+    const deductionIds = (options?.deductions || []).map(d => d.item.id).filter(Boolean);
+    const freshIds = [...new Set([...(safeId ? [safeId] : []), ...(customerId ? [customerId] : []), ...deductionIds])];
+
+    const freshSafes = safeId ? await this.fetchFreshRecords(branch, 'safes', [safeId]) : new Map();
+    const freshCustomers = customerId ? await this.fetchFreshRecords(branch, 'customers', [customerId]) : new Map();
+    const freshInventory = deductionIds.length > 0 ? await this.fetchFreshRecords(branch, 'inventory', deductionIds) : new Map();
 
     // 1. Sale invoice
     recordsToPush.push({
@@ -871,15 +1012,19 @@ class MultiBranchManager {
     // 2. Safe balance and transaction
     const cashCollected = Number(sale.paidAmount ?? sale.finalTotal) || 0;
     if (cashCollected > 0 && options?.safe) {
+      // 🔴 FIX RMW: الرصيد الجديد يُحسب من آخر نسخة سحابية (وليس الكاش المحلي)
+      const freshSafe = freshSafes.get(options.safe.id);
+      const { merged: baseSafe, version: safeVersion } = this.applyFreshData(options.safe as any, freshSafe, ['balance']);
       const updatedSafe: Safe = {
-        ...options.safe,
-        balance: (Number(options.safe.balance) || 0) + cashCollected,
+        ...baseSafe,
+        balance: (Number(baseSafe.balance) || 0) + cashCollected,
       };
       recordsToPush.push({
         store: 'safes',
         recordId: options.safe.id,
+        version: safeVersion,
         data: updatedSafe,
-      });
+      } as any);
 
       const txId = `tx_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
       recordsToPush.push({
@@ -903,31 +1048,40 @@ class MultiBranchManager {
     // 3. Inventory deduction
     if (options?.deductions && options.deductions.length > 0) {
       for (const d of options.deductions) {
-        const newQty = Math.max(0, (Number(d.item.quantity) || 0) - d.quantity);
+        // 🔴 FIX RMW: الخصم من الكمية السحابية الحالية (وليس الكاش القديم) →
+        // لا مزيد بيع زائد عند البيع المتزامن من أكثر من جهاز
+        const freshItem = freshInventory.get(d.item.id);
+        const { merged: baseItem, version: itemVersion } = this.applyFreshData(d.item as any, freshItem, ['quantity']);
+        const newQty = Math.max(0, (Number(baseItem.quantity) || 0) - d.quantity);
         recordsToPush.push({
           store: 'inventory',
           recordId: d.item.id,
+          version: itemVersion,
           data: {
-            ...d.item,
+            ...baseItem,
             quantity: newQty,
             updatedAt: new Date().toISOString(),
           },
-        });
+        } as any);
       }
     }
 
     // 4. Customer balance update if remaining debt exists
     const remaining = Number(sale.remainingAmount) || 0;
     if (remaining > 0 && options?.customer) {
-      const newCustomerBalance = (Number(options.customer.balance) || 0) + remaining;
+      // 🔴 FIX RMW: رصيد العميل من النسخة السحابية الأحدث
+      const freshCustomer = freshCustomers.get(options.customer.id);
+      const { merged: baseCustomer, version: customerVersion } = this.applyFreshData(options.customer as any, freshCustomer, ['balance']);
+      const newCustomerBalance = (Number(baseCustomer.balance) || 0) + remaining;
       recordsToPush.push({
         store: 'customers',
         recordId: options.customer.id,
+        version: customerVersion,
         data: {
-          ...options.customer,
+          ...baseCustomer,
           balance: newCustomerBalance,
         },
-      });
+      } as any);
     }
 
     return await this.pushRecordsToBranch(branch, recordsToPush);
@@ -951,8 +1105,19 @@ class MultiBranchManager {
     const nowIso = new Date().toISOString();
     const isOutflow = tx.type === 'expense';
     const amountVal = Math.abs(Number(tx.amount) || 0);
+    const tenantId = branch.tenantId ? branch.tenantId.trim() : '';
+    if (!tenantId) {
+      return {
+        success: false,
+        error: 'يرجى تحديد معرف المتجر (Tenant ID) من إعدادات الفرع قبل إرسال معاملات الخزينة للسحابة',
+      };
+    }
 
-    const newSafeBalance = (Number(tx.safe.balance) || 0) + (isOutflow ? -amountVal : amountVal);
+    // 🔴 FIX RMW: رصيد الخزنة يُحسب من آخر نسخة سحابية — لا من الكاش المحلي
+    const freshSafeMap = await this.fetchFreshRecords(branch, 'safes', [tx.safe.id]);
+    const freshSafe = freshSafeMap.get(tx.safe.id);
+    const { merged: baseSafe, version: safeVersion } = this.applyFreshData(tx.safe as any, freshSafe, ['balance']);
+    const newSafeBalance = (Number(baseSafe.balance) || 0) + (isOutflow ? -amountVal : amountVal);
 
     const records = [
       {
@@ -975,8 +1140,9 @@ class MultiBranchManager {
       {
         store: 'safes',
         recordId: tx.safe.id,
+        version: safeVersion,
         data: {
-          ...tx.safe,
+          ...baseSafe,
           balance: newSafeBalance,
         },
       },
@@ -993,7 +1159,7 @@ class MultiBranchManager {
     order: MaintenanceOrder,
     safeForDeposit?: Safe
   ): Promise<{ success: boolean; error?: string }> {
-    const records: Array<{ store: string; recordId: string; data: any }> = [
+    const records: Array<{ store: string; recordId: string; data: any; version?: number }> = [
       {
         store: 'maintenance',
         recordId: order.id,
@@ -1007,16 +1173,22 @@ class MultiBranchManager {
 
     // If order was delivered and finalPrice was collected into a safe:
     if (order.status === 'delivered' && (Number(order.finalPrice) || 0) > 0 && safeForDeposit) {
+      // 🔴 FIX RMW: رصيد الخزنة من النسخة السحابية الأحدث قبل إضافة إيراد الصيانة
+      const freshSafeMap = await this.fetchFreshRecords(branch, 'safes', [safeForDeposit.id]);
+      const freshSafe = freshSafeMap.get(safeForDeposit.id);
+      const { merged: baseSafe, version: safeVersion } = this.applyFreshData(safeForDeposit as any, freshSafe, ['balance']);
+
       const price = Number(order.finalPrice);
-      const newBal = (Number(safeForDeposit.balance) || 0) + price;
+      const newBal = (Number(baseSafe.balance) || 0) + price;
       const txId = `tx_maint_${Date.now()}`;
 
       records.push(
         {
           store: 'safes',
           recordId: safeForDeposit.id,
+          version: safeVersion,
           data: {
-            ...safeForDeposit,
+            ...baseSafe,
             balance: newBal,
           },
         },

@@ -26,9 +26,10 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   onClose,
   hideAmounts,
 }) => {
-  if (!isOpen || !sale) return null;
-
+  // ⚠️ جميع الـ Hooks يجب أن تُعرَّف قبل أي early return (قواعد React Hooks)
   const [copied, setCopied] = useState(false);
+
+  if (!isOpen || !sale) return null;
 
   const generateShareText = () => {
     const saleDateStr = sale.date || sale.createdAt || new Date().toISOString();

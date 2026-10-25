@@ -7,6 +7,8 @@ export interface BranchConfig {
   supabaseUrl: string;
   supabaseAnonKey: string;
   tenantId: string;
+  /** 🔐 سر عزل المستأجر (اختياري) — مطلوب فقط مع مخطط RLS الصارم (Step 8) */
+  tenantSecret?: string;
   enabled: boolean;
   createdAt: string;
   lastSyncAt?: string;

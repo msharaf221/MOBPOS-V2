@@ -40,8 +40,7 @@ export const BranchEditModal: React.FC<BranchEditModalProps> = ({
   onSave,
   onDelete,
 }) => {
-  if (!isOpen) return null;
-
+  // ⚠️ جميع الـ Hooks يجب أن تُعرَّف قبل أي early return (قواعد React Hooks)
   const [name, setName] = useState(branch?.name || '');
   const [city, setCity] = useState(branch?.city || 'القاهرة');
   const [code, setCode] = useState(branch?.code || '');
@@ -49,11 +48,14 @@ export const BranchEditModal: React.FC<BranchEditModalProps> = ({
   const [supabaseUrl, setSupabaseUrl] = useState(branch?.supabaseUrl || '');
   const [supabaseAnonKey, setSupabaseAnonKey] = useState(branch?.supabaseAnonKey || '');
   const [tenantId, setTenantId] = useState(branch?.tenantId || '');
+  const [tenantSecret, setTenantSecret] = useState(branch?.tenantSecret || '');
   const [enabled, setEnabled] = useState(branch?.enabled ?? true);
 
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
   const [copiedSql, setCopiedSql] = useState(false);
+
+  if (!isOpen) return null;
 
   const handleTestConnection = async () => {
     if (!supabaseUrl.trim() || !supabaseAnonKey.trim()) {
@@ -70,6 +72,8 @@ export const BranchEditModal: React.FC<BranchEditModalProps> = ({
 
       const client = createClient(cleanUrl, cleanKey, {
         auth: { persistSession: false },
+        // 🔴 SECURITY: نفس رأس السر المستخدم في المزامنة الفعلية (RLS الصارم)
+        ...(tenantSecret.trim() ? { global: { headers: { 'x-tenant-secret': tenantSecret.trim() } } } : {}),
       });
 
       // 1. Check if mobpos_records exists
@@ -145,6 +149,7 @@ export const BranchEditModal: React.FC<BranchEditModalProps> = ({
         supabaseUrl: supabaseUrl.trim().replace(/\/+$/, ''),
         supabaseAnonKey: supabaseAnonKey.trim(),
         tenantId: tenantId.trim(),
+        tenantSecret: tenantSecret.trim() || undefined,
         enabled,
       },
       branch?.id
@@ -275,6 +280,18 @@ export const BranchEditModal: React.FC<BranchEditModalProps> = ({
                 value={tenantId}
                 onChange={e => setTenantId(e.target.value)}
                 placeholder="مثال: معرف ترخيص الفرع"
+                className="w-full p-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-mono text-[11px] focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-slate-400 mb-1">🔐 سر المتجر (Tenant Secret) — اختياري</label>
+              <input
+                type="password"
+                dir="ltr"
+                value={tenantSecret}
+                onChange={e => setTenantSecret(e.target.value)}
+                placeholder="سر قوي 32+ حرفاً — يُشترط مع مخطط RLS الصارم فقط"
                 className="w-full p-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-mono text-[11px] focus:outline-none"
               />
             </div>

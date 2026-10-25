@@ -15,8 +15,14 @@ import { MaintenanceModal } from './components/MaintenanceModal';
 import { DebtsModal } from './components/DebtsModal';
 import { POSTab } from './components/POSTab';
 import { QuickActionModal } from './components/QuickActionModal';
+import { AppLockScreen } from './components/AppLockScreen';
+import { isAppLockEnabled } from './utils/appLock';
 
 export default function App() {
+  // 🔒 قفل التطبيق: يعمل قبل تركيب باقي الشاشة إن كان مفعّلاً
+  const [isLocked, setIsLocked] = useState<boolean>(() => isAppLockEnabled());
+  // حالة الإعداد لعرض القسم في مفتاح الإعدادات
+  const [appLockEnabled, setAppLockEnabled] = useState<boolean>(() => isAppLockEnabled());
   const [branches, setBranches] = useState<BranchConfig[]>(() => multiBranchManager.getBranches());
   const [selectedBranchId, setSelectedBranchId] = useState<string>('all');
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
@@ -51,7 +57,12 @@ export default function App() {
   const [hideAmounts, setHideAmounts] = useState<boolean>(() => {
     return localStorage.getItem('mobpos_companion_hide_amounts') === 'true';
   });
-  const [autoRefreshInterval, setAutoRefreshInterval] = useState<number>(10);
+  const [autoRefreshInterval, setAutoRefreshInterval] = useState<number>(() => {
+    const raw = Number(localStorage.getItem('mobpos_companion_auto_refresh_v1'));
+    // القيم مسموح بها فقط: 15 / 30 / 60 / 0 (يدوي) — الافتراضي 30 ثانية
+    if (raw === 15 || raw === 30 || raw === 60 || raw === 0) return raw;
+    return 30;
+  });
 
   // Modals state
   const [selectedSale, setSelectedSale] = useState<SaleRecord | null>(null);
@@ -62,6 +73,13 @@ export default function App() {
   const [isMaintenanceModalOpen, setIsMaintenanceModalOpen] = useState(false);
   const [isDebtsModalOpen, setIsDebtsModalOpen] = useState(false);
   const [isQuickActionOpen, setIsQuickActionOpen] = useState(false);
+  // Nonce لإعادة ربط (remount) النوافذ عند كل فتح حتى لا تتسرب القيم القديمة بين الفروع
+  const [modalsNonce, setModalsNonce] = useState(0);
+
+  const openModal = (setter: (open: boolean) => void) => {
+    setModalsNonce(n => n + 1);
+    setter(true);
+  };
 
   // Load and refresh metrics
   const refreshMetrics = useCallback(async (force = false) => {
@@ -181,6 +199,12 @@ export default function App() {
     });
   };
 
+  // 🔴 FIX: تحفظ مدة التحديث التلقائي الآن (كانت تُفقد عند إعادة تشغيل التطبيق)
+  const changeAutoRefreshInterval = (seconds: number) => {
+    setAutoRefreshInterval(seconds);
+    localStorage.setItem('mobpos_companion_auto_refresh_v1', String(seconds));
+  };
+
   const handleManualRefresh = useCallback(() => {
     refreshMetrics(true).catch(() => undefined);
   }, [refreshMetrics]);
@@ -209,6 +233,12 @@ export default function App() {
     multiBranchManager.updateBranch(id, { enabled });
     refreshMetrics(true);
   };
+
+  // 🔒 الشاشة تُعرض بدلاً من كل شيء حتى إدخال الرمز الصحيح (بعد كل الـ Hooks
+  // في أعلى التركيب حتى تظل قواعد React Hooks سليمة)
+  if (isLocked) {
+    return <AppLockScreen onSuccess={() => setIsLocked(false)} shopName="MOBPOS Companion" />;
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex justify-center selection:bg-cyan-500 selection:text-black">
@@ -239,7 +269,10 @@ export default function App() {
           branches={branches}
           selectedBranchId={selectedBranchId}
           onSelectBranch={setSelectedBranchId}
-          onOpenAddBranch={() => setBranchEditState({ isOpen: true, branch: null })}
+          onOpenAddBranch={() => {
+            setModalsNonce(n => n + 1);
+            setBranchEditState({ isOpen: true, branch: null });
+          }}
           hideAmounts={hideAmounts}
           onToggleHideAmounts={toggleHideAmounts}
           isRefreshing={isRefreshing}
@@ -258,9 +291,9 @@ export default function App() {
               hideAmounts={hideAmounts}
               onSelectSale={sale => setSelectedSale(sale)}
               onNavigateToTab={setActiveTab}
-              onOpenMaintenanceModal={() => setIsMaintenanceModalOpen(true)}
-              onOpenDebtsModal={() => setIsDebtsModalOpen(true)}
-              onOpenQuickAction={() => setIsQuickActionOpen(true)}
+              onOpenMaintenanceModal={() => openModal(setIsMaintenanceModalOpen)}
+              onOpenDebtsModal={() => openModal(setIsDebtsModalOpen)}
+              onOpenQuickAction={() => openModal(setIsQuickActionOpen)}
             />
           )}
 
@@ -291,7 +324,7 @@ export default function App() {
               safes={metrics.safesList}
               transactions={metrics.recentTransactions}
               hideAmounts={hideAmounts}
-              onOpenQuickAction={() => setIsQuickActionOpen(true)}
+              onOpenQuickAction={() => openModal(setIsQuickActionOpen)}
             />
           )}
 
@@ -299,20 +332,28 @@ export default function App() {
             <InventoryTab
               inventory={metrics.inventoryList}
               hideAmounts={hideAmounts}
-              onOpenAddProduct={() => setIsQuickActionOpen(true)}
+              onOpenAddProduct={() => openModal(setIsQuickActionOpen)}
             />
           )}
 
           {activeTab === 'settings' && (
             <SettingsTab
               branches={branches}
-              onOpenAddBranch={() => setBranchEditState({ isOpen: true, branch: null })}
-              onEditBranch={branch => setBranchEditState({ isOpen: true, branch })}
+              onOpenAddBranch={() => {
+                setModalsNonce(n => n + 1);
+                setBranchEditState({ isOpen: true, branch: null });
+              }}
+              onEditBranch={branch => {
+                setModalsNonce(n => n + 1);
+                setBranchEditState({ isOpen: true, branch });
+              }}
               onToggleBranchEnabled={handleToggleBranchEnabled}
               hideAmounts={hideAmounts}
               onToggleHideAmounts={toggleHideAmounts}
               autoRefreshInterval={autoRefreshInterval}
-              onChangeAutoRefresh={setAutoRefreshInterval}
+              onChangeAutoRefresh={changeAutoRefreshInterval}
+              appLockEnabled={appLockEnabled}
+              onChangeAppLock={setAppLockEnabled}
             />
           )}
         </main>
@@ -331,6 +372,7 @@ export default function App() {
           isOpen={Boolean(selectedSale)}
           onClose={() => setSelectedSale(null)}
           hideAmounts={hideAmounts}
+          key={`invoice-${selectedSale?.id ?? 'none'}-${modalsNonce}`}
         />
 
         <BranchEditModal
@@ -339,6 +381,7 @@ export default function App() {
           onClose={() => setBranchEditState({ isOpen: false, branch: null })}
           onSave={handleSaveBranch}
           onDelete={branchEditState.branch ? handleDeleteBranch : undefined}
+          key={`branch-${branchEditState.branch?.id ?? 'new'}-${modalsNonce}`}
         />
 
         <MaintenanceModal
@@ -350,6 +393,7 @@ export default function App() {
           selectedBranchId={selectedBranchId}
           safesList={metrics.safesList}
           onRefresh={handleManualRefresh}
+          key={`maint-${modalsNonce}`}
         />
 
         <DebtsModal
@@ -361,6 +405,7 @@ export default function App() {
           selectedBranchId={selectedBranchId}
           safesList={metrics.safesList}
           onRefresh={handleManualRefresh}
+          key={`debts-${modalsNonce}`}
         />
 
         <QuickActionModal
@@ -371,6 +416,7 @@ export default function App() {
           selectedBranchId={selectedBranchId}
           hideAmounts={hideAmounts}
           onSuccess={handleManualRefresh}
+          key={`quick-${modalsNonce}`}
         />
       </div>
     </div>

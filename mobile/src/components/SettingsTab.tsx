@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Building2,
   Plus,
@@ -12,6 +12,7 @@ import {
   Shield,
   Smartphone,
   Info,
+  Lock,
 } from 'lucide-react';
 import type { BranchConfig } from '../types';
 import { formatTimeAgo } from '../utils/format';
@@ -25,6 +26,9 @@ interface SettingsTabProps {
   onToggleHideAmounts: () => void;
   autoRefreshInterval: number;
   onChangeAutoRefresh: (seconds: number) => void;
+  /** 🔒 قفل التطبيق برمز مطابقة */
+  appLockEnabled: boolean;
+  onChangeAppLock: (enabled: boolean) => void;
 }
 
 export const SettingsTab: React.FC<SettingsTabProps> = ({
@@ -36,6 +40,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
   onToggleHideAmounts,
   autoRefreshInterval,
   onChangeAutoRefresh,
+  appLockEnabled,
+  onChangeAppLock,
 }) => {
   return (
     <div className="space-y-4 pb-24 text-xs">
@@ -207,18 +213,180 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
         </div>
       </div>
 
-      {/* System info */}
+        {/* 🔒 App Lock management */}
+        <AppLockSection
+          enabled={appLockEnabled}
+          onChange={onChangeAppLock}
+        />
+
+        {/* System info */}
       <div className="p-4 rounded-3xl glass-card flex items-start gap-3 text-slate-400">
         <Info size={16} className="text-cyan-400 shrink-0 mt-0.5" />
         <div className="space-y-1">
           <p className="font-bold text-slate-200">
-            MOBPOS Companion — رادار الفروع v1.0.0
+            MOBPOS Companion — رادار الفروع {__APP_VERSION__}
           </p>
           <p className="text-[10px] leading-relaxed">
             تطبيق مخصص لمالك النظام لمتابعة وإدارة الفروع المتعددة لحظياً من أي هاتف (أندرويد وآيفون) في نفس الوقت.
           </p>
         </div>
       </div>
+    </div>
+  );
+};
+
+/**
+ * قسم إدارة قفل التطبيق: تفعيل/إلغاء برمز مطابقة (4–6 أرقام).
+ * الرمز يُشفر SHA-256 عبر crypto.subtle ولا يُخزَّن نصاً.
+ */
+const AppLockSection: React.FC<{
+  enabled: boolean;
+  onChange: (enabled: boolean) => void;
+}> = ({ enabled, onChange }) => {
+  const [mode, setMode] = useState<'idle' | 'set' | 'disable'>('idle');
+  const [pin, setPin] = useState('');
+  const [pinConfirm, setPinConfirm] = useState('');
+  const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const reset = () => {
+    setMode('idle');
+    setPin('');
+    setPinConfirm('');
+    setBusy(false);
+  };
+
+  const handleSetPin = async () => {
+    if (!/^\d{4,6}$/.test(pin)) {
+      setMsg({ kind: 'err', text: 'الرمز 4–6 أرقام فقط' });
+      return;
+    }
+    if (pin !== pinConfirm) {
+      setMsg({ kind: 'err', text: 'الرمزان غير متطابقين' });
+      return;
+    }
+    setBusy(true);
+    try {
+      const { setAppLockPin } = await import('../utils/appLock');
+      await setAppLockPin(pin);
+      setMsg({ kind: 'ok', text: 'تم تفعيل القفل — سيعمل من المرة القادمة فت فتح التطبيق' });
+      onChange(true);
+      setMode('idle');
+      setPin('');
+      setPinConfirm('');
+    } catch {
+      setMsg({ kind: 'err', text: 'تعذر تفعيل القفل (متصفح لا يدعم crypto.subtle)' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDisable = async () => {
+    if (!/^\d{4,6}$/.test(pin)) {
+      setMsg({ kind: 'err', text: 'أدخل الرمز الحالي للإلغاء' });
+      return;
+    }
+    setBusy(true);
+    try {
+      const { verifyAppLockPin, disableAppLock } = await import('../utils/appLock');
+      const ok = await verifyAppLockPin(pin);
+      if (!ok) {
+        setMsg({ kind: 'err', text: 'الرمز الحالي غير صحيح' });
+        setBusy(false);
+        return;
+      }
+      disableAppLock();
+      setMsg({ kind: 'ok', text: 'تم إلغاء القفل' });
+      onChange(false);
+      reset();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="p-4 rounded-3xl glass-card space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="font-bold text-white flex items-center gap-1.5">
+            <Lock size={14} className="text-emerald-400" />
+            <span>قفل التطبيق برمز مطابقة</span>
+          </div>
+          <p className="text-[10px] text-slate-400 mt-0.5">
+            طلب رمز عند فتح التطبيق (يُخزن هاشاً فقط)
+          </p>
+        </div>
+
+        {mode === 'idle' && (
+          enabled ? (
+            <button
+              type="button"
+              onClick={() => { setMode('disable'); setMsg(null); }}
+              className="px-3 py-1.5 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-[11px] font-bold"
+            >
+              إلغاء القفل
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => { setMode('set'); setMsg(null); }}
+              className="px-3 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold"
+            >
+              تفعيل
+            </button>
+          )
+        )}
+      </div>
+
+      {mode !== 'idle' && (
+        <div className="space-y-2 pt-1">
+          <input
+            type="tel"
+            inputMode="numeric"
+            dir="ltr"
+            value={pin}
+            onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+            placeholder={mode === 'set' ? 'رمز جديد (4–6 أرقام)' : 'الرمز الحالي'}
+            className="w-full p-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-mono text-sm tracking-widest text-center focus:outline-none"
+          />
+          {mode === 'set' && (
+            <input
+              type="tel"
+              inputMode="numeric"
+              dir="ltr"
+              value={pinConfirm}
+              onChange={e => setPinConfirm(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              placeholder="تأكيد الرمز"
+              className="w-full p-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-mono text-sm tracking-widest text-center focus:outline-none"
+            />
+          )}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => (mode === 'set' ? handleSetPin() : handleDisable())}
+              className="flex-1 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-[11px] disabled:opacity-50"
+            >
+              {mode === 'set' ? 'حفظ الرمز' : 'إلغاء القفل'}
+            </button>
+            <button
+              type="button"
+              onClick={reset}
+              className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 text-[11px] font-bold"
+            >
+              رجوع
+            </button>
+          </div>
+        </div>
+      )}
+
+      {msg && (
+        <p className={`text-[10px] font-medium flex items-center gap-1.5 ${
+          msg.kind === 'ok' ? 'text-emerald-300' : 'text-rose-300'
+        }`}>
+          {msg.kind === 'ok' ? <CheckCircle2 size={12} /> : <AlertCircle size={12} />} {msg.text}
+        </p>
+      )}
     </div>
   );
 };
