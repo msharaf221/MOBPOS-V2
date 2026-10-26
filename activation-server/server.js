@@ -15,6 +15,12 @@
 //   • /release: فك ارتباط مفتاح بجهازه (دعم فني)
 //   • سجلات v1 القديمة (بدون machineToken) تُرقّى تلقائياً
 //     عند أول تفعيل أو تحقق من نفس الجهاز المرتبط.
+//
+//  v2.1 — الأداء (خطوة حماية اللايسنس أثناء بطء الاستيقاظ):
+//   • فصل الكتابة: القرارات الأمنية (أول تفعيل/إصدار توكن/إلغاء/فك ربط)
+//     تُكتب فوراً بنجاح الحفظ قبل الرد، ونبض /verify المنهجي (lastSeen/hits)
+//     يُدفّع فلاش ~1 ثانية بدل إعادة كتابة كامل الملف مع كل طلب.
+//   • أشكال الردود على كل النقاط لم تتغير إطلاقاً (توافق كامل مع العملاء القديمين).
 // ============================================================
 
 import express from 'express';
@@ -73,7 +79,7 @@ function writeNow() {
   const tmp = `${DATA_FILE}.${process.pid}.tmp`;
   try {
     // Activation is a security decision. Do not acknowledge it before the
-    // atomic replacement succeeds; otherwise a crash in the debounce window
+    // atomic replacement succeeds; otherwise a crash in the grace window
     // could make the same key available again after restart.
     fs.writeFileSync(tmp, JSON.stringify(db, null, 2), { mode: 0o600 });
     fs.renameSync(tmp, DATA_FILE);
@@ -85,16 +91,44 @@ function writeNow() {
     process.exit(1);
   }
 }
-function persist() {
+
+// ===== Persistence policy (perf, v2.1) =====
+// Two write classes:
+//   • CRITICAL   — anything that changes a security decision: first activation,
+//     machine-token issuance (v1 migration), revoke, release. These MUST be on
+//     disk before the response is sent, otherwise a crash could forget a token
+//     we already gave to a client (that client would then verify with a token
+//     the server never recorded → bad_token → license cleared).
+//   • HEARTBEAT  — cosmetic only: lastSeen/hits counters on /verify and
+//     same-device re-activation where the token already exists. Losing these
+//     in a crash changes nothing security-wise, so they are debounced (~1s)
+//     instead of doing a full-file atomic rename on every request — which
+//     stalled the single-threaded node process under bursts of clients.
+const HEARTBEAT_FLUSH_MS = 1000;
+let heartbeatTimer = null;
+function flushHeartbeat() {
+  heartbeatTimer = null;
+  writeNow();
+}
+function persistCritical() {
   dirty = true;
   writeNow();
 }
+function persistHeartbeat() {
+  dirty = true;
+  if (!heartbeatTimer) {
+    heartbeatTimer = setTimeout(flushHeartbeat, HEARTBEAT_FLUSH_MS);
+    // Do not keep the process alive just for a cosmetic stats write.
+    heartbeatTimer.unref?.();
+  }
+}
 
 // Flush any pending debounced write before the process actually exits, so a
-// crash/kill within the 100ms debounce window can't silently lose the most
+// crash/kill within the heartbeat grace window can't silently lose the most
 // recent activation/verify state.
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
+    if (heartbeatTimer) { clearTimeout(heartbeatTimer); heartbeatTimer = null; }
     writeNow();
     process.exit(0);
   });
@@ -253,7 +287,7 @@ app.post('/activate', rateLimiter(30, 60000), authCheck, (req, res) => {
     // First activation ever — consume the key permanently + issue machine token
     const machineToken = newMachineToken();
     db[keyId] = { deviceId, machineToken, activatedAt: now, lastSeen: now, hits: 1 };
-    persist();
+    persistCritical(); // SECURITY: token must exist on disk before the client stores it
     console.log(`[ACTIVATE] new key ${keyId} → device ${deviceId}`);
     return res.json({ ok: true, firstActivation: true, machineToken });
   }
@@ -270,9 +304,11 @@ app.post('/activate', rateLimiter(30, 60000), authCheck, (req, res) => {
     // ترقية سجلات v1 القديمة: أصدر توكن إذا لم يكن موجوداً
     if (!existing.machineToken) {
       existing.machineToken = newMachineToken();
+      persistCritical(); // SECURITY: new token must be durable before we return it
       console.log(`[MIGRATE] key ${keyId} upgraded to v2 (machine token issued)`);
+    } else {
+      persistHeartbeat(); // cosmetic counters only — safe to debounce
     }
-    persist();
     return res.json({ ok: true, firstActivation: false, machineToken: existing.machineToken });
   }
 
@@ -314,7 +350,7 @@ app.post('/verify', rateLimiter(30, 60000), authCheck, (req, res) => {
     rec.machineToken = newMachineToken();
     rec.lastSeen = now;
     rec.hits = Math.min(Number.MAX_SAFE_INTEGER, (rec.hits || 0) + 1);
-    persist();
+    persistCritical(); // SECURITY: new token must be durable before we return it
     console.log(`[MIGRATE] key ${keyId} upgraded to v2 during verify`);
     return res.json({ ok: true, machineToken: rec.machineToken, migrated: true });
   }
@@ -326,7 +362,7 @@ app.post('/verify', rateLimiter(30, 60000), authCheck, (req, res) => {
 
   rec.lastSeen = now;
   rec.hits = (rec.hits || 0) + 1;
-  persist();
+  persistHeartbeat(); // cosmetic counters only — safe to debounce
   return res.json({ ok: true, verifiedAt: now });
 });
 
@@ -340,7 +376,7 @@ app.post('/revoke', rateLimiter(30, 60000), adminCheck, (req, res) => {
 
   rec.revoked = true;
   rec.revokedAt = new Date().toISOString();
-  persist();
+  persistCritical(); // SECURITY: revocation must survive a crash
   console.log(`[REVOKE] key ${keyId} revoked (was bound to ${rec.deviceId})`);
   return res.json({ ok: true, revokedAt: rec.revokedAt });
 });
@@ -356,7 +392,7 @@ app.post('/release', rateLimiter(30, 60000), adminCheck, (req, res) => {
   const oldDevice = rec.deviceId;
   // حذف السجل كاملاً = تفعيل جديد كأنه أول مرة (بتوكن جديد)
   delete db[keyId];
-  persist();
+  persistCritical(); // SECURITY: unbinding must survive a crash
   console.log(`[RELEASE] key ${keyId} unbound from device ${oldDevice}`);
   return res.json({ ok: true, releasedDevice: oldDevice });
 });

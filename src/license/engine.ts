@@ -243,6 +243,21 @@ export type ReverifyStatus =
   | 'unknown_key'           // المفتاح غير مسجل على السيرفر → مُسح محلياً
   | 'unknown';
 
+/**
+ * حدث يُبَث على window عندما يرفض السيرفر اللايسنس رفضاً قاطعاً
+ * (إلغاء / Machine Token خاطئ / جهاز آخر) — إعادة التحقق تعمل في
+ * الخلفية، فالواجهة تستمع لهذا الحدث لقفل التطبيق فوراً.
+ */
+export const LICENSE_REVOKED_EVENT = 'mobpos:license-revoked';
+
+function notifyLicenseRevoked(): void {
+  try {
+    window.dispatchEvent(new CustomEvent(LICENSE_REVOKED_EVENT));
+  } catch {
+    /* بيئة بدون DOM — التجاهل آمن (لا واجهة تستمع إطلاقاً) */
+  }
+}
+
 /** إعادة التحقق مرة واحدة كل 24 ساعة كحد أقصى. */
 const REVERIFY_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
@@ -251,8 +266,11 @@ const REVERIFY_INTERVAL_MS = 24 * 60 * 60 * 1000;
  * keyId + deviceId + machineToken — إثبات أن هذا الجهاز هو صاحب التفعيل الأصلي.
  */
 async function serverVerify(license: ActiveLicense): Promise<{ ok: boolean; machineToken?: string; reason?: string }> {
+  // مهلة قصيرة (6 ث): إعادة التحقق لا تحجب الإقلاع أبداً — تتشغل في الخلفية،
+  // والانقطاع يعني عملية إعادة محاولة قادمة وليس حجب المستخدم. التفعيل
+  // /activate (مرة واحدة لكل مفتاح) يبقى 12 ث بينما المستخدم ينتظر صراحة.
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 12000);
+  const timer = setTimeout(() => controller.abort(), 6000);
   try {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (ACTIVATION_SERVER_TOKEN) headers['Authorization'] = `Bearer ${ACTIVATION_SERVER_TOKEN}`;
@@ -419,17 +437,21 @@ export async function verifyStoredActivation(): Promise<StartupCheck> {
     storeLicense(record);
   }
 
-  // Reverify before granting the app screen. Network failures are explicitly
-  // treated as offline grace, but authoritative revocation/token/device
-  // failures must be observed before the user can continue working.
-  try {
-    const serverStatus = await reverifyLicense(record);
-    if (serverStatus === 'revoked' || serverStatus === 'used_on_other_device' || serverStatus === 'bad_token') {
-      return { status: 'invalid' };
+  // إعادة التحقق تُجدول في الخلفية — الإقلاع يعتمد على الفحص المحلي الكامل
+  // (التوقيع الرقمي + الصلاحية + ربط الجهاز) الذي نجح فوق، ومستَ تنتظر الشبكة.
+  // الرفض القاطع من السيرفر (إلغاء / توكن خاطئ / جهاز آخر) يُمسح محلياً من
+  // reverifyLicense نفسها، ويُبَث حدث `mobpos:license-revoked` لقفل الواجهة
+  // فوراً — مع سماحية أوفلاين كما كانت للانقطاع البسيط.
+  void (async () => {
+    try {
+      const serverStatus = await reverifyLicense(record);
+      if (serverStatus === 'revoked' || serverStatus === 'used_on_other_device' || serverStatus === 'bad_token') {
+        notifyLicenseRevoked();
+      }
+    } catch {
+      // Keep the signed, device-matched license usable if the server is down.
     }
-  } catch {
-    // Keep the signed, device-matched license usable if the server is down.
-  }
+  })();
 
   return { status: 'ok', license: record };
 }

@@ -1,0 +1,48 @@
+name: Keep License Server Warm
+
+# ============================================================
+#  إبقاء سيرفر التفعيل على Render "صحياً" — أداء اللايسنس للعملاء
+#
+#  الخدمة المجانية على Render تنام بعد ~15 دقيقة خمول، والاستيقاظ
+#  البارد يأخذ 30-60 ثانية (هذا هو مصدر بطء شاشة الترخيص المشيوف).
+#  ضربة /health كل 5 دقائق (الحد الأدنى المسموح به في GitHub Actions)
+#  تمنع النوم تماماً — ولأنها على مستوى السيرفر، تستفيد منها نسخ العملاء
+#  القديمة كلها فوراً دون أي تحديث على أجهزتهم.
+#
+#  ملاحظة: فشل النبض لا يجعل الووركفلو فاشلاً (وإلا يمتلئ بريد المالك
+#  بالإنذارات كل 5 دقائق) — يُترك تحذير في سجل التشغيل للمراجعة.
+# ============================================================
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: none
+
+# لا داعي لتكدس تشغيلات متزامنة لو انهالت جدولة المتتالية
+concurrency:
+  group: keep-license-warm
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    name: Ping /health
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Warm up the activation server
+        env:
+          HEALTH_URL: https://mobpos.onrender.com/health
+        run: |
+          for attempt in 1 2 3; do
+            if curl -fsS --max-time 25 "$HEALTH_URL" > /dev/null; then
+              echo "✅ الخادم الحقيقي رد — النبض الشريك ما گأكد، يبقى مو قاعماً"
+              exit 0
+            fi
+            echo "المحاولة $attempt فشلت — إعادة بعد 5 ثوانٍ"
+            sleep 5
+          done
+          echo "::warning::فشل نقر /health في كل المحاولات — الخادم قد يكون متوقفاً أو بطيئ الاستيقاظ"
+          echo "راجع $HEALTH_URL يدوياً أو لوحة Render"

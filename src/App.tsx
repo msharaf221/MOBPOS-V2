@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useStore } from './hooks/useStore';
 import { ActiveLicense, PLAN_FEATURES } from './license/types';
-import { clearLicense, verifyStoredActivation, isLicenseExpired } from './license/engine';
+import { clearLicense, verifyStoredActivation, isLicenseExpired, LICENSE_REVOKED_EVENT } from './license/engine';
 import { maybeRunScheduledBackup, requestPersistentStorage } from './utils/backup';
 import LicenseActivation from './components/LicenseActivation';
 import LicenseExpired from './components/LicenseExpired';
@@ -70,6 +70,20 @@ export default function App() {
     }, 60000);
     return () => clearInterval(interval);
   }, [screen, license]);
+
+  // رفض سيرفر الترخيص القاطع (إلغاء / توكن خاطئ / جهاز آخر): إعادة التحقق
+  // تعمل في الخلفية ولا تمنع الإقلاع — بمجرد أن يعود السيرفر برفض قاطع
+  // يُقفل التطبيق فوراً على شاشة الترخيص. أمان 1.0.27 كامل دون انتظار الشبكة.
+  useEffect(() => {
+    if (screen !== 'app') return;
+    const onRevoked = () => {
+      clearLicense();
+      setLicense(null);
+      setScreen('license');
+    };
+    window.addEventListener(LICENSE_REVOKED_EVENT, onRevoked);
+    return () => window.removeEventListener(LICENSE_REVOKED_EVENT, onRevoked);
+  }, [screen]);
 
   useEffect(() => {
     syncEngine.setStoreDispatcher((storeName, action) => {

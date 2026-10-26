@@ -42,8 +42,9 @@ export const ACTIVATION_SERVER_URL: string = 'https://mobpos.onrender.com';
  */
 export const ACTIVATION_SERVER_TOKEN: string =
   (typeof import.meta !== 'undefined' &&
-    (import.meta as ImportMeta & { env?: Record<string, string> }).env?.VITE_ACTIVATION_SERVER_TOKEN) ||
-  '';
+    ((import.meta as ImportMeta & { env?: Record<string, string> }).env?.VITE_ACTIVATION_SERVER_TOKEN ||
+     (import.meta as ImportMeta & { env?: Record<string, string> }).env?.VITE_ACTIVATION_TOKEN)) ||
+  'Muhamed@04035122139M';
 
 // مفاتيح التخزين المحلي
 export const STORAGE_KEYS = {
