@@ -137,6 +137,82 @@ class MultiBranchManager {
     this.metricsCache.delete(id);
   }
 
+  /**
+   * استيراد إعدادات الفرع والمزامنة من كود الاقتران السريع (QR Code)
+   */
+  public importFromPairingCode(code: string): { ok: boolean; branch?: BranchConfig; error?: string } {
+    try {
+      const clean = code.trim();
+      let jsonStr = '';
+      if (clean.startsWith('MOBPOS_PAIR:')) {
+        const b64 = clean.slice('MOBPOS_PAIR:'.length);
+        const globalBuffer = (globalThis as unknown as { Buffer?: { from: (s: string, e: string) => { toString: (e: string) => string } } }).Buffer;
+        jsonStr = globalBuffer
+          ? globalBuffer.from(b64, 'base64').toString('utf8')
+          : decodeURIComponent(escape(atob(b64)));
+      } else {
+        jsonStr = clean;
+      }
+      const data = JSON.parse(jsonStr) as {
+        v?: number;
+        app?: string;
+        url?: string;
+        key?: string;
+        tenantId?: string;
+        tenantSecret?: string;
+        userEmail?: string;
+        userName?: string;
+      };
+
+      if (!data.url || !data.key) {
+        return { ok: false, error: 'رمز الاقتران غير صالح أو مفقود الرابط/المفتاح' };
+      }
+
+      const branches = this.getBranches();
+      const branchName = data.userName ? `متجر ${data.userName}` : 'الفرع المتزامن';
+
+      // Check if existing branch matches 'b_main' or the same tenantId
+      const existingIdx = branches.findIndex(b => b.id === 'b_main' || (data.tenantId && b.tenantId === data.tenantId));
+      let targetBranch: BranchConfig;
+
+      if (existingIdx >= 0) {
+        targetBranch = {
+          ...branches[existingIdx],
+          name: branches[existingIdx].name === 'الفرع الرئيسي' ? branchName : branches[existingIdx].name,
+          supabaseUrl: data.url,
+          supabaseAnonKey: data.key,
+          tenantId: data.tenantId || 'default-tenant',
+          tenantSecret: data.tenantSecret || '',
+          userEmail: data.userEmail,
+          userName: data.userName,
+          enabled: true,
+          status: 'syncing',
+        };
+        branches[existingIdx] = targetBranch;
+        this.saveBranches(branches);
+        this.updateBranch(targetBranch.id, targetBranch);
+      } else {
+        targetBranch = this.addBranch({
+          name: branchName,
+          city: 'الفرع المتزامن',
+          code: 'SYNC-01',
+          color: '#38bdf8',
+          supabaseUrl: data.url,
+          supabaseAnonKey: data.key,
+          tenantId: data.tenantId || 'default-tenant',
+          tenantSecret: data.tenantSecret || '',
+          userEmail: data.userEmail,
+          userName: data.userName,
+          enabled: true,
+        });
+      }
+
+      return { ok: true, branch: targetBranch };
+    } catch {
+      return { ok: false, error: 'فشل فك تشفير رمز الاقتران' };
+    }
+  }
+
   public subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);

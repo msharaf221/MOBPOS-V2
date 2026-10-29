@@ -11,9 +11,26 @@ export interface SyncConfig {
   refreshToken?: string; // Supabase Auth refresh token
   userEmail?: string;    // Supabase Auth account email
   tenantId?: string;     // Unique store/license partition
+  userName?: string;     // User display name (e.g. from Google)
+  userAvatarUrl?: string;// User avatar / picture URL
+  authProvider?: 'google' | 'password' | 'anon'; // Authentication method
   /** سر عزل المستأجر (اختياري) يُرَفق كرأس x-tenant-secret — شغّيل فقط مع مخطط RLS الصارم */
   tenantSecret?: string;
   autoSyncEnabled: boolean; // Auto sync on/off toggle
+}
+
+export interface MobilePairingPayload {
+  v: number;             // version = 1
+  app: 'mobpos';
+  url: string;
+  key: string;
+  tenantId: string;
+  tenantSecret?: string;
+  userEmail?: string;
+  userName?: string;
+  userAvatarUrl?: string;
+  refreshToken?: string;
+  timestamp: number;
 }
 
 export type OutboxAction = 'upsert' | 'delete';
@@ -54,6 +71,10 @@ export interface SyncEngineState {
   tenantId: string;
   isConfigured: boolean;
   isRealtimeConnected: boolean;
+  userEmail?: string;
+  userName?: string;
+  userAvatarUrl?: string;
+  authProvider?: 'google' | 'password' | 'anon';
 }
 
 export type SyncStateListener = (state: SyncEngineState) => void;

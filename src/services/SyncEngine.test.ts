@@ -182,4 +182,26 @@ test('scheduleDebouncedSnapshot safely handles store names and repeated invocati
   });
 });
 
+test('generateMobilePairingCode and importMobilePairingCode work roundtrip', () => {
+  syncEngine.saveConfig({
+    url: 'https://test-project.supabase.co',
+    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSJ9.signature123',
+    tenantId: 'test-tenant-123',
+    userEmail: 'ahmed.pos@gmail.com',
+    userName: 'أحمد التاجر',
+  });
+
+  const pairingCode = syncEngine.generateMobilePairingCode();
+  assert.ok(pairingCode.startsWith('MOBPOS_PAIR:'), 'Pairing code must have prefix MOBPOS_PAIR:');
+
+  const result = syncEngine.importMobilePairingCode(pairingCode);
+  assert.equal(result.ok, true, 'Pairing code must be successfully imported');
+  assert.equal(syncEngine.getState().userEmail, 'ahmed.pos@gmail.com');
+
+  // Negative test: invalid pairing code
+  const badResult = syncEngine.importMobilePairingCode('MOBPOS_PAIR:invalid_base_64!!!');
+  assert.equal(badResult.ok, false, 'Invalid pairing code must fail safely');
+});
+
+
 

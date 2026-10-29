@@ -13,6 +13,7 @@ import type {
   SyncStateListener,
   OutboxItem,
   SyncRecordRow,
+  MobilePairingPayload,
 } from '../types/sync.ts';
 
 export function isValidJwt(token?: string | null): boolean {
@@ -47,11 +48,18 @@ const CFG_KEY = 'mobpos_sync_key';
 const CFG_ACCESS_TOKEN = 'mobpos_sync_access_token';
 const CFG_REFRESH_TOKEN = 'mobpos_sync_refresh_token';
 const CFG_USER_EMAIL = 'mobpos_sync_user_email';
+const CFG_USER_NAME = 'mobpos_sync_user_name';
+const CFG_USER_AVATAR = 'mobpos_sync_user_avatar';
+const CFG_AUTH_PROVIDER = 'mobpos_sync_auth_provider';
 
 const CFG_TENANT_SECRET = 'mobpos_sync_tenant_secret';
 const CFG_TENANT = 'mobpos_sync_tenant';
 const CFG_AUTO_SYNC = 'mobpos_sync_auto_enabled';
 const CFG_CLIENT_ID = 'mobpos_device_client_id';
+
+const metaEnv = (typeof import.meta !== 'undefined' && ((import.meta as unknown as Record<string, unknown>).env as Record<string, string> | undefined)) || {};
+export const DEFAULT_SUPABASE_URL = (metaEnv.VITE_DEFAULT_SUPABASE_URL || metaEnv.VITE_SUPABASE_URL || '').trim();
+export const DEFAULT_SUPABASE_ANON_KEY = (metaEnv.VITE_DEFAULT_SUPABASE_ANON_KEY || metaEnv.VITE_SUPABASE_ANON_KEY || '').trim();
 
 const BATCH_SIZE = 50;
 const INITIAL_BACKOFF_MS = 5000;
@@ -107,6 +115,10 @@ class SyncEngine {
       tenantId: this.resolveTenantId(),
       isConfigured: false,
       isRealtimeConnected: false,
+      userEmail: this.config.userEmail,
+      userName: this.config.userName,
+      userAvatarUrl: this.config.userAvatarUrl,
+      authProvider: this.config.authProvider,
     };
   }
 
@@ -128,6 +140,8 @@ class SyncEngine {
     if (typeof localStorage !== 'undefined') {
       const custom = (localStorage.getItem(CFG_TENANT) || '').trim();
       if (custom) return custom;
+    } else if (this.config?.tenantId) {
+      return this.config.tenantId;
     }
     const stored = this.activeLicense || getStoredActiveLicense();
     if (stored?.keyId) return stored.keyId;
@@ -136,7 +150,7 @@ class SyncEngine {
 
   public loadConfig(): SyncConfig {
     if (typeof localStorage === 'undefined') {
-      return { url: '', anonKey: '', autoSyncEnabled: true };
+      return { url: DEFAULT_SUPABASE_URL, anonKey: DEFAULT_SUPABASE_ANON_KEY, autoSyncEnabled: true, authProvider: 'anon' };
     }
     const rawToken = (localStorage.getItem(CFG_ACCESS_TOKEN) || '').trim();
     // Auto-clean non-JWT access tokens (such as Supabase Personal Access Tokens sbp_...)
@@ -146,12 +160,18 @@ class SyncEngine {
       localStorage.removeItem(CFG_ACCESS_TOKEN);
     }
 
+    const storedUrl = (localStorage.getItem(CFG_URL) || '').trim().replace(/\/+$/, '');
+    const storedKey = (localStorage.getItem(CFG_KEY) || '').trim().replace(/^['"]|['"]$/g, '');
+
     return {
-      url: (localStorage.getItem(CFG_URL) || '').trim().replace(/\/+$/, ''),
-      anonKey: (localStorage.getItem(CFG_KEY) || '').trim().replace(/^['"]|['"]$/g, ''),
+      url: storedUrl || DEFAULT_SUPABASE_URL,
+      anonKey: storedKey || DEFAULT_SUPABASE_ANON_KEY,
       accessToken: validToken,
       refreshToken: (localStorage.getItem(CFG_REFRESH_TOKEN) || '').trim() || undefined,
       userEmail: (localStorage.getItem(CFG_USER_EMAIL) || '').trim() || undefined,
+      userName: (localStorage.getItem(CFG_USER_NAME) || '').trim() || undefined,
+      userAvatarUrl: (localStorage.getItem(CFG_USER_AVATAR) || '').trim() || undefined,
+      authProvider: (localStorage.getItem(CFG_AUTH_PROVIDER) as 'google' | 'password' | 'anon') || (validToken ? 'password' : 'anon'),
       tenantId: this.resolveTenantId(),
       tenantSecret: (localStorage.getItem(CFG_TENANT_SECRET) || '').trim() || undefined,
       autoSyncEnabled: localStorage.getItem(CFG_AUTO_SYNC) !== 'false',
@@ -159,25 +179,41 @@ class SyncEngine {
   }
 
   public saveConfig(cfg: Partial<SyncConfig>): void {
-    if (typeof localStorage === 'undefined') return;
-    if (cfg.url !== undefined) localStorage.setItem(CFG_URL, cfg.url.trim().replace(/\/+$/, ''));
-    if (cfg.anonKey !== undefined) localStorage.setItem(CFG_KEY, cfg.anonKey.trim().replace(/^['"]|['"]$/g, ''));
-    if (cfg.accessToken !== undefined) {
-      const clean = cfg.accessToken.trim();
-      if (isValidJwt(clean)) {
-        localStorage.setItem(CFG_ACCESS_TOKEN, clean);
-      } else {
-        localStorage.removeItem(CFG_ACCESS_TOKEN);
+    if (typeof localStorage !== 'undefined') {
+      if (cfg.url !== undefined) localStorage.setItem(CFG_URL, cfg.url.trim().replace(/\/+$/, ''));
+      if (cfg.anonKey !== undefined) localStorage.setItem(CFG_KEY, cfg.anonKey.trim().replace(/^['"]|['"]$/g, ''));
+      if (cfg.accessToken !== undefined) {
+        const clean = cfg.accessToken.trim();
+        if (isValidJwt(clean)) {
+          localStorage.setItem(CFG_ACCESS_TOKEN, clean);
+        } else {
+          localStorage.removeItem(CFG_ACCESS_TOKEN);
+        }
       }
-    }
-    if (cfg.refreshToken !== undefined) localStorage.setItem(CFG_REFRESH_TOKEN, cfg.refreshToken.trim());
-    if (cfg.userEmail !== undefined) localStorage.setItem(CFG_USER_EMAIL, cfg.userEmail.trim());
-    if (cfg.tenantId !== undefined) localStorage.setItem(CFG_TENANT, cfg.tenantId.trim());
-    if (cfg.tenantSecret !== undefined) localStorage.setItem(CFG_TENANT_SECRET, cfg.tenantSecret.trim());
-    if (cfg.autoSyncEnabled !== undefined) localStorage.setItem(CFG_AUTO_SYNC, cfg.autoSyncEnabled ? 'true' : 'false');
+      if (cfg.refreshToken !== undefined) localStorage.setItem(CFG_REFRESH_TOKEN, cfg.refreshToken.trim());
+      if (cfg.userEmail !== undefined) localStorage.setItem(CFG_USER_EMAIL, cfg.userEmail.trim());
+      if (cfg.userName !== undefined) localStorage.setItem(CFG_USER_NAME, cfg.userName.trim());
+      if (cfg.userAvatarUrl !== undefined) localStorage.setItem(CFG_USER_AVATAR, cfg.userAvatarUrl.trim());
+      if (cfg.authProvider !== undefined) localStorage.setItem(CFG_AUTH_PROVIDER, cfg.authProvider);
+      if (cfg.tenantId !== undefined) localStorage.setItem(CFG_TENANT, cfg.tenantId.trim());
+      if (cfg.tenantSecret !== undefined) localStorage.setItem(CFG_TENANT_SECRET, cfg.tenantSecret.trim());
+      if (cfg.autoSyncEnabled !== undefined) localStorage.setItem(CFG_AUTO_SYNC, cfg.autoSyncEnabled ? 'true' : 'false');
 
-    this.config = this.loadConfig();
+      this.config = this.loadConfig();
+    } else {
+      this.config = {
+        ...this.config,
+        ...cfg,
+        url: cfg.url !== undefined ? cfg.url.trim().replace(/\/+$/, '') : this.config.url,
+        anonKey: cfg.anonKey !== undefined ? cfg.anonKey.trim().replace(/^['"]|['"]$/g, '') : this.config.anonKey,
+      };
+    }
+
     this.state.tenantId = this.resolveTenantId();
+    this.state.userEmail = this.config.userEmail;
+    this.state.userName = this.config.userName;
+    this.state.userAvatarUrl = this.config.userAvatarUrl;
+    this.state.authProvider = this.config.authProvider;
     this.reconnect();
 
     // Dual-write to persistent IndexedDB so credentials can NEVER be wiped!
@@ -440,6 +476,10 @@ class SyncEngine {
     } else {
       this.state.status = 'synced';
     }
+    this.state.userEmail = this.config.userEmail;
+    this.state.userName = this.config.userName;
+    this.state.userAvatarUrl = this.config.userAvatarUrl;
+    this.state.authProvider = this.config.authProvider;
     this.emitState();
   }
 
@@ -522,6 +562,56 @@ class SyncEngine {
     }
   }
 
+  public async signInWithGoogleIdToken(idToken: string): Promise<{ ok: boolean; error?: string }> {
+    const effectiveUrl = this.config.url || DEFAULT_SUPABASE_URL;
+    const effectiveKey = this.config.anonKey || DEFAULT_SUPABASE_ANON_KEY;
+
+    if (!effectiveUrl || !effectiveKey) {
+      return { ok: false, error: 'رابط ومفتاح Supabase غير مهيأين. يرجى ضبط الرابط والمفتاح في إعدادات المزامنة أولاً.' };
+    }
+
+    try {
+      if (!this.supabase) {
+        this.supabase = createClient(effectiveUrl, effectiveKey);
+      }
+      const { data, error } = await this.supabase.auth.signInWithIdToken({
+        provider: 'google',
+        token: idToken,
+      });
+
+      if (error || !data?.session || !data?.user) {
+        return { ok: false, error: error?.message || 'فشل تسجيل الدخول باستخدام حساب Google' };
+      }
+
+      const user = data.user;
+      const session = data.session;
+      const metadata = user.user_metadata || {};
+      const userEmail = user.email || metadata.email || '';
+      const userName = metadata.full_name || metadata.name || userEmail.split('@')[0] || '';
+      const userAvatarUrl = metadata.avatar_url || metadata.picture || '';
+
+      // Auto-set tenant to user.id if tenant is default or empty
+      const currentCustomTenant = (typeof localStorage !== 'undefined' ? localStorage.getItem(CFG_TENANT) : '') || '';
+      const newTenant = (!currentCustomTenant || currentCustomTenant === 'default-tenant') ? user.id : currentCustomTenant;
+
+      this.saveConfig({
+        url: effectiveUrl,
+        anonKey: effectiveKey,
+        accessToken: session.access_token,
+        refreshToken: session.refresh_token,
+        userEmail,
+        userName,
+        userAvatarUrl,
+        authProvider: 'google',
+        tenantId: newTenant,
+      });
+
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : 'حدث خطأ أثناء الاتصال بحساب Google' };
+    }
+  }
+
   public async signInWithPassword(email: string, password: string): Promise<{ ok: boolean; error?: string }> {
     if (!this.config.url || !this.config.anonKey) {
       return { ok: false, error: 'أدخل رابط ومفتاح Supabase أولاً' };
@@ -560,6 +650,7 @@ class SyncEngine {
         accessToken: session.access_token,
         refreshToken: session.refresh_token,
         userEmail: user?.email || cleanEmail,
+        authProvider: 'password',
       });
       return { ok: true };
     } catch (err) {
@@ -579,7 +670,70 @@ class SyncEngine {
       accessToken: '',
       refreshToken: '',
       userEmail: '',
+      userName: '',
+      userAvatarUrl: '',
+      authProvider: 'anon',
     });
+  }
+
+  /**
+   * توليد نص مشفر لرمز QR للاقتران الفوري مع تطبيق الجوال
+   */
+  public generateMobilePairingCode(): string {
+    const payload: MobilePairingPayload = {
+      v: 1,
+      app: 'mobpos',
+      url: this.config.url || DEFAULT_SUPABASE_URL,
+      key: this.config.anonKey || DEFAULT_SUPABASE_ANON_KEY,
+      tenantId: this.state.tenantId,
+      tenantSecret: this.config.tenantSecret,
+      userEmail: this.config.userEmail,
+      userName: this.config.userName,
+      userAvatarUrl: this.config.userAvatarUrl,
+      refreshToken: this.config.refreshToken,
+      timestamp: Date.now(),
+    };
+    const jsonStr = JSON.stringify(payload);
+    const encoded = typeof Buffer !== 'undefined'
+      ? Buffer.from(jsonStr, 'utf8').toString('base64')
+      : btoa(unescape(encodeURIComponent(jsonStr)));
+    return `MOBPOS_PAIR:${encoded}`;
+  }
+
+  /**
+   * استيراد إعدادات الاقتران من رمز QR
+   */
+  public importMobilePairingCode(code: string): { ok: boolean; error?: string } {
+    try {
+      const clean = code.trim();
+      let jsonStr = '';
+      if (clean.startsWith('MOBPOS_PAIR:')) {
+        const b64 = clean.slice('MOBPOS_PAIR:'.length);
+        jsonStr = typeof Buffer !== 'undefined'
+          ? Buffer.from(b64, 'base64').toString('utf8')
+          : decodeURIComponent(escape(atob(b64)));
+      } else {
+        jsonStr = clean;
+      }
+      const data = JSON.parse(jsonStr) as MobilePairingPayload;
+      if (!data.url || !data.key) {
+        return { ok: false, error: 'رمز الاقتران غير صالح (بيانات الرابط أو المفتاح مفقودة)' };
+      }
+      this.saveConfig({
+        url: data.url,
+        anonKey: data.key,
+        tenantId: data.tenantId,
+        tenantSecret: data.tenantSecret,
+        userEmail: data.userEmail,
+        userName: data.userName,
+        userAvatarUrl: data.userAvatarUrl,
+        refreshToken: data.refreshToken,
+        authProvider: data.userEmail ? (data.userName ? 'google' : 'password') : 'anon',
+      });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: 'تعذر فك تشفير رمز الاقتران' };
+    }
   }
 
   // ------------------------------------------------------------

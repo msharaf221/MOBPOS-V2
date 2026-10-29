@@ -354,6 +354,9 @@ export default function App() {
               onChangeAutoRefresh={changeAutoRefreshInterval}
               appLockEnabled={appLockEnabled}
               onChangeAppLock={setAppLockEnabled}
+              onPairSuccess={() => {
+                refreshMetrics(true).catch(() => undefined);
+              }}
             />
           )}
         </main>

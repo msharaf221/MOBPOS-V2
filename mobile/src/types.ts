@@ -14,6 +14,8 @@ export interface BranchConfig {
   lastSyncAt?: string;
   status?: 'connected' | 'error' | 'syncing' | 'offline';
   errorMessage?: string;
+  userEmail?: string;
+  userName?: string;
 }
 
 export interface SaleItem {

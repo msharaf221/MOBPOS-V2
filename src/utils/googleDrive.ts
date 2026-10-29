@@ -6,24 +6,7 @@
 
 import type { BackupPayload } from './backup';
 
-declare global {
-  interface Window {
-    google?: {
-      accounts?: {
-        oauth2?: {
-          initTokenClient: (config: {
-            client_id: string;
-            scope: string;
-            callback: (response: { access_token?: string; error?: string }) => void;
-            error_callback?: (err: { type?: string; message?: string }) => void;
-          }) => {
-            requestAccessToken: (override?: { prompt?: string }) => void;
-          };
-        };
-      };
-    };
-  }
-}
+
 
 const GIS_SRC = 'https://accounts.google.com/gsi/client';
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';

@@ -5,8 +5,9 @@ import {
   Printer, Download, AlertTriangle, Info, CheckCircle,
   Monitor, Smartphone, Upload, Cloud, CloudUpload, Clock,
   History, Trash2, Loader2, KeyRound, XCircle, Crown, ImagePlus, X, Wifi,
-  Zap, CheckCircle2, Copy
+  Zap, CheckCircle2, Copy, QrCode, LogOut
 } from 'lucide-react';
+import QRCode from 'qrcode';
 import { User, AppSettings } from '../types';
 import { ActiveLicense } from '../license/types';
 import LicenseManager from './LicenseManager';
@@ -42,6 +43,7 @@ import {
 } from '../utils/googleDrive';
 import { useSyncEngine } from '../hooks/useSyncEngine';
 import { syncEngine, isValidJwt } from '../services/SyncEngine';
+import { promptGoogleIdentity, getGoogleClientId, saveGoogleClientId } from '../utils/googleAuth';
 
 interface SettingsProps {
   currentUser: User;
@@ -92,6 +94,67 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
   const [syncBusy, setSyncBusy] = useState(false);
   const [syncMsg, setSyncMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const [copiedSql, setCopiedSql] = useState(false);
+  const [googleClientIdDraft, setGoogleClientIdDraft] = useState(() => getGoogleClientId());
+  const [googleAuthBusy, setGoogleAuthBusy] = useState(false);
+  const [qrPairingModalOpen, setQrPairingModalOpen] = useState(false);
+  const [qrPairingDataUrl, setQrPairingDataUrl] = useState<string>('');
+
+  const handleOpenQrPairing = async () => {
+    try {
+      const code = syncEngine.generateMobilePairingCode();
+      const dataUrl = await QRCode.toDataURL(code, {
+        width: 340,
+        margin: 2,
+        color: {
+          dark: '#0f172a',
+          light: '#ffffff',
+        },
+      });
+      setQrPairingDataUrl(dataUrl);
+      setQrPairingModalOpen(true);
+    } catch {
+      setSyncMsg({ kind: 'err', text: 'فشل إنشاء رمز QR للاقتران' });
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    const clientId = googleClientIdDraft.trim() || clientIdDraft.trim() || getGoogleClientId();
+    if (!clientId) {
+      setSyncMsg({ kind: 'err', text: 'يرجى إدخال Google Client ID أولاً للربط بحساب Google' });
+      return;
+    }
+    setGoogleAuthBusy(true);
+    setSyncMsg(null);
+    try {
+      saveGoogleClientId(clientId);
+      const res = await promptGoogleIdentity(clientId);
+      if (!res.ok || !res.idToken) {
+        setSyncMsg({ kind: 'err', text: res.error || 'تعذر تسجيل الدخول بحساب Google' });
+        return;
+      }
+      const syncRes = await syncEngine.signInWithGoogleIdToken(res.idToken);
+      if (syncRes.ok) {
+        const cfg = syncEngine.loadConfig();
+        setSyncMsg({ kind: 'ok', text: `تم تسجيل الدخول وربط المتجر بنجاح عبر حساب Google (${res.metadata?.email || cfg.userEmail || ''}) ✅` });
+        setSyncUrl(cfg.url);
+        setSyncKey(cfg.anonKey);
+        setSyncTenant(cfg.tenantId || '');
+        setSyncAccessToken(cfg.accessToken || '');
+      } else {
+        setSyncMsg({ kind: 'err', text: syncRes.error || 'فشل الاتصال بسحابة Supabase' });
+      }
+    } catch (err) {
+      setSyncMsg({ kind: 'err', text: err instanceof Error ? err.message : 'حدث خطأ أثناء تسجيل الدخول' });
+    } finally {
+      setGoogleAuthBusy(false);
+    }
+  };
+
+  const handleSignOutSync = async () => {
+    await syncEngine.signOut();
+    setSyncAccessToken('');
+    setSyncMsg({ kind: 'ok', text: 'تم تسجيل الخروج بنجاح والتحويل إلى الوضع المحلي' });
+  };
 
   // ===== Backup state =====
   const [backupSettings, setBackupSettings] = useState<BackupSettings | null>(null);
@@ -1464,159 +1527,273 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                   </div>
                 </div>
 
-                {/* Connection Form */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
-                  <div>
-                    <label className="block text-xs font-bold text-gray-750 dark:text-gray-300 mb-1 flex items-center justify-between">
-                      <span>رابط Supabase URL</span>
-                      <span className="text-[10px] text-sky-600 dark:text-sky-400 font-normal">مطلوب</span>
-                    </label>
-                    <input
-                      type="text"
-                      dir="ltr"
-                      value={syncUrl}
-                      onChange={e => setSyncUrl(e.target.value)}
-                      placeholder="https://xxxx.supabase.co"
-                      className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-800 dark:text-white font-mono text-xs focus:ring-2 focus:ring-sky-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-gray-750 dark:text-gray-300 mb-1 flex items-center justify-between">
-                      <span>Anon Public Key</span>
-                      <span className="text-[10px] text-sky-600 dark:text-sky-400 font-normal">مطلوب</span>
-                    </label>
-                    <input
-                      type="password"
-                      dir="ltr"
-                      value={syncKey}
-                      onChange={e => setSyncKey(e.target.value)}
-                      placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-                      className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-800 dark:text-white font-mono text-xs focus:ring-2 focus:ring-sky-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                      معرّف المتجر (Tenant ID)
-                    </label>
-                    <input
-                      type="text"
-                      dir="ltr"
-                      value={syncTenant}
-                      onChange={e => setSyncTenant(e.target.value)}
-                      placeholder="افتراضي: معرّف الترخيص"
-                      className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-800 dark:text-white font-mono text-xs"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                      🔐 سر المتجر (Tenant Secret) — اختياري
-                    </label>
-                    <input
-                      type="password"
-                      dir="ltr"
-                      value={syncTenantSecret}
-                      onChange={e => setSyncTenantSecret(e.target.value)}
-                      placeholder="سر قوي 32+ حرفاً — يُشترط مع مخطط RLS الصارم فقط"
-                      className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-800 dark:text-white font-mono text-xs"
-                    />
-                    <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-1 leading-relaxed">
-                      إذا نفذت «الخطوة 8 — عزل المستأجرين الصارم» من سكربت المخطط، أدخل نفس السر في كل الأجهزة.
-                      اتركت الحقل فاضياً لو لسه على السياسات المفتوحة (allow_all).
-                    </p>
-                  </div>
-                </div>
+                {/* Google Sign-In & Mobile QR Pairing Banner */}
+                <div className="mb-5 p-4 rounded-2xl border border-sky-100 dark:border-sky-900/50 bg-gradient-to-br from-sky-50/70 via-white to-blue-50/50 dark:from-sky-950/30 dark:via-gray-800 dark:to-gray-800 shadow-sm">
+                  {sync.userEmail ? (
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                      <div className="flex items-center gap-3">
+                        {sync.userAvatarUrl ? (
+                          <img
+                            src={sync.userAvatarUrl}
+                            alt="Avatar"
+                            className="w-11 h-11 rounded-full border-2 border-sky-400 shadow-sm object-cover"
+                          />
+                        ) : (
+                          <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-sky-600 to-blue-500 text-white font-bold flex items-center justify-center text-base shadow-sm">
+                            {(sync.userName || sync.userEmail)[0].toUpperCase()}
+                          </div>
+                        )}
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-bold text-gray-900 dark:text-white">
+                              {sync.userName || 'مستخدم مسجل'}
+                            </span>
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+                              {sync.authProvider === 'google' ? 'Google Account' : 'حساب سحابي'}
+                            </span>
+                          </div>
+                          <span className="text-xs text-gray-600 dark:text-gray-300 block dir-ltr text-right sm:text-left mt-0.5">
+                            {sync.userEmail}
+                          </span>
+                          <span className="text-[11px] text-sky-600 dark:text-sky-400 font-medium block mt-0.5">
+                            معرّف المتجر السحابي: <code className="font-mono bg-sky-100/60 dark:bg-sky-900/40 px-1 py-0.5 rounded">{sync.tenantId}</code>
+                          </span>
+                        </div>
+                      </div>
 
-                {/* Token Alert if non-JWT token is present */}
-                {syncAccessToken && !isValidJwt(syncAccessToken) && (
-                  <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 rounded-xl text-xs text-amber-800 dark:text-amber-200 flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <AlertTriangle size={16} className="text-amber-600 shrink-0" />
-                      <span>
-                        تنبيه: التوكن المسجل ليس بصيغة JWT (مثل Personal Access Token sbp_...). المزامنة لا تحتاجه وتعمل مباشرة بمفتاح Anon Key.
-                      </span>
+                      <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                        <button
+                          type="button"
+                          onClick={handleOpenQrPairing}
+                          className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-2 bg-sky-600 hover:bg-sky-700 active:scale-95 text-white rounded-xl text-xs font-bold transition shadow-sm"
+                        >
+                          <QrCode size={15} />
+                          <span>ربط تطبيق الجوال (QR)</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleSignOutSync}
+                          className="flex items-center justify-center gap-1.5 px-3 py-2 bg-gray-200 hover:bg-rose-100 hover:text-rose-700 dark:bg-gray-700 dark:hover:bg-rose-950/40 dark:hover:text-rose-300 text-gray-700 dark:text-gray-300 rounded-xl text-xs font-bold transition"
+                          title="تسجيل الخروج والتحويل إلى الوضع المحلي"
+                        >
+                          <LogOut size={14} />
+                          <span>تسجيل الخروج</span>
+                        </button>
+                      </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSyncAccessToken('');
-                        sync.updateConfig({ accessToken: undefined });
-                        setSyncMsg({ kind: 'ok', text: 'تم حذف التوكن بنجاح والاعتماد على Anon Key ✅' });
-                      }}
-                      className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold transition shrink-0"
-                    >
-                      إزالة التوكن واستخدام Anon Key فقط
-                    </button>
-                  </div>
-                )}
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="w-8 h-8 rounded-lg bg-sky-500/10 dark:bg-sky-400/10 flex items-center justify-center text-sky-600 dark:text-sky-400 font-bold">
+                            <Cloud size={18} />
+                          </div>
+                          <div>
+                            <h4 className="text-xs font-bold text-gray-900 dark:text-white">
+                              المزامنة اللحظية الفورية بحساب Google
+                            </h4>
+                            <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                              سجل دخولك بحساب Google ليتم ربط المتجر ومزامنة المبيعات تلقائياً بين الكمبيوتر والجوال
+                            </p>
+                          </div>
+                        </div>
+                      </div>
 
-                {/* SQL Setup Helper for Supabase Projects */}
-                <div className="mb-4 p-4 bg-sky-50/50 dark:bg-sky-950/20 border border-sky-200 dark:border-sky-800/60 rounded-2xl">
-                  <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                    <div className="flex items-center gap-2">
-                      <Database size={16} className="text-sky-600 dark:text-sky-400" />
-                      <span className="text-xs font-bold text-gray-900 dark:text-white">
-                        كود SQL تهيئة قاعدة بيانات Supabase (جاهز للنسخ لأي متجر أو عميل جديد)
-                      </span>
+                      <div className="flex flex-wrap items-center gap-2.5 pt-1">
+                        <button
+                          type="button"
+                          disabled={googleAuthBusy}
+                          onClick={handleGoogleSignIn}
+                          className="flex items-center gap-2 px-4 py-2.5 bg-white hover:bg-gray-50 text-gray-700 dark:bg-gray-700 dark:hover:bg-gray-650 dark:text-white border border-gray-300 dark:border-gray-600 rounded-xl text-xs font-bold transition shadow-sm disabled:opacity-50"
+                        >
+                          {googleAuthBusy ? (
+                            <Loader2 size={16} className="animate-spin text-sky-500" />
+                          ) : (
+                            <svg className="w-4 h-4" viewBox="0 0 24 24">
+                              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                            </svg>
+                          )}
+                          <span>تسجيل الدخول باستخدام Google</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={handleOpenQrPairing}
+                          className="flex items-center gap-1.5 px-4 py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold transition shadow-sm"
+                        >
+                          <QrCode size={16} />
+                          <span>ربط تطبيق الجوال (QR)</span>
+                        </button>
+                      </div>
+
+                      {/* Google Client ID helper collapsible */}
+                      <details className="mt-2 text-[11px] text-gray-500 dark:text-gray-400">
+                        <summary className="cursor-pointer hover:underline text-sky-600 dark:text-sky-400 select-none">
+                          تعديل Google OAuth Client ID (اختياري)
+                        </summary>
+                        <div className="mt-2 flex gap-2">
+                          <input
+                            type="text"
+                            dir="ltr"
+                            value={googleClientIdDraft}
+                            onChange={e => setGoogleClientIdDraft(e.target.value)}
+                            placeholder="xxxxxx-xxxxxx.apps.googleusercontent.com"
+                            className="flex-1 p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white font-mono text-[11px]"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              saveGoogleClientId(googleClientIdDraft);
+                              setSyncMsg({ kind: 'ok', text: 'تم حفظ Google Client ID بنجاح ✅' });
+                            }}
+                            className="px-3 py-1 bg-gray-700 text-white rounded-lg font-bold text-xs"
+                          >
+                            حفظ
+                          </button>
+                        </div>
+                      </details>
                     </div>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        try {
-                          await navigator.clipboard.writeText(SUPABASE_SCHEMA_SQL);
-                          setCopiedSql(true);
-                          setTimeout(() => setCopiedSql(false), 2500);
-                        } catch {
-                          alert('تم نسخ الكود');
-                        }
-                      }}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-sky-600 hover:bg-sky-700 active:scale-95 text-white rounded-xl text-xs font-bold transition shadow-sm"
-                    >
-                      {copiedSql ? <CheckCircle2 size={14} className="text-emerald-300" /> : <Copy size={14} />}
-                      <span>{copiedSql ? 'تم نسخ كود SQL بنجاح ✅' : 'نسخ كود SQL كامل'}</span>
-                    </button>
-                  </div>
-                  <p className="text-[11px] text-gray-600 dark:text-gray-300 leading-relaxed mb-2">
-                    لربط أي متجر جديد: افتح قائمة <strong>SQL Editor</strong> في لوحة تحكم Supabase، الصق الكود واضغط <strong>Run</strong>. الكود ينشئ الجداول والفهارس وسياسات الأمان والبث المباشر فورياً بدون أي أخطاء.
-                  </p>
-                  <details className="mt-1">
-                    <summary className="cursor-pointer text-[11px] font-bold text-sky-600 dark:text-sky-400 hover:underline select-none">
-                      معاينة كود SQL الكامل
-                    </summary>
-                    <pre className="mt-2 p-3 bg-gray-900 text-emerald-400 text-[10px] font-mono rounded-xl max-h-48 overflow-y-auto whitespace-pre-wrap select-all" dir="ltr">
-                      {SUPABASE_SCHEMA_SQL}
-                    </pre>
-                  </details>
+                  )}
                 </div>
 
                 {/* Optional / Advanced Settings Accordion */}
-                <details className="border border-gray-200 dark:border-gray-700 rounded-xl p-3 bg-gray-50/60 dark:bg-gray-750/50 mb-4 group">
-                  <summary className="cursor-pointer text-xs font-bold text-gray-700 dark:text-gray-300 flex items-center justify-between select-none">
-                    <span>إعدادات متقدمة (اختياري: توكن مخصص أو حساب Supabase Auth)</span>
+                <details className="border border-gray-200 dark:border-gray-700 rounded-2xl p-4 bg-gray-50/50 dark:bg-gray-750/40 mb-4 group">
+                  <summary className="cursor-pointer text-xs font-bold text-gray-750 dark:text-gray-200 flex items-center justify-between select-none">
+                    <span className="flex items-center gap-1.5">
+                      <Database size={15} className="text-sky-600 dark:text-sky-400" />
+                      <span>إعدادات متقدمة للاتصال بسيرفر Supabase مخصص (Custom Server)</span>
+                    </span>
                     <span className="text-[11px] text-gray-400 group-open:rotate-180 transition-transform">▼</span>
                   </summary>
 
-                  <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 space-y-3">
-                    <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                      💡 المزامنة اللحظية تعمل تلقائياً عبر مفتاح Anon Key للمتجر ولا تتطلب تسجيل دخول أو توكن. يمكنك إبقاء الحقول بالأسفل فارغة.
-                    </p>
-
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                        توكن الدخول (Supabase Auth Access Token - JWT فقط)
-                      </label>
-                      <input
-                        type="password"
-                        dir="ltr"
-                        value={syncAccessToken}
-                        onChange={e => setSyncAccessToken(e.target.value)}
-                        placeholder="eyJhbGciOi..."
-                        className="w-full p-2.5 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-800 dark:text-white font-mono text-xs"
-                      />
+                  <div className="mt-4 pt-3 border-t border-gray-200 dark:border-gray-700 space-y-4">
+                    {/* Connection Form */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+                      <div>
+                        <label className="block text-xs font-bold text-gray-750 dark:text-gray-300 mb-1 flex items-center justify-between">
+                          <span>رابط Supabase URL</span>
+                          <span className="text-[10px] text-sky-600 dark:text-sky-400 font-normal">مطلوب</span>
+                        </label>
+                        <input
+                          type="text"
+                          dir="ltr"
+                          value={syncUrl}
+                          onChange={e => setSyncUrl(e.target.value)}
+                          placeholder="https://xxxx.supabase.co"
+                          className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-800 dark:text-white font-mono text-xs focus:ring-2 focus:ring-sky-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-gray-750 dark:text-gray-300 mb-1 flex items-center justify-between">
+                          <span>Anon Public Key</span>
+                          <span className="text-[10px] text-sky-600 dark:text-sky-400 font-normal">مطلوب</span>
+                        </label>
+                        <input
+                          type="password"
+                          dir="ltr"
+                          value={syncKey}
+                          onChange={e => setSyncKey(e.target.value)}
+                          placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                          className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-800 dark:text-white font-mono text-xs focus:ring-2 focus:ring-sky-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                          معرّف المتجر (Tenant ID)
+                        </label>
+                        <input
+                          type="text"
+                          dir="ltr"
+                          value={syncTenant}
+                          onChange={e => setSyncTenant(e.target.value)}
+                          placeholder="افتراضي: معرّف الترخيص"
+                          className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-800 dark:text-white font-mono text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                          🔐 سر المتجر (Tenant Secret) — اختياري
+                        </label>
+                        <input
+                          type="password"
+                          dir="ltr"
+                          value={syncTenantSecret}
+                          onChange={e => setSyncTenantSecret(e.target.value)}
+                          placeholder="سر قوي 32+ حرفاً — يُشترط مع مخطط RLS الصارم فقط"
+                          className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-800 dark:text-white font-mono text-xs"
+                        />
+                        <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-1 leading-relaxed">
+                          إذا نفذت «الخطوة 8 — عزل المستأجرين الصارم» من سكربت المخطط، أدخل نفس السر في كل الأجهزة.
+                        </p>
+                      </div>
                     </div>
 
-                    <div className="pt-2">
-                      <p className="text-xs font-bold text-gray-700 dark:text-gray-300 mb-2">
-                        تسجيل الدخول المباشر بحساب Supabase Auth:
+                    {/* Token Alert if non-JWT token is present */}
+                    {syncAccessToken && !isValidJwt(syncAccessToken) && (
+                      <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 rounded-xl text-xs text-amber-800 dark:text-amber-200 flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <AlertTriangle size={16} className="text-amber-600 shrink-0" />
+                          <span>
+                            تنبيه: التوكن المسجل ليس بصيغة JWT. المزامنة لا تحتاجه وتعمل مباشرة بمفتاح Anon Key.
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSyncAccessToken('');
+                            sync.updateConfig({ accessToken: undefined });
+                            setSyncMsg({ kind: 'ok', text: 'تم حذف التوكن بنجاح والاعتماد على Anon Key ✅' });
+                          }}
+                          className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold transition shrink-0"
+                        >
+                          إزالة التوكن
+                        </button>
+                      </div>
+                    )}
+
+                    {/* SQL Setup Helper for Supabase Projects */}
+                    <div className="p-4 bg-sky-50/50 dark:bg-sky-950/20 border border-sky-200 dark:border-sky-800/60 rounded-2xl">
+                      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                        <div className="flex items-center gap-2">
+                          <Database size={16} className="text-sky-600 dark:text-sky-400" />
+                          <span className="text-xs font-bold text-gray-900 dark:text-white">
+                            كود SQL تهيئة قاعدة بيانات Supabase (للمشاريع الخاصة)
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              await navigator.clipboard.writeText(SUPABASE_SCHEMA_SQL);
+                              setCopiedSql(true);
+                              setTimeout(() => setCopiedSql(false), 2500);
+                            } catch {
+                              alert('تم نسخ الكود');
+                            }
+                          }}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-sky-600 hover:bg-sky-700 active:scale-95 text-white rounded-xl text-xs font-bold transition shadow-sm"
+                        >
+                          {copiedSql ? <CheckCircle2 size={14} className="text-emerald-300" /> : <Copy size={14} />}
+                          <span>{copiedSql ? 'تم نسخ كود SQL بنجاح ✅' : 'نسخ كود SQL'}</span>
+                        </button>
+                      </div>
+                      <details className="mt-1">
+                        <summary className="cursor-pointer text-[11px] font-bold text-sky-600 dark:text-sky-400 hover:underline select-none">
+                          معاينة كود SQL الكامل
+                        </summary>
+                        <pre className="mt-2 p-3 bg-gray-900 text-emerald-400 text-[10px] font-mono rounded-xl max-h-48 overflow-y-auto whitespace-pre-wrap select-all" dir="ltr">
+                          {SUPABASE_SCHEMA_SQL}
+                        </pre>
+                      </details>
+                    </div>
+
+                    {/* Direct Password Login */}
+                    <div className="p-3 bg-gray-100/70 dark:bg-gray-700/40 rounded-xl space-y-2">
+                      <p className="text-xs font-bold text-gray-750 dark:text-gray-300">
+                        تسجيل الدخول المباشر بحساب Supabase Auth (إيميل وكلمة مرور):
                       </p>
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                         <input
@@ -1661,7 +1838,7 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                           }}
                           className="px-3 py-2 bg-slate-700 hover:bg-slate-800 text-white rounded-lg text-xs font-bold transition disabled:opacity-50"
                         >
-                          تسجيل الدخول والربط
+                          دخول وربط
                         </button>
                       </div>
                     </div>
@@ -2034,6 +2211,58 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                 )}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile QR Pairing Modal */}
+      {qrPairingModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in" dir="rtl">
+          <div className="bg-white dark:bg-gray-800 rounded-3xl p-6 max-w-sm w-full shadow-2xl border border-gray-200 dark:border-gray-700 text-center space-y-4 animate-scale-up">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-sky-100 dark:bg-sky-900/40 text-sky-600 dark:text-sky-400 flex items-center justify-center font-bold">
+                  <QrCode size={18} />
+                </div>
+                <h3 className="text-sm font-bold text-gray-900 dark:text-white">
+                  ربط تطبيق الجوال الفوري
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setQrPairingModalOpen(false)}
+                className="p-1 rounded-full text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-500 dark:text-gray-300 leading-relaxed">
+              افتح تطبيق <strong>MOBPOS Companion</strong> على هاتفك، اذهب للإعدادات واضغط <strong>"اقتران سريع عبر QR"</strong> ثم وجه الكاميرا لهذا الرمز:
+            </p>
+
+            <div className="p-3 bg-white rounded-2xl shadow-inner border border-gray-200 inline-block mx-auto">
+              {qrPairingDataUrl ? (
+                <img src={qrPairingDataUrl} alt="Pairing QR Code" className="w-64 h-64 mx-auto rounded-xl" />
+              ) : (
+                <div className="w-64 h-64 flex items-center justify-center">
+                  <Loader2 size={32} className="animate-spin text-sky-600" />
+                </div>
+              )}
+            </div>
+
+            <div className="text-[11px] text-gray-500 dark:text-gray-400 space-y-1 bg-gray-50 dark:bg-gray-750 p-2.5 rounded-xl border border-gray-100 dark:border-gray-700 text-right">
+              <div>• يتضمن الرمز رابط المزامنة وهوية المتجر <code className="font-mono bg-sky-100/50 dark:bg-sky-900/30 px-1 rounded">{sync.tenantId}</code>.</div>
+              <div>• تتم المزامنة اللحظية (AutoSync) فورياً بمجرد المسح دون كتابة أي شيء.</div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setQrPairingModalOpen(false)}
+              className="w-full py-2.5 bg-gray-800 hover:bg-gray-900 text-white font-bold rounded-xl text-xs transition"
+            >
+              تم / إغلاق
+            </button>
           </div>
         </div>
       )}

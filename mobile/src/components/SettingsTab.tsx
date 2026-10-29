@@ -13,9 +13,17 @@ import {
   Smartphone,
   Info,
   Lock,
+  QrCode,
+  Sparkles,
+  Key,
+  X,
+  ClipboardPaste,
 } from 'lucide-react';
 import type { BranchConfig } from '../types';
 import { formatTimeAgo } from '../utils/format';
+import { multiBranchManager } from '../services/MultiBranchManager';
+import { CameraScannerModal } from './CameraScannerModal';
+import { playBeep, playSuccess, triggerHaptic } from '../utils/sound';
 
 interface SettingsTabProps {
   branches: BranchConfig[];
@@ -29,6 +37,7 @@ interface SettingsTabProps {
   /** 🔒 قفل التطبيق برمز مطابقة */
   appLockEnabled: boolean;
   onChangeAppLock: (enabled: boolean) => void;
+  onPairSuccess?: () => void;
 }
 
 export const SettingsTab: React.FC<SettingsTabProps> = ({
@@ -42,9 +51,87 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
   onChangeAutoRefresh,
   appLockEnabled,
   onChangeAppLock,
+  onPairSuccess,
 }) => {
+  const [isScanningPair, setIsScanningPair] = useState(false);
+  const [showManualPairModal, setShowManualPairModal] = useState(false);
+  const [manualCodeInput, setManualCodeInput] = useState('');
+  const [pairSuccessMsg, setPairSuccessMsg] = useState<string | null>(null);
+  const [pairErrorMsg, setPairErrorMsg] = useState<string | null>(null);
+
+  const handlePairCode = (code: string) => {
+    setIsScanningPair(false);
+    setShowManualPairModal(false);
+    setPairErrorMsg(null);
+    setPairSuccessMsg(null);
+
+    const res = multiBranchManager.importFromPairingCode(code);
+    if (res.ok && res.branch) {
+      playSuccess();
+      triggerHaptic('success');
+      setPairSuccessMsg(`تم ربط المتجر بنجاح: ${res.branch.name}`);
+      onPairSuccess?.();
+      setTimeout(() => setPairSuccessMsg(null), 6000);
+    } else {
+      playBeep();
+      triggerHaptic('warning');
+      setPairErrorMsg(res.error || 'رمز الاقتران غير صالح. تأكد من مسح كود QR من برنامج MOBPOS على الكمبيوتر');
+      setTimeout(() => setPairErrorMsg(null), 6000);
+    }
+  };
+
   return (
     <div className="space-y-4 pb-24 text-xs">
+      {/* 🚀 Quick QR Pairing Card */}
+      <div className="relative overflow-hidden rounded-3xl p-4 bg-gradient-to-br from-cyan-950/40 via-slate-900 to-indigo-950/40 border border-cyan-500/30 shadow-xl shadow-cyan-950/30">
+        <div className="flex items-start justify-between gap-3 relative z-10">
+          <div className="space-y-1">
+            <div className="flex items-center gap-1.5 text-cyan-400 font-bold text-xs">
+              <Sparkles size={14} className="animate-pulse" />
+              <span>اقتران فوري مع جهاز الكمبيوتر (QR)</span>
+            </div>
+            <p className="text-[11px] text-slate-300 leading-relaxed">
+              من شاشة الإعدادات ⚙️ على الكمبيوتر، اضغط على <strong>"ربط تطبيق الهاتف QR"</strong> وامسح الكود بالكاميرا ليتم ربط المتجر والمزامنة فوراً دون كتابة روابط أو مفاتيح!
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-3.5 flex flex-wrap gap-2 relative z-10">
+          <button
+            type="button"
+            onClick={() => setIsScanningPair(true)}
+            className="flex-1 min-w-[140px] flex items-center justify-center gap-2 py-2.5 px-3.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs transition shadow-lg shadow-cyan-500/25 active:scale-98"
+          >
+            <QrCode size={16} />
+            <span>مسح كود الاقتران QR</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setShowManualPairModal(true)}
+            className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 font-medium text-xs border border-slate-700 transition"
+            title="لصق كود الاقتران يدوياً إذا تعذرت الكاميرا"
+          >
+            <Key size={14} />
+            <span>لصق الكود</span>
+          </button>
+        </div>
+
+        {pairSuccessMsg && (
+          <div className="mt-3 p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2 animate-fadeIn">
+            <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
+            <span className="font-bold">{pairSuccessMsg}</span>
+          </div>
+        )}
+
+        {pairErrorMsg && (
+          <div className="mt-3 p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2 animate-fadeIn">
+            <AlertCircle size={16} className="text-rose-400 shrink-0" />
+            <span>{pairErrorMsg}</span>
+          </div>
+        )}
+      </div>
+
       {/* Branches Header & Add Button */}
       <div className="flex items-center justify-between px-1">
         <div>
@@ -102,6 +189,11 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                     <div className="text-[10px] text-slate-400 mt-0.5 truncate">
                       {branch.city || 'مصر'} • {branch.supabaseUrl ? 'سحابة Supabase متصلة' : 'بدون ربط سحابي'}
                     </div>
+                    {branch.userEmail && (
+                      <div className="text-[10px] text-cyan-400 font-mono mt-0.5 truncate">
+                        👤 {branch.userEmail}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -231,6 +323,87 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
           </p>
         </div>
       </div>
+
+      {/* QR Scanner Modal for Instant Pairing */}
+      <CameraScannerModal
+        isOpen={isScanningPair}
+        onClose={() => setIsScanningPair(false)}
+        title="امسح كود الاقتران من شاشة الكمبيوتر"
+        onScan={scannedCode => {
+          handlePairCode(scannedCode);
+        }}
+      />
+
+      {/* Manual Code Input Modal */}
+      {showManualPairModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-sm rounded-3xl bg-slate-900 border border-slate-750 p-5 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-cyan-500/10 text-cyan-400 flex items-center justify-center">
+                  <Key size={16} />
+                </div>
+                <h3 className="font-bold text-white text-sm">لصق كود الاقتران يدوياً</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowManualPairModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white bg-slate-800"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              إذا لم تكن الكاميرا متاحة، يمكنك نسخ كود الاقتران من شاشة إعدادات الكمبيوتر ولصقه هنا مباشرة:
+            </p>
+
+            <div className="space-y-2">
+              <textarea
+                value={manualCodeInput}
+                onChange={e => setManualCodeInput(e.target.value)}
+                placeholder="MOBPOS_PAIR:eyJ..."
+                rows={4}
+                className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-750 text-white font-mono text-xs focus:outline-none focus:border-cyan-500 break-all resize-none"
+              />
+
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    const text = await navigator.clipboard.readText();
+                    if (text) setManualCodeInput(text);
+                  } catch {
+                    // Clipboard read blocked, user can paste manually
+                  }
+                }}
+                className="text-[10px] text-cyan-400 hover:text-cyan-300 flex items-center gap-1 font-semibold"
+              >
+                <ClipboardPaste size={12} />
+                <span>لصق من الحافظة</span>
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                type="button"
+                disabled={!manualCodeInput.trim()}
+                onClick={() => handlePairCode(manualCodeInput.trim())}
+                className="flex-1 py-2 px-3 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-50 text-slate-950 font-bold text-xs transition shadow-lg shadow-cyan-500/20"
+              >
+                تأكيد الاقتران والربط
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowManualPairModal(false)}
+                className="py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 text-xs font-semibold"
+              >
+                إلغاء
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
