@@ -31,19 +31,28 @@ export default function Sales({ sales, saleReturns, customers, inventory, imeiUn
   const [returnQuantity, setReturnQuantity] = useState(1);
   const [returnReason, setReturnReason] = useState('');
 
+  // خريطة العملاء بدل customers.find لكل صف في الجدول
+  const customerById = useMemo(() => new Map(customers.map(c => [c.id, c])), [customers]);
+
   // Filter sales
   const filteredSales = useMemo(() => {
     return sales
       .filter(sale => {
-        const customer = customers.find(c => c.id === sale.customerId);
+        const customer = customerById.get(sale.customerId);
+        const custName = customer?.name || (sale as any).customerName || '';
+        const custPhone = customer?.phone || (sale as any).customerPhone || '';
         const matchesSearch = 
           sale.invoiceNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          customer?.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          customer?.phone.includes(searchTerm) ||
+          custName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          custPhone.includes(searchTerm) ||
           sale.items.some(it => {
             const prod = inventory.find(i => i.id === it.inventoryId);
-            return prod?.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                   (prod?.barcode && prod.barcode.includes(searchTerm));
+            const itemName = prod?.name || (it as any).name || '';
+            const barcode = prod?.barcode || '';
+            const itemImei = (it as any).imei || '';
+            return itemName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                   (barcode && barcode.includes(searchTerm)) ||
+                   (itemImei && itemImei.includes(searchTerm));
           });
 
         let matchesDate = true;
@@ -68,10 +77,7 @@ export default function Sales({ sales, saleReturns, customers, inventory, imeiUn
         return matchesSearch && matchesDate;
       })
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [sales, customers, searchTerm, dateFilter]);
-
-  // خريطة العملاء بدل customers.find لكل صف في الجدول
-  const customerById = useMemo(() => new Map(customers.map(c => [c.id, c])), [customers]);
+  }, [sales, customerById, searchTerm, dateFilter]);
 
   const salesPage = usePagination(filteredSales, { defaultPageSize: 50, storageKey: 'mobpos_page_size_sales' });
 
@@ -246,7 +252,7 @@ export default function Sales({ sales, saleReturns, customers, inventory, imeiUn
                       {formatDate(sale.createdAt)}
                     </td>
                     <td className="px-4 py-3 text-gray-800 dark:text-white">
-                      {customer?.name || 'عميل غير محدد'}
+                      {customer?.name || (sale as any).customerName || (sale.customerId ? 'عميل مسجل' : 'عميل نقدي')}
                     </td>
                     <td className="px-4 py-3 text-gray-600 dark:text-gray-400">
                       {sale.items.length} منتج
@@ -258,14 +264,20 @@ export default function Sales({ sales, saleReturns, customers, inventory, imeiUn
                       {formatCurrency(sale.profit)}
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`px-2 py-1 rounded-full text-xs ${
-                        sale.paymentMethod === 'cash' ? 'bg-green-100 text-green-700' :
-                        sale.paymentMethod === 'card' ? 'bg-blue-100 text-blue-700' :
-                        'bg-orange-100 text-orange-700'
-                      }`}>
-                        {sale.paymentMethod === 'cash' ? 'نقدي' :
-                         sale.paymentMethod === 'card' ? 'بطاقة' : 'تقسيط'}
-                      </span>
+                      {(() => {
+                        const pm = String(sale.paymentMethod || '').toLowerCase();
+                        const isCash = pm === 'cash' || pm.includes('نقدي') || pm.includes('كاش');
+                        const isCard = pm === 'card' || pm.includes('بطاقة') || pm.includes('فيزا') || pm.includes('instapay') || pm.includes('إنستاباي') || pm.includes('محفظة');
+                        return (
+                          <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                            isCash ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
+                            isCard ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' :
+                            'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300'
+                          }`}>
+                            {isCash ? 'نقدي' : isCard ? 'بطاقة / تحويل' : 'تقسيط'}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-center gap-1">
@@ -337,30 +349,40 @@ export default function Sales({ sales, saleReturns, customers, inventory, imeiUn
 
             <div className="p-6 space-y-6">
               {/* Customer Info */}
-              <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg">
-                <p className="text-sm text-gray-500 dark:text-gray-400">العميل</p>
-                <p className="font-medium text-gray-800 dark:text-white">
-                  {customers.find(c => c.id === selectedSale.customerId)?.name || 'عميل غير محدد'}
-                </p>
+              <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">العميل</p>
+                  <p className="font-medium text-gray-800 dark:text-white">
+                    {customers.find(c => c.id === selectedSale.customerId)?.name || (selectedSale as any).customerName || (selectedSale.customerId ? 'عميل مسجل' : 'عميل نقدي')}
+                  </p>
+                </div>
+                {((selectedSale as any).customerPhone || customers.find(c => c.id === selectedSale.customerId)?.phone) && (
+                  <div className="text-left font-mono text-sm text-gray-600 dark:text-gray-300" dir="ltr">
+                    {(selectedSale as any).customerPhone || customers.find(c => c.id === selectedSale.customerId)?.phone}
+                  </div>
+                )}
               </div>
 
               {/* Items */}
               <div>
                 <h4 className="font-bold text-gray-800 dark:text-white mb-3">المنتجات</h4>
                 <div className="space-y-2">
-                  {selectedSale.items.map(item => {
+                  {selectedSale.items.map((item, idx) => {
                     const product = inventory.find(i => i.id === item.inventoryId);
                     const imei = item.imeiUnitId ? imeiUnits.find(u => u.id === item.imeiUnitId) : null;
+                    const imeiStr = (item as any).imei || (imei ? `${imei.imei1 || ''} ${imei.color || ''}` : '');
+                    const itemName = product?.name || (item as any).name || `صنف مبيعات #${idx + 1}`;
                     const returnedQuantity = getReturnedQuantity(selectedSale.id, item);
                     const returnableQuantity = Math.max(0, item.quantity - returnedQuantity);
+                    const lineTotal = Number(item.total ?? (item.unitPrice * item.quantity)) || 0;
                     
                     return (
-                      <div key={item.id} className="flex items-center justify-between gap-4 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                      <div key={item.id || `item_${idx}`} className="flex items-center justify-between gap-4 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
                         <div>
-                          <p className="font-medium text-gray-800 dark:text-white">{product?.name}</p>
-                          {imei && (
-                            <p className="text-sm text-gray-500 dark:text-gray-400">
-                              IMEI: {imei.imei1} | {imei.color} - {imei.storage}
+                          <p className="font-medium text-gray-800 dark:text-white">{itemName}</p>
+                          {imeiStr && (
+                            <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">
+                              IMEI: {imeiStr}
                             </p>
                           )}
                           <p className="text-sm text-gray-500 dark:text-gray-400">
@@ -374,7 +396,7 @@ export default function Sales({ sales, saleReturns, customers, inventory, imeiUn
                         </div>
                         <div className="flex items-center gap-3">
                           <span className="font-bold text-gray-800 dark:text-white">
-                            {formatCurrency(item.total)}
+                            {formatCurrency(lineTotal)}
                           </span>
                           {returnableQuantity > 0 && (
                             <button
@@ -396,9 +418,9 @@ export default function Sales({ sales, saleReturns, customers, inventory, imeiUn
               <div className="border-t border-gray-200 dark:border-gray-700 pt-4 space-y-2">
                 <div className="flex justify-between text-gray-600 dark:text-gray-400">
                   <span>الإجمالي الفرعي:</span>
-                  <span>{formatCurrency(selectedSale.subtotal)}</span>
+                  <span>{formatCurrency(selectedSale.subtotal ?? (selectedSale.total + (selectedSale.discount || 0)))}</span>
                 </div>
-                {selectedSale.discount > 0 && (
+                {(selectedSale.discount || 0) > 0 && (
                   <div className="flex justify-between text-red-600">
                     <span>الخصم:</span>
                     <span>- {formatCurrency(selectedSale.discount)}</span>

@@ -3,10 +3,10 @@ import { StoreState } from './types';
 import { summarizeReturns, returnsInPeriod } from '../../utils/returns';
 import { buildImeiStockIndex, isSellableUnit } from '../../utils/stockCounts';
 import { WARRANTY_ALERT_DAYS } from './helpers';
-import { InventoryItem } from '../../types';
+import { InventoryItem, Transaction } from '../../types';
 
 export function useStatsSlice(state: StoreState) {
-    const { customers, inventory, imeiUnits, sales, saleReturns, maintenance, safes, stockWastes } = state;
+    const { inventory, imeiUnits, sales, saleReturns, maintenance, safes, stockWastes, transactions, customers } = state;
 
     const getStatistics = useCallback(() => {
       const today = new Date();
@@ -21,14 +21,39 @@ export function useStatsSlice(state: StoreState) {
         );
       };
   
+      // مبيعات وصيانة اليوم ومصروفاته
       const todaySales = sales.filter(s => isSameLocalDay(s.createdAt));
-      const todayRevenue = todaySales.reduce((sum, s) => sum + s.total, 0);
-      const todayProfit = todaySales.reduce((sum, s) => sum + s.profit, 0);
+      const todaySalesRevenue = todaySales.reduce((sum, s) => sum + s.total, 0);
+      const todaySalesProfit = todaySales.reduce((sum, s) => sum + s.profit, 0);
+
+      const todayMaintenance = maintenance.filter(m => m.status === 'delivered' && m.deliveredAt && isSameLocalDay(m.deliveredAt));
+      const todayMaintRevenue = todayMaintenance.reduce((sum, m) => sum + (m.collectedAmount || m.finalCost || 0), 0);
+      const todayMaintProfit = todayMaintenance.reduce((sum, m) => sum + (m.profit || 0), 0);
+
+      const nonPnlTypes: Transaction['type'][] = ['transfer', 'wallet_deposit', 'wallet_withdrawal', 'capital', 'side_account'];
+      const todayExpenses = (transactions || [])
+        .filter(t => isSameLocalDay(t.createdAt) && (t.type === 'expense' || (t.amount < 0 && !nonPnlTypes.includes(t.type))))
+        .reduce((sum, t) => sum + Math.abs(t.amount), 0);
+
+      const todayRevenue = todaySalesRevenue + todayMaintRevenue;
+      const todayProfit = (todaySalesProfit + todayMaintProfit) - todayExpenses;
   
+      // مبيعات وصيانة الشهر ومصروفاته
       const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
       const monthSales = sales.filter(s => new Date(s.createdAt) >= monthStart);
-      const monthRevenue = monthSales.reduce((sum, s) => sum + s.total, 0);
-      const monthProfit = monthSales.reduce((sum, s) => sum + s.profit, 0);
+      const monthSalesRevenue = monthSales.reduce((sum, s) => sum + s.total, 0);
+      const monthSalesProfit = monthSales.reduce((sum, s) => sum + s.profit, 0);
+
+      const monthMaintenance = maintenance.filter(m => m.status === 'delivered' && m.deliveredAt && new Date(m.deliveredAt) >= monthStart);
+      const monthMaintRevenue = monthMaintenance.reduce((sum, m) => sum + (m.collectedAmount || m.finalCost || 0), 0);
+      const monthMaintProfit = monthMaintenance.reduce((sum, m) => sum + (m.profit || 0), 0);
+
+      const monthExpenses = (transactions || [])
+        .filter(t => new Date(t.createdAt) >= monthStart && (t.type === 'expense' || (t.amount < 0 && !nonPnlTypes.includes(t.type))))
+        .reduce((sum, t) => sum + Math.abs(t.amount), 0);
+
+      const monthRevenue = monthSalesRevenue + monthMaintRevenue;
+      const monthProfit = (monthSalesProfit + monthMaintProfit) - monthExpenses;
   
       // المرتجعات بتتحسب بتاريخ المرتجع نفسه (أساس نقدي) — الفاتورة الأصلية
       // مابتتعدلش، فلازم نطرح أثر مرتجعات الشهر هنا عشان الصافي يبقى صح.
@@ -94,7 +119,7 @@ export function useStatsSlice(state: StoreState) {
         returnCount: saleReturns.length,
         wasteCount: stockWastes.length
       };
-    }, [sales, saleReturns, stockWastes, safes, imeiUnits, maintenance, inventory, customers]);
+    }, [sales, saleReturns, stockWastes, safes, imeiUnits, maintenance, inventory, customers, transactions]);
   
 
   return { getStatistics };

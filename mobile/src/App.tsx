@@ -41,6 +41,8 @@ export default function App() {
     activeMaintenanceCount: 0,
     todayTotalRevenue: 0,
     todayProfitTotal: 0,
+    todayGrossProfit: 0,
+    todayNetProfit: 0,
     todayExpensesTotal: 0,
     totalSafesBalance: 0,
     inventoryCostValue: 0,

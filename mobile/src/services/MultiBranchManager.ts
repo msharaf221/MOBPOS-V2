@@ -518,48 +518,79 @@ class MultiBranchManager {
         // s.paid is amount collected
         // s.remaining is debt
         const finalTotal = Number(s.total ?? s.finalTotal ?? 0);
-        const subtotal = Number(s.subtotal ?? s.total ?? finalTotal);
-        const paidAmount = Number(s.paid ?? s.paidAmount ?? finalTotal);
-        const remainingAmount = Number(s.remaining ?? s.remainingAmount ?? 0);
         const discount = Number(s.discount ?? 0);
-        const profit = Number(s.profit ?? 0);
+        const subtotal = Number(s.subtotal ?? (s.total && s.total > 0 && discount > 0 ? s.total + discount : (s.finalTotal ?? finalTotal)));
+        const paidAmount = Number(s.paid ?? s.paidAmount ?? finalTotal);
+        const remainingAmount = Number(s.remaining ?? s.remainingAmount ?? Math.max(0, finalTotal - paidAmount));
         const rawDate = s.createdAt || s.date || new Date().toISOString();
 
         // Normalize line items
         const rawItems = Array.isArray(s.items) ? s.items : [];
+        let totalItemsCost = 0;
+        let hasKnownCost = false;
+
         const items: SaleItem[] = rawItems.map((it: any, idx: number) => {
-          const inv = it.inventoryId ? inventoryMap.get(it.inventoryId) : null;
+          const invId = it.inventoryId || it.id;
+          const inv = invId ? inventoryMap.get(invId) : null;
           const imeiObj = it.imeiUnitId ? imeiMap.get(it.imeiUnitId) : null;
           const unitPrice = Number(it.unitPrice ?? it.price ?? inv?.sellPrice ?? 0);
-          const costPrice = Number(it.costPrice ?? it.cost ?? inv?.costPrice ?? 0);
+          const rawCost = Number(it.costPrice ?? it.cost ?? inv?.costPrice ?? 0);
+          const costPrice = Number.isFinite(rawCost) && rawCost >= 0 ? rawCost : 0;
+          const qty = Number(it.quantity) || 1;
+          const lineTotal = Number(it.total ?? (unitPrice * qty));
           const imeiStr = it.imei || (imeiObj ? (imeiObj.imei1 || imeiObj.imei2) : undefined);
 
+          if (costPrice > 0) {
+            totalItemsCost += costPrice * qty;
+            hasKnownCost = true;
+          }
+
           return {
-            id: it.id || it.inventoryId || `item_${idx}`,
+            id: it.id || invId || `item_${idx}`,
+            inventoryId: invId,
             name: it.name || inv?.name || 'صنف مبيعات',
-            quantity: Number(it.quantity) || 1,
+            quantity: qty,
             price: unitPrice,
+            unitPrice,
             cost: costPrice,
+            costPrice,
+            total: lineTotal,
+            returnedQuantity: Number(it.returnedQuantity) || 0,
             imei: imeiStr,
           };
         });
 
+        // 🔴 حساب ربح الفاتورة محاسبياً بدقة:
+        // إذا كان الربح المسجل مساوياً للإيراد بالكامل (وهو الخطأ المحاسبي الشائع لعدم إدخال التكلفة وقت البيع)،
+        // أو كان الربح غير مسجل (undefined/0)، فإننا نسترجع التكلفة الحقيقية من المخزون ونطرحها من الصافي.
+        let verifiedProfit = Number(s.profit ?? 0);
+        if (hasKnownCost && totalItemsCost > 0) {
+          verifiedProfit = Math.max(0, finalTotal - totalItemsCost);
+        } else if (verifiedProfit >= finalTotal && finalTotal > 0 && !hasKnownCost) {
+          // إذا كانت التكلفة غير مسجلة إطلاقاً لا في الفاتورة ولا في كارت الصنف:
+          // لا يجوز اعتبار الإيراد ربحاً بنسبة 100% لبضاعة تجارية
+          verifiedProfit = 0;
+        }
+
         let paymentMethodLabel = s.paymentMethod || 'نقدي (كاش)';
-        if (paymentMethodLabel === 'cash') paymentMethodLabel = 'نقدي (كاش)';
-        else if (paymentMethodLabel === 'card') paymentMethodLabel = 'بطاقة / فيزا';
-        else if (paymentMethodLabel === 'installment') paymentMethodLabel = 'آجل / تقسيط';
+        const pmLower = String(s.paymentMethod || '').toLowerCase();
+        if (pmLower === 'cash' || pmLower.includes('نقدي') || pmLower.includes('كاش')) paymentMethodLabel = 'نقدي (كاش)';
+        else if (pmLower === 'card' || pmLower.includes('فيزا') || pmLower.includes('بطاقة')) paymentMethodLabel = 'بطاقة / فيزا';
+        else if (pmLower.includes('instapay') || pmLower.includes('إنستاباي') || pmLower.includes('محفظة')) paymentMethodLabel = 'إنستاباي / محفظة';
+        else if (pmLower === 'installment' || pmLower.includes('تقسيط') || pmLower.includes('آجل') || pmLower.includes('debt')) paymentMethodLabel = 'آجل / تقسيط';
 
         return {
           id: s.id,
           invoiceNumber: s.invoiceNumber || s.id?.slice(0, 8),
           date: rawDate,
           createdAt: rawDate,
+          subtotal,
           total: subtotal,
           discount,
           finalTotal,
           paidAmount,
           remainingAmount,
-          profit,
+          profit: verifiedProfit,
           paymentMethod: paymentMethodLabel,
           safeId: s.safeId,
           safeName: safe?.name || s.safeName || 'الخزينة الرئيسية',
@@ -568,6 +599,7 @@ class MultiBranchManager {
           customerPhone: customer?.phone || s.customerPhone || '',
           customerId: s.customerId,
           items,
+          notes: s.notes,
           branchId: branch.id,
           branchName: branch.name,
           branchColor: branch.color,
@@ -729,11 +761,7 @@ class MultiBranchManager {
         m => m.status !== 'delivered' && m.status !== 'cancelled'
       ).length;
 
-      // C. Total Revenue & Overall Profit
-      const todayTotalRevenue = todaySalesTotal + todayMaintenanceIncome;
-      const todayProfitTotal = todaySalesProfit + todayMaintenanceProfit;
-
-      // D. Expenses & Outflows
+      // C. Expenses & Outflows (حُسبت أولاً لتطبيق القاعدة المحاسبية لصافي الربح)
       const todayExpenses = normalizedTransactions.filter(t => {
         const d = (t.date || (t as any).createdAt || '').slice(0, 10);
         const isOutflow =
@@ -746,6 +774,15 @@ class MultiBranchManager {
         return d === todayDateStr && isOutflow;
       });
       const todayExpensesTotal = todayExpenses.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+
+      // D. Total Revenue, Gross Profit & Net Operating Profit
+      // 1. إجمالي الإيرادات = مبيعات البضاعة + إيرادات الصيانة المحصلة
+      const todayTotalRevenue = todaySalesTotal + todayMaintenanceIncome;
+      // 2. مجمل الربح (قبل المصروفات) = ربح مبيعات البضاعة + ربح الصيانة
+      const todayGrossProfit = todaySalesProfit + todayMaintenanceProfit;
+      // 3. صافي الربح الحقيقي = مجمل الربح - المصروفات اليومية
+      const todayNetProfit = todayGrossProfit - todayExpensesTotal;
+      const todayProfitTotal = todayNetProfit;
 
       // E. Safes Cash Liquidity
       const totalSafesBalance = normalizedSafes.reduce((acc, s) => acc + (Number(s.balance) || 0), 0);
@@ -798,6 +835,8 @@ class MultiBranchManager {
         activeMaintenanceCount,
         todayTotalRevenue,
         todayProfitTotal,
+        todayGrossProfit,
+        todayNetProfit,
         todayExpensesTotal,
         totalSafesBalance,
         inventoryCostValue,
@@ -888,6 +927,8 @@ class MultiBranchManager {
       activeMaintenanceCount: perBranch.reduce((acc, m) => acc + m.activeMaintenanceCount, 0),
       todayTotalRevenue: perBranch.reduce((acc, m) => acc + (m.todayTotalRevenue || m.todaySalesTotal), 0),
       todayProfitTotal: perBranch.reduce((acc, m) => acc + m.todayProfitTotal, 0),
+      todayGrossProfit: perBranch.reduce((acc, m) => acc + (m.todayGrossProfit || (m.todaySalesProfit + m.todayMaintenanceProfit)), 0),
+      todayNetProfit: perBranch.reduce((acc, m) => acc + (m.todayNetProfit ?? m.todayProfitTotal), 0),
       todayExpensesTotal: perBranch.reduce((acc, m) => acc + m.todayExpensesTotal, 0),
       totalSafesBalance: perBranch.reduce((acc, m) => acc + m.totalSafesBalance, 0),
       inventoryCostValue: perBranch.reduce((acc, m) => acc + (m.inventoryCostValue || 0), 0),
@@ -946,6 +987,8 @@ class MultiBranchManager {
       activeMaintenanceCount: 0,
       todayTotalRevenue: 0,
       todayProfitTotal: 0,
+      todayGrossProfit: 0,
+      todayNetProfit: 0,
       todayExpensesTotal: 0,
       totalSafesBalance: 0,
       inventoryCostValue: 0,
@@ -1121,7 +1164,46 @@ class MultiBranchManager {
     const freshCustomers = customerId ? await this.fetchFreshRecords(branch, 'customers', [customerId]) : new Map();
     const freshInventory = deductionIds.length > 0 ? await this.fetchFreshRecords(branch, 'inventory', deductionIds) : new Map();
 
-    // 1. Sale invoice
+    // 1. Sale invoice — متوافقة 100% مع واجهة ديسكتوب ومحرك المزامنة
+    let desktopPaymentMethod: 'cash' | 'card' | 'installment' = 'cash';
+    const pmLower = String(sale.paymentMethod || '').toLowerCase();
+    if (pmLower.includes('card') || pmLower.includes('فيزا') || pmLower.includes('بطاقة') || pmLower.includes('instapay') || pmLower.includes('إنستاباي') || pmLower.includes('محفظة')) {
+      desktopPaymentMethod = 'card';
+    } else if (pmLower.includes('installment') || pmLower.includes('آجل') || pmLower.includes('تقسيط') || pmLower.includes('debt')) {
+      desktopPaymentMethod = 'installment';
+    } else {
+      desktopPaymentMethod = 'cash';
+    }
+
+    const netTotal = Number(sale.finalTotal) || 0;
+    const discountVal = Number(sale.discount || 0);
+    const grossSubtotal = Number(sale.total) || (netTotal + discountVal);
+    const paidVal = Number(sale.paidAmount ?? netTotal);
+    const remainingVal = Number(sale.remainingAmount ?? Math.max(0, netTotal - paidVal));
+
+    const normalizedSaleItems = sale.items.map((it, idx) => {
+      const invId = it.inventoryId || it.id || `item_${idx}`;
+      const unitPrice = Number(it.unitPrice ?? it.price ?? 0);
+      const costPrice = Number(it.costPrice ?? it.cost ?? 0);
+      const qty = Number(it.quantity) || 1;
+      const lineTotal = Number(it.total ?? (unitPrice * qty));
+
+      return {
+        id: it.id || `sale_item_${idx}`,
+        inventoryId: invId,
+        name: it.name,
+        quantity: qty,
+        unitPrice,
+        costPrice,
+        total: lineTotal,
+        returnedQuantity: 0,
+        imei: it.imei,
+      };
+    });
+
+    const totalCost = normalizedSaleItems.reduce((acc, it) => acc + (it.costPrice * it.quantity), 0);
+    const finalProfit = totalCost > 0 ? Math.max(0, netTotal - totalCost) : (sale.profit && sale.profit < netTotal ? sale.profit : 0);
+
     recordsToPush.push({
       store: 'sales',
       recordId: sale.id,
@@ -1129,33 +1211,26 @@ class MultiBranchManager {
         id: sale.id,
         invoiceNumber: sale.invoiceNumber,
         date: sale.date || new Date().toISOString(),
-        createdAt: sale.createdAt || new Date().toISOString(),
-        total: sale.total,
-        discount: sale.discount || 0,
-        finalTotal: sale.finalTotal,
-        paid: sale.paidAmount ?? sale.finalTotal,
-        paidAmount: sale.paidAmount ?? sale.finalTotal,
-        remaining: sale.remainingAmount || 0,
-        remainingAmount: sale.remainingAmount || 0,
-        profit: sale.profit || 0,
-        paymentMethod: sale.paymentMethod || 'نقدي (كاش)',
-        safeId: sale.safeId,
-        safeName: sale.safeName,
+        createdAt: sale.createdAt || sale.date || new Date().toISOString(),
+        subtotal: grossSubtotal,
+        discount: discountVal,
+        total: netTotal, // 🔴 في الديسكتوب: total هو الصافي بعد الخصم
+        finalTotal: netTotal,
+        paid: paidVal,
+        paidAmount: paidVal,
+        remaining: remainingVal,
+        remainingAmount: remainingVal,
+        profit: finalProfit,
+        paymentMethod: desktopPaymentMethod,
+        safeId: sale.safeId || options?.safe?.id || '',
+        safeName: sale.safeName || options?.safe?.name || 'الخزينة الرئيسية',
+        cashierId: 'mobile_pos',
         cashierName: sale.cashierName || 'كاشير الموبايل',
-        customerId: sale.customerId,
-        customerName: sale.customerName,
-        customerPhone: sale.customerPhone,
-        items: sale.items.map(it => ({
-          id: it.id,
-          inventoryId: it.id,
-          name: it.name,
-          quantity: it.quantity,
-          price: it.price,
-          unitPrice: it.price,
-          cost: it.cost || 0,
-          costPrice: it.cost || 0,
-          imei: it.imei,
-        })),
+        customerId: sale.customerId || options?.customer?.id || '',
+        customerName: sale.customerName || options?.customer?.name || 'عميل نقدي',
+        customerPhone: sale.customerPhone || options?.customer?.phone || '',
+        items: normalizedSaleItems,
+        notes: sale.notes || `فاتورة مبيعات من تطبيق الموبايل (${branch.name})`,
         branchId: branch.id,
         branchName: branch.name,
       },

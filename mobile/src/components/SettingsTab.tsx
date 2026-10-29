@@ -18,11 +18,15 @@ import {
   Key,
   X,
   ClipboardPaste,
+  DownloadCloud,
+  RotateCw,
 } from 'lucide-react';
 import type { BranchConfig } from '../types';
 import { formatTimeAgo } from '../utils/format';
 import { multiBranchManager } from '../services/MultiBranchManager';
 import { CameraScannerModal } from './CameraScannerModal';
+import { UpdateModal } from './UpdateModal';
+import { checkMobileUpdate, CURRENT_MOBILE_VERSION, type MobileUpdateResult } from '../utils/updateCheck';
 import { playBeep, playSuccess, triggerHaptic } from '../utils/sound';
 
 interface SettingsTabProps {
@@ -58,6 +62,60 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
   const [manualCodeInput, setManualCodeInput] = useState('');
   const [pairSuccessMsg, setPairSuccessMsg] = useState<string | null>(null);
   const [pairErrorMsg, setPairErrorMsg] = useState<string | null>(null);
+
+  // حالة فحص التحديثات
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+  const [availableUpdate, setAvailableUpdate] = useState<MobileUpdateResult | null>(null);
+  const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
+  const [updateCheckMsg, setUpdateCheckMsg] = useState<{
+    kind: 'available' | 'uptodate' | 'error';
+    text: string;
+    subtext?: string;
+  } | null>(null);
+
+  const handleCheckUpdates = async () => {
+    setIsCheckingUpdate(true);
+    setUpdateCheckMsg(null);
+    try {
+      const res = await checkMobileUpdate();
+      if (!res.ok) {
+        setUpdateCheckMsg({
+          kind: 'error',
+          text: res.error || 'تعذر التحقق من التحديثات',
+        });
+        playBeep();
+        triggerHaptic('warning');
+        return;
+      }
+
+      if (res.updateAvailable) {
+        setAvailableUpdate(res);
+        setIsUpdateModalOpen(true);
+        setUpdateCheckMsg({
+          kind: 'available',
+          text: `متوفر إصدار جديد: v${res.latestVersion}`,
+          subtext: res.releaseTitle,
+        });
+        playSuccess();
+        triggerHaptic('success');
+      } else {
+        setUpdateCheckMsg({
+          kind: 'uptodate',
+          text: `أنت على أحدث إصدار بالفعل (v${res.currentVersion})`,
+          subtext: 'لا توجد تحديثات معلقة حالياً.',
+        });
+        playSuccess();
+        triggerHaptic('light');
+      }
+    } catch {
+      setUpdateCheckMsg({
+        kind: 'error',
+        text: 'حدث خطأ أثناء الاتصال بخادم التحديثات',
+      });
+    } finally {
+      setIsCheckingUpdate(false);
+    }
+  };
 
   const handlePairCode = (code: string) => {
     setIsScanningPair(false);
@@ -311,6 +369,75 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
           onChange={onChangeAppLock}
         />
 
+        {/* 🔄 قسم فحص وتحديثات التطبيق */}
+        <div className="p-4 rounded-3xl glass-card space-y-3 border border-cyan-500/20">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-xl bg-cyan-500/15 text-cyan-400 flex items-center justify-center">
+                <DownloadCloud size={16} />
+              </div>
+              <div>
+                <h4 className="font-bold text-white text-xs">تحديثات التطبيق</h4>
+                <p className="text-[10px] text-slate-400 font-mono">
+                  الإصدار المثبت: v{CURRENT_MOBILE_VERSION}
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              disabled={isCheckingUpdate}
+              onClick={handleCheckUpdates}
+              className="px-3.5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-50 text-slate-950 font-bold text-xs transition flex items-center gap-1.5 shadow-md shadow-cyan-500/20 active:scale-95"
+            >
+              {isCheckingUpdate ? (
+                <>
+                  <RotateCw size={13} className="animate-spin" />
+                  <span>جاري الفحص...</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles size={13} />
+                  <span>فحص التحديثات 🔄</span>
+                </>
+              )}
+            </button>
+          </div>
+
+          {updateCheckMsg && (
+            <div className={`p-2.5 rounded-xl text-[11px] flex items-center gap-2 ${
+              updateCheckMsg.kind === 'available'
+                ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                : updateCheckMsg.kind === 'uptodate'
+                ? 'bg-cyan-500/10 text-cyan-300 border border-cyan-500/20'
+                : 'bg-rose-500/15 text-rose-300 border border-rose-500/30'
+            }`}>
+              {updateCheckMsg.kind === 'available' ? (
+                <Sparkles size={14} className="shrink-0 text-emerald-400" />
+              ) : updateCheckMsg.kind === 'uptodate' ? (
+                <CheckCircle2 size={14} className="shrink-0 text-cyan-400" />
+              ) : (
+                <AlertCircle size={14} className="shrink-0 text-rose-400" />
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="font-bold">{updateCheckMsg.text}</p>
+                {updateCheckMsg.subtext && (
+                  <p className="text-[10px] opacity-80 mt-0.5">{updateCheckMsg.subtext}</p>
+                )}
+              </div>
+              {updateCheckMsg.kind === 'available' && (
+                <button
+                  type="button"
+                  onClick={() => setIsUpdateModalOpen(true)}
+                  className="px-2.5 py-1 rounded-lg bg-emerald-500 text-slate-950 font-black text-[10px] shrink-0"
+                >
+                  عرض وتنزيل
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
         {/* System info */}
       <div className="p-4 rounded-3xl glass-card flex items-start gap-3 text-slate-400">
         <Info size={16} className="text-cyan-400 shrink-0 mt-0.5" />
@@ -323,6 +450,13 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
           </p>
         </div>
       </div>
+
+      {/* Update Modal */}
+      <UpdateModal
+        update={availableUpdate}
+        isOpen={isUpdateModalOpen}
+        onClose={() => setIsUpdateModalOpen(false)}
+      />
 
       {/* QR Scanner Modal for Instant Pairing */}
       <CameraScannerModal

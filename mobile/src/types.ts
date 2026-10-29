@@ -24,6 +24,11 @@ export interface SaleItem {
   quantity: number;
   price: number;
   cost?: number;
+  inventoryId?: string;
+  costPrice?: number;
+  unitPrice?: number;
+  total?: number;
+  returnedQuantity?: number;
   imei?: string;
 }
 
@@ -32,6 +37,7 @@ export interface SaleRecord {
   invoiceNumber?: string;
   date: string;
   createdAt?: string;
+  subtotal?: number;
   total: number;
   discount?: number;
   finalTotal: number;
@@ -46,6 +52,7 @@ export interface SaleRecord {
   customerPhone?: string;
   customerId?: string;
   items: SaleItem[];
+  notes?: string;
   branchId?: string;
   branchName?: string;
   branchColor?: string;
@@ -173,6 +180,8 @@ export interface BranchMetrics {
   // 3. الإيراد الشامل والأرباح الشاملة
   todayTotalRevenue: number;
   todayProfitTotal: number;
+  todayGrossProfit?: number;
+  todayNetProfit?: number;
   // 4. المصروفات والسيولة
   todayExpensesTotal: number;
   totalSafesBalance: number;

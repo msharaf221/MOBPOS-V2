@@ -263,16 +263,24 @@ export const POSTab: React.FC<POSTabProps> = ({
       else if (paymentMethod === 'debt') paymentLabel = 'آجل / تقسيط';
 
       const saleItems: SaleItem[] = cart.map((c, idx) => ({
-        id: c.item.id || `item_${idx}`,
+        id: `sale_item_${Date.now()}_${idx}`,
+        inventoryId: c.item.id,
         name: c.item.name,
         quantity: c.quantity,
         price: c.unitPrice,
-        cost: c.costPrice,
+        unitPrice: c.unitPrice,
+        cost: c.costPrice || c.item.costPrice || 0,
+        costPrice: c.costPrice || c.item.costPrice || 0,
+        total: Number(c.unitPrice * c.quantity),
+        returnedQuantity: 0,
         imei: c.selectedImei,
       }));
 
-      const totalCost = cart.reduce((acc, c) => acc + c.quantity * (c.costPrice || 0), 0);
-      const profit = Math.max(0, cartFinalTotal - totalCost);
+      const totalCost = cart.reduce((acc, c) => {
+        const itemCost = Number(c.costPrice || c.item.costPrice || 0);
+        return acc + c.quantity * itemCost;
+      }, 0);
+      const profit = totalCost > 0 ? Math.max(0, cartFinalTotal - totalCost) : 0;
 
       const saleRecord: SaleRecord = {
         id: `sale_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,

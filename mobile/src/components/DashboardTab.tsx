@@ -55,8 +55,8 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     ? Math.min(100, Math.round((metrics.todayCashCollected / metrics.todaySalesTotal) * 100))
     : 100;
 
-  const profitMarginPct = metrics.todaySalesTotal > 0
-    ? Math.round((metrics.todayProfitTotal / metrics.todaySalesTotal) * 100)
+  const profitMarginPct = metrics.todayTotalRevenue > 0
+    ? Math.round((metrics.todayProfitTotal / metrics.todayTotalRevenue) * 100)
     : 0;
 
   const isCompletelyEmpty =
@@ -242,19 +242,19 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
           <div className="flex items-center justify-between text-xs font-bold text-emerald-300">
             <span className="flex items-center gap-1.5">
               <Coins size={15} className="text-emerald-400" />
-              صافي الأرباح
+              صافي أرباح التشغيل
             </span>
             <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 font-black font-mono">
               ~{profitMarginPct}%
             </span>
           </div>
 
-          <div className="text-2xl font-black text-emerald-400 font-mono tracking-tight">
-            +{formatCurrency(metrics.todayProfitTotal, hideAmounts)}
+          <div className={`text-2xl font-black font-mono tracking-tight ${metrics.todayProfitTotal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+            {metrics.todayProfitTotal >= 0 ? '+' : ''}{formatCurrency(metrics.todayProfitTotal, hideAmounts)}
           </div>
 
           <p className="text-[10px] text-slate-400 leading-tight">
-            ربح بضاعة (+{formatCurrency(metrics.todaySalesProfit, hideAmounts)}) + ربح صيانة (+{formatCurrency(metrics.todayMaintenanceProfit, hideAmounts)})
+            مجمل ربح ({formatCurrency(metrics.todayGrossProfit ?? (metrics.todaySalesProfit + metrics.todayMaintenanceProfit), hideAmounts)}) {metrics.todayExpensesTotal > 0 ? `- مصروفات (${formatCurrency(metrics.todayExpensesTotal, hideAmounts)})` : ''}
           </p>
         </div>
       </div>
