@@ -2,15 +2,11 @@ import React, { useState } from 'react';
 import {
   X,
   Wrench,
-  Phone,
-  Clock,
   User,
   CheckCircle2,
-  AlertCircle,
   Plus,
   Send,
   Coins,
-  Check,
 } from 'lucide-react';
 import type { BranchConfig, MaintenanceOrder, Safe } from '../types';
 import { formatCurrency, formatTimeAgo } from '../utils/format';
@@ -148,9 +144,22 @@ export const MaintenanceModal: React.FC<MaintenanceModalProps> = ({
     if (!deliveringOrder || !activeBranch) return;
     const safe = safesList.find(s => s.id === deliveredSafeId) || safesList[0];
 
-    const collected = Number(deliverCollectedAmount) || deliveringOrder.finalPrice || deliveringOrder.expectedPrice || 0;
-    const cost = Number(deliverCostPrice) || deliveringOrder.costPrice || 0;
+    const rawCollected = Number(deliverCollectedAmount);
+    const collected = Number.isFinite(rawCollected) && rawCollected >= 0
+      ? rawCollected
+      : Number(deliveringOrder.finalPrice || deliveringOrder.expectedPrice || 0);
+
+    const rawCost = Number(deliverCostPrice);
+    const cost = Number.isFinite(rawCost) && rawCost >= 0
+      ? rawCost
+      : Number(deliveringOrder.costPrice || 0);
+
     const profit = Math.max(0, collected - cost);
+
+    if (collected > 0 && !safe) {
+      alert('تنبيه: لا توجد خزينة محددة لإيداع المبلغ المحصل، يرجى اختيار خزينة أولاً');
+      return;
+    }
 
     try {
       const updated: MaintenanceOrder = {

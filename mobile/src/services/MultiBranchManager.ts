@@ -1324,6 +1324,26 @@ class MultiBranchManager {
     else if (order.status === 'cancelled') desktopStatus = 'cancelled';
     else desktopStatus = 'received';
 
+    let safeToUse = safeForDeposit;
+    if (!safeToUse && order.status === 'delivered' && order.safeId) {
+      try {
+        const freshSafeMap = await this.fetchFreshRecords(branch, 'safes', [order.safeId]);
+        const fetched = freshSafeMap.get(order.safeId);
+        if (fetched?.data) {
+          safeToUse = {
+            id: order.safeId,
+            name: fetched.data.name || 'الخزينة',
+            type: fetched.data.type || 'cash',
+            balance: Number(fetched.data.balance) || 0,
+            branchId: branch.id,
+            branchName: branch.name,
+          };
+        }
+      } catch {
+        // Fallback silently if fetch fails
+      }
+    }
+
     const maintenanceData = {
       ...order,
       deviceType: order.deviceType || order.deviceModel || 'جهاز صيانة',
@@ -1340,7 +1360,7 @@ class MultiBranchManager {
       receivedDate: order.receivedDate || order.receivedAt || nowIso,
       deliveredAt: order.status === 'delivered' ? (order.deliveryDate || order.deliveredAt || nowIso) : '',
       deliveryDate: order.status === 'delivered' ? (order.deliveryDate || order.deliveredAt || nowIso) : '',
-      safeId: safeForDeposit ? safeForDeposit.id : (order.safeId || ''),
+      safeId: safeToUse ? safeToUse.id : (order.safeId || ''),
       branchId: branch.id,
       branchName: branch.name,
     };
@@ -1354,11 +1374,11 @@ class MultiBranchManager {
     ];
 
     // If order was delivered and finalPrice was collected into a safe:
-    if (order.status === 'delivered' && finalAmount > 0 && safeForDeposit) {
+    if (order.status === 'delivered' && finalAmount > 0 && safeToUse) {
       // 🔴 FIX RMW: رصيد الخزنة من النسخة السحابية الأحدث قبل إضافة إيراد الصيانة
-      const freshSafeMap = await this.fetchFreshRecords(branch, 'safes', [safeForDeposit.id]);
-      const freshSafe = freshSafeMap.get(safeForDeposit.id);
-      const { merged: baseSafe, version: safeVersion } = this.applyFreshData(safeForDeposit as any, freshSafe, ['balance']);
+      const freshSafeMap = await this.fetchFreshRecords(branch, 'safes', [safeToUse.id]);
+      const freshSafe = freshSafeMap.get(safeToUse.id);
+      const { merged: baseSafe, version: safeVersion } = this.applyFreshData(safeToUse as any, freshSafe, ['balance']);
 
       const newBal = (Number(baseSafe.balance) || 0) + finalAmount;
       const txId = `tx_maint_${Date.now()}`;
@@ -1366,7 +1386,7 @@ class MultiBranchManager {
       records.push(
         {
           store: 'safes',
-          recordId: safeForDeposit.id,
+          recordId: safeToUse.id,
           version: safeVersion,
           data: {
             ...baseSafe,
@@ -1380,8 +1400,8 @@ class MultiBranchManager {
             id: txId,
             type: 'maintenance', // 🔴 FIX: type must be 'maintenance' (NOT 'sale')
             amount: finalAmount,
-            safeId: safeForDeposit.id,
-            safeName: safeForDeposit.name,
+            safeId: safeToUse.id,
+            safeName: safeToUse.name,
             referenceId: order.id,
             description: `إيراد تسليم صيانة #${order.ticketNumber || order.id.slice(0, 8)} (${order.deviceModel})`,
             category: 'صيانة',
