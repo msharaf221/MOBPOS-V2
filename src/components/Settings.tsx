@@ -4,7 +4,7 @@ import {
   Globe, Palette, Bell, Lock, ChevronLeft, Store,
   Printer, Download, AlertTriangle, Info, CheckCircle,
   Monitor, Smartphone, Upload, Cloud, CloudUpload, Clock,
-  History, Trash2, Loader2, KeyRound, XCircle, Crown, ImagePlus, X, Wifi,
+  History, Trash2, Loader2, KeyRound, Crown, ImagePlus, X, Wifi,
   Zap, CheckCircle2, Copy, QrCode, LogOut
 } from 'lucide-react';
 import QRCode from 'qrcode';
@@ -36,14 +36,8 @@ import {
   downloadLocalSnapshot, downloadPayload, createBackupPayload,
   restoreFromParsed, formatBackupTime, formatBytes as fmtBytes,
 } from '../utils/backup';
-import {
-  getAccessToken, getUserEmail, listDriveBackups,
-  downloadDriveBackup, deleteDriveBackup, clearTokenCache,
-  DriveBackupFile,
-} from '../utils/googleDrive';
 import { useSyncEngine } from '../hooks/useSyncEngine';
 import { syncEngine, isValidJwt } from '../services/SyncEngine';
-import { promptGoogleIdentity, getGoogleClientId, saveGoogleClientId } from '../utils/googleAuth';
 
 interface SettingsProps {
   currentUser: User;
@@ -94,8 +88,6 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
   const [syncBusy, setSyncBusy] = useState(false);
   const [syncMsg, setSyncMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const [copiedSql, setCopiedSql] = useState(false);
-  const [googleClientIdDraft, setGoogleClientIdDraft] = useState(() => getGoogleClientId());
-  const [googleAuthBusy, setGoogleAuthBusy] = useState(false);
   const [qrPairingModalOpen, setQrPairingModalOpen] = useState(false);
   const [qrPairingDataUrl, setQrPairingDataUrl] = useState<string>('');
 
@@ -117,39 +109,6 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
     }
   };
 
-  const handleGoogleSignIn = async () => {
-    const clientId = googleClientIdDraft.trim() || clientIdDraft.trim() || getGoogleClientId();
-    if (!clientId) {
-      setSyncMsg({ kind: 'err', text: 'يرجى إدخال Google Client ID أولاً للربط بحساب Google' });
-      return;
-    }
-    setGoogleAuthBusy(true);
-    setSyncMsg(null);
-    try {
-      saveGoogleClientId(clientId);
-      const res = await promptGoogleIdentity(clientId);
-      if (!res.ok || !res.idToken) {
-        setSyncMsg({ kind: 'err', text: res.error || 'تعذر تسجيل الدخول بحساب Google' });
-        return;
-      }
-      const syncRes = await syncEngine.signInWithGoogleIdToken(res.idToken);
-      if (syncRes.ok) {
-        const cfg = syncEngine.loadConfig();
-        setSyncMsg({ kind: 'ok', text: `تم تسجيل الدخول وربط المتجر بنجاح عبر حساب Google (${res.metadata?.email || cfg.userEmail || ''}) ✅` });
-        setSyncUrl(cfg.url);
-        setSyncKey(cfg.anonKey);
-        setSyncTenant(cfg.tenantId || '');
-        setSyncAccessToken(cfg.accessToken || '');
-      } else {
-        setSyncMsg({ kind: 'err', text: syncRes.error || 'فشل الاتصال بسحابة Supabase' });
-      }
-    } catch (err) {
-      setSyncMsg({ kind: 'err', text: err instanceof Error ? err.message : 'حدث خطأ أثناء تسجيل الدخول' });
-    } finally {
-      setGoogleAuthBusy(false);
-    }
-  };
-
   const handleSignOutSync = async () => {
     await syncEngine.signOut();
     setSyncAccessToken('');
@@ -160,11 +119,8 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
   const [backupSettings, setBackupSettings] = useState<BackupSettings | null>(null);
   const [snapshots, setSnapshots] = useState<Awaited<ReturnType<typeof listLocalSnapshots>>>([]);
   const [backupBusy, setBackupBusy] = useState(false);
+  const [supabaseBackupBusy, setSupabaseBackupBusy] = useState(false);
   const [backupMsg, setBackupMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
-  const [clientIdDraft, setClientIdDraft] = useState('');
-  const [driveBusy, setDriveBusy] = useState(false);
-  const [driveFiles, setDriveFiles] = useState<DriveBackupFile[]>([]);
-  const [showDriveHelp, setShowDriveHelp] = useState(false);
   const [restoringId, setRestoringId] = useState<string | null>(null);
 
   // ===== Password change state =====
@@ -182,76 +138,36 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
     const [s, snaps] = await Promise.all([getBackupSettings(), listLocalSnapshots()]);
     setBackupSettings(s);
     setSnapshots(snaps);
-    setClientIdDraft(s.driveClientId || '');
   }, []);
 
   useEffect(() => {
     refreshBackupData().catch(() => undefined);
   }, [refreshBackupData]);
 
-  const handleManualBackup = async (toDrive: boolean) => {
+  const handleManualBackup = async () => {
     setBackupBusy(true);
     setBackupMsg(null);
-    const result = await runBackupNow(toDrive);
+    const result = await runBackupNow(false);
     setBackupBusy(false);
     if (!result.ok) {
       flashBackupMsg('err', result.error || 'فشل إنشاء النسخة الاحتياطية');
       return;
     }
-    if (toDrive && !result.driveUploaded) {
-      flashBackupMsg('err', `تم الحفظ محليًا ✅ لكن الرفع إلى جوجل فشل: ${result.driveError || 'غير معروف'}`);
-    } else if (toDrive) {
-      flashBackupMsg('ok', 'تم إنشاء النسخة ورفعها إلى Google Drive ✅');
-    } else {
-      flashBackupMsg('ok', 'تم إنشاء النسخة الاحتياطية وحفظها محليًا ✅');
-    }
+    flashBackupMsg('ok', 'تم إنشاء النسخة الاحتياطية وحفظها محليًا بنجاح ✅');
     await refreshBackupData();
   };
 
-  const handleConnectDrive = async () => {
-    const id = clientIdDraft.trim();
-    if (!id) {
-      flashBackupMsg('err', 'أدخل Google OAuth Client ID أولاً (راجع خطوات التجهيز بالأسفل)');
-      setShowDriveHelp(true);
-      return;
-    }
-    setDriveBusy(true);
+  const handleSupabaseSnapshotBackup = async () => {
+    setSupabaseBackupBusy(true);
+    setBackupMsg(null);
     try {
-      const token = await getAccessToken(id, false);
-      if (!token) {
-        flashBackupMsg('err', 'تعذر الاتصال بحساب Google — تأكد من Client ID ومن اتصال الإنترنت');
-        return;
-      }
-      const email = await getUserEmail(token);
-      await saveBackupSettings({ driveClientId: id, driveConnectedEmail: email });
-      flashBackupMsg('ok', `تم ربط Google Drive بنجاح${email ? ` (${email})` : ''} ✅`);
-      await refreshBackupData();
-      await handleRefreshDriveFiles();
+      const count = await syncEngine.pushAllSnapshots();
+      flashBackupMsg('ok', `تم أخذ لقطة سحابية شاملة (${count} جداول) وحفظها في سحابة Supabase بنجاح ✅`);
+    } catch (e) {
+      flashBackupMsg('err', e instanceof Error ? e.message : 'تعذر حفظ النسخة السحابية في Supabase — تأكد من الاتصال');
     } finally {
-      setDriveBusy(false);
+      setSupabaseBackupBusy(false);
     }
-  };
-
-  const handleDisconnectDrive = async () => {
-    clearTokenCache();
-    await saveBackupSettings({ driveConnectedEmail: null, driveAutoUpload: false });
-    setDriveFiles([]);
-    flashBackupMsg('ok', 'تم فصل Google Drive. (يبقى Client ID محفوظًا لإعادة الربط)');
-    await refreshBackupData();
-  };
-
-  const handleRefreshDriveFiles = async () => {
-    const s = backupSettings || await getBackupSettings();
-    if (!s.driveClientId || !s.driveConnectedEmail) return;
-    const token = await getAccessToken(s.driveClientId, true);
-    if (!token) {
-      // fall back to interactive token so the list can load
-      const interactive = await getAccessToken(s.driveClientId, false);
-      if (!interactive) return;
-      setDriveFiles(await listDriveBackups(interactive));
-      return;
-    }
-    setDriveFiles(await listDriveBackups(token));
   };
 
   const handleRestorePayload = async (parsed: unknown) => {
@@ -280,41 +196,6 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
     await handleRestorePayload(full.payload);
   };
 
-  const handleRestoreDriveFile = async (fileId: string) => {
-    const s = backupSettings || await getBackupSettings();
-    if (!s.driveClientId) return;
-    setRestoringId(fileId);
-    try {
-      let token = await getAccessToken(s.driveClientId, true);
-      if (!token) token = await getAccessToken(s.driveClientId, false);
-      if (!token) {
-        alert('تعذر الاتصال بـ Google Drive');
-        return;
-      }
-      const payload = await downloadDriveBackup(token, fileId);
-      await handleRestorePayload(payload);
-    } catch {
-      alert('فشل تنزيل النسخة من Google Drive');
-    } finally {
-      setRestoringId(null);
-    }
-  };
-
-  const handleDeleteDriveFile = async (fileId: string) => {
-    const s = backupSettings || await getBackupSettings();
-    if (!s.driveClientId) return;
-    if (!confirm('حذف هذه النسخة من Google Drive؟')) return;
-    try {
-      let token = await getAccessToken(s.driveClientId, true);
-      if (!token) token = await getAccessToken(s.driveClientId, false);
-      if (!token) return;
-      await deleteDriveBackup(token, fileId);
-      await handleRefreshDriveFiles();
-    } catch {
-      alert('فشل الحذف من Google Drive');
-    }
-  };
-
   const handleToggleAuto = async (enabled: boolean) => {
     await saveBackupSettings({ autoEnabled: enabled });
     await refreshBackupData();
@@ -322,11 +203,6 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
 
   const handleAutoHourChange = async (hour: number) => {
     await saveBackupSettings({ autoHour: hour });
-    await refreshBackupData();
-  };
-
-  const handleToggleDriveAuto = async (enabled: boolean) => {
-    await saveBackupSettings({ driveAutoUpload: enabled });
     await refreshBackupData();
   };
 
@@ -1172,32 +1048,34 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                           <p className="text-xs text-gray-400 dark:text-gray-500 font-mono mt-0.5 break-all">{backupSettings.lastBackupName}</p>
                         )}
                       </div>
-                      <div className="p-3 bg-purple-50 dark:bg-purple-900/15 rounded-xl border border-purple-100 dark:border-purple-800">
-                        <p className="text-xs text-gray-500 dark:text-gray-400">آخر رفع إلى Google Drive</p>
-                        <p className="font-bold text-purple-700 dark:text-purple-300 mt-1">
-                          {backupSettings.driveConnectedEmail
-                            ? formatBackupTime(backupSettings.lastDriveUploadAt)
-                            : 'غير متصل بجوجل'}
+                      <div className="p-3 bg-emerald-50 dark:bg-emerald-900/15 rounded-xl border border-emerald-100 dark:border-emerald-800">
+                        <p className="text-xs text-gray-500 dark:text-gray-400">حالة السحابة (Supabase)</p>
+                        <p className="font-bold text-emerald-700 dark:text-emerald-300 mt-1 flex items-center gap-1.5">
+                          <Cloud size={16} />
+                          {sync.isOnline ? (sync.status === 'syncing' ? 'جاري المزامنة...' : 'متصل بالسحابة') : 'وضع غير متصل'}
+                        </p>
+                        <p className="text-xs text-gray-400 dark:text-gray-500 font-mono mt-0.5">
+                          معرّف المتجر: {sync.tenantId || 'افتراضي'}
                         </p>
                       </div>
                     </div>
 
                     <div className="flex flex-wrap gap-3">
                       <button
-                        onClick={() => handleManualBackup(false)}
+                        onClick={handleManualBackup}
                         disabled={backupBusy}
                         className="flex items-center gap-2 px-5 py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold rounded-xl transition shadow-lg shadow-blue-600/20"
                       >
                         {backupBusy ? <Loader2 size={18} className="animate-spin" /> : <Database size={18} />}
-                        إنشاء نسخة الآن
+                        إنشاء نسخة محلية الآن
                       </button>
                       <button
-                        onClick={() => handleManualBackup(true)}
-                        disabled={backupBusy || !backupSettings.driveClientId}
+                        onClick={handleSupabaseSnapshotBackup}
+                        disabled={supabaseBackupBusy}
                         className="flex items-center gap-2 px-5 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-xl transition shadow-lg shadow-emerald-600/20"
                       >
-                        {backupBusy ? <Loader2 size={18} className="animate-spin" /> : <CloudUpload size={18} />}
-                        نسخة الآن + رفع إلى جوجل
+                        {supabaseBackupBusy ? <Loader2 size={18} className="animate-spin" /> : <CloudUpload size={18} />}
+                        أخذ لقطة سحابية كاملة في Supabase
                       </button>
                     </div>
                   </div>
@@ -1206,164 +1084,89 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                 )}
               </div>
 
-              {/* ===== CARD: Google Drive Backup ===== */}
+              {/* ===== CARD: Supabase Cloud Backup & Sync ===== */}
               <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-                <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-1 flex items-center gap-2">
-                  <Cloud size={20} className="text-emerald-500" />
-                  النسخ الاحتياطي إلى Google Drive
-                </h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
-                  ارفع نسخك الاحتياطية إلى حسابك على جوجل لحمايتها من فقدان الجهاز
-                </p>
-
-                {backupSettings && (backupSettings.driveConnectedEmail ? (
-                  /* ---- Connected state ---- */
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between p-4 bg-emerald-50 dark:bg-emerald-900/15 rounded-xl border border-emerald-200 dark:border-emerald-800">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-emerald-500 rounded-full flex items-center justify-center text-white">
-                          <CheckCircle size={20} />
-                        </div>
-                        <div>
-                          <p className="font-bold text-emerald-800 dark:text-emerald-200">متصل بحساب Google</p>
-                          <p className="text-sm text-emerald-600 dark:text-emerald-400 font-mono">{backupSettings.driveConnectedEmail}</p>
-                        </div>
-                      </div>
-                      <button
-                        onClick={handleDisconnectDrive}
-                        className="flex items-center gap-1.5 px-4 py-2 bg-white dark:bg-gray-800 border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 rounded-xl text-sm font-bold hover:bg-red-50 dark:hover:bg-red-900/20 transition"
-                      >
-                        <XCircle size={16} />
-                        فصل
-                      </button>
-                    </div>
-
-                    <ToggleRow
-                      label="رفع تلقائي إلى Google Drive"
-                      description="مع النسخة اليومية التلقائية (يتم الرفع بصمت عند توفر جلسة جوجل)"
-                      checked={backupSettings.driveAutoUpload}
-                      onChange={handleToggleDriveAuto}
-                    />
-
-                    <div className="flex flex-wrap gap-3">
-                      <button
-                        onClick={() => handleManualBackup(true)}
-                        disabled={backupBusy}
-                        className="flex items-center gap-2 px-5 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-xl transition"
-                      >
-                        {backupBusy ? <Loader2 size={18} className="animate-spin" /> : <CloudUpload size={18} />}
-                        رفع نسخة الآن
-                      </button>
-                      <button
-                        onClick={handleRefreshDriveFiles}
-                        className="flex items-center gap-2 px-5 py-3 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 font-bold rounded-xl transition"
-                      >
-                        <RefreshCw size={18} />
-                        تحديث القائمة
-                      </button>
-                    </div>
-
-                    {/* Drive backups list */}
-                    {driveFiles.length > 0 && (
-                      <div className="mt-2">
-                        <p className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
-                          <History size={16} /> النسخ الموجودة على Drive ({driveFiles.length})
-                        </p>
-                        <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-                          {driveFiles.map(f => (
-                            <div key={f.id} className="flex items-center justify-between gap-2 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
-                              <div className="min-w-0">
-                                <p className="font-mono text-sm text-gray-800 dark:text-gray-200 truncate">{f.name}</p>
-                                <p className="text-xs text-gray-400">
-                                  {formatBackupTime(f.createdTime)} — {fmtBytes(Number(f.size) || 0)}
-                                </p>
-                              </div>
-                              <div className="flex gap-1.5 flex-shrink-0">
-                                <button
-                                  onClick={() => handleRestoreDriveFile(f.id)}
-                                  disabled={restoringId === f.id}
-                                  title="استعادة"
-                                  className="p-2 bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-300 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-900/60 transition disabled:opacity-50"
-                                >
-                                  {restoringId === f.id ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
-                                </button>
-                                <button
-                                  onClick={() => handleDeleteDriveFile(f.id)}
-                                  title="حذف"
-                                  className="p-2 bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-300 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/60 transition"
-                                >
-                                  <Trash2 size={16} />
-                                </button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+                <div className="flex items-start justify-between flex-wrap gap-3 mb-4">
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-1 flex items-center gap-2">
+                      <Cloud size={20} className="text-emerald-500" />
+                      النسخ والمزامنة السحابية عبر Supabase
+                    </h3>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      يتم حفظ ومزامنة قاعدة البيانات وقوائم الأسعار والمبيعات تلقائياً في سحابة Supabase فائقة السرعة
+                    </p>
                   </div>
-                ) : (
-                  /* ---- Not connected state ---- */
-                  <div className="space-y-4">
-                    <div className="p-4 bg-amber-50 dark:bg-amber-900/15 rounded-xl border border-amber-200 dark:border-amber-800 text-sm text-amber-800 dark:text-amber-300 flex items-start gap-2">
-                      <AlertTriangle size={18} className="flex-shrink-0 mt-0.5" />
-                      <span>
-                        للربط مع جوجل تحتاج إلى <b>Google OAuth Client ID</b> مجاني من Google Cloud Console.
-                        اتبع الخطوات بالأسفل ثم الصِف المُعرِّف هنا.
-                      </span>
-                    </div>
+                  <span className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 ${
+                    sync.isOnline 
+                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800'
+                      : 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-800'
+                  }`}>
+                    <span className={`w-2 h-2 rounded-full ${sync.isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+                    {sync.isOnline ? 'سحابة Supabase متصلة' : 'في انتظار الاتصال'}
+                  </span>
+                </div>
 
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
-                        Google OAuth Client ID
-                      </label>
-                      <input
-                        type="text"
-                        value={clientIdDraft}
-                        onChange={e => setClientIdDraft(e.target.value)}
-                        placeholder="xxxxxxxx.apps.googleusercontent.com"
-                        dir="ltr"
-                        className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-800 dark:text-white font-mono text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-                      />
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl border border-gray-200 dark:border-gray-600">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">معرّف المتجر السحابي (Tenant)</p>
+                      <p className="font-mono text-sm font-bold text-gray-800 dark:text-gray-200 mt-1 truncate" dir="ltr">
+                        {sync.tenantId || 'غير محدد'}
+                      </p>
                     </div>
-
-                    <div className="flex flex-wrap gap-3">
-                      <button
-                        onClick={handleConnectDrive}
-                        disabled={driveBusy || !clientIdDraft.trim()}
-                        className="flex items-center gap-2 px-5 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-xl transition shadow-lg shadow-emerald-600/20"
-                      >
-                        {driveBusy ? <Loader2 size={18} className="animate-spin" /> : <KeyRound size={18} />}
-                        ربط Google Drive
-                      </button>
-                      <button
-                        onClick={() => setShowDriveHelp(v => !v)}
-                        className="flex items-center gap-2 px-5 py-3 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 font-bold rounded-xl transition"
-                      >
-                        <Info size={18} />
-                        خطوات التجهيز
-                      </button>
+                    <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl border border-gray-200 dark:border-gray-600">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">التغييرات المعلقة للإرسال</p>
+                      <p className="font-bold text-gray-800 dark:text-gray-200 mt-1">
+                        {sync.pendingCount} تعديل معلق
+                      </p>
                     </div>
-
-                    {showDriveHelp && (
-                      <div className="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-xl text-sm text-gray-600 dark:text-gray-300 space-y-2 list-decimal list-inside">
-                        <p className="font-bold text-gray-800 dark:text-white">كيف تحصل على Client ID (مرة واحدة فقط):</p>
-                        <ol className="space-y-1.5 pl-2">
-                          <li>افتح <span className="font-mono text-xs" dir="ltr">console.cloud.google.com</span> وسجّل دخولك بحساب جوجل الخاص بالمحل.</li>
-                          <li>أنشئ مشروعًا جديدًا (أو اختر مشروعًا موجودًا).</li>
-                          <li>من <b>APIs &amp; Services → Library</b> فعّل <b>Google Drive API</b>.</li>
-                          <li>من <b>APIs &amp; Services → OAuth consent screen</b> اختر <b>External</b> وأدخل اسم التطبيق وبريدك (لا يحتاج نشرًا عامًا).</li>
-                          <li>من <b>Credentials → Create Credentials → OAuth client ID</b> اختر نوع <b>Web application</b>.</li>
-                          <li>في <b>Authorized JavaScript origins</b> أضف الرابط الذي يعمل عليه النظام بالضبط (مثال: <span className="font-mono text-xs" dir="ltr">https://myshop.example.com</span>).</li>
-                          <li>انسخ <b>Client ID</b> والصقه في الخانة أعلاه ثم اضغط "ربط Google Drive".</li>
-                        </ol>
-                        <p className="text-amber-700 dark:text-amber-400 mt-2">
-                          ⚠️ ملاحظة: الربط يعمل عندما يعمل النظام من خلال رابط ويب (http/https)، ولا يعمل إذا كان الملف مفتوحًا مباشرة من القرص.
-                          النطاق <span className="font-mono text-xs" dir="ltr">drive.file</span> يعني أن التطبيق لا يرى إلا الملفات التي ينشئها بنفسه.
-                        </p>
-                      </div>
-                    )}
+                    <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl border border-gray-200 dark:border-gray-600">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">تطبيق الموبايل</p>
+                      <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400 mt-1 flex items-center gap-1">
+                        <CheckCircle size={15} />
+                        يدعم كاميرا الباركود وIMEI
+                      </p>
+                    </div>
                   </div>
-                ))}
+
+                  <div className="p-3.5 bg-emerald-50/70 dark:bg-emerald-950/30 rounded-xl border border-emerald-100 dark:border-emerald-800/60 text-xs text-emerald-800 dark:text-emerald-300 leading-relaxed">
+                    ✨ <b>مزامنة مباشرة وفورية:</b> تم اعتماد سحابة Supabase كلياً كبديل نهائي لـ Google OAuth وDrive، دون أي حاجة لإنشاء حسابات مطورين أو إعداد مفاتيح API معقدة. امسح رمز الـ QR من تطبيق الموبايل لربط الهاتف بالمتجر في ثانيتين!
+                  </div>
+
+                  <div className="flex flex-wrap gap-3 pt-1">
+                    <button
+                      type="button"
+                      onClick={handleSupabaseSnapshotBackup}
+                      disabled={supabaseBackupBusy}
+                      className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-xl transition shadow-sm text-sm"
+                    >
+                      {supabaseBackupBusy ? <Loader2 size={16} className="animate-spin" /> : <CloudUpload size={16} />}
+                      أخذ لقطة سحابية كاملة الآن
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          await sync.triggerSyncNow();
+                        } catch (err) {
+                          console.error(err);
+                        }
+                      }}
+                      className="flex items-center gap-2 px-4 py-2.5 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl transition shadow-sm text-sm"
+                    >
+                      <RefreshCw size={16} />
+                      مزامنة لحظية الآن
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleOpenQrPairing}
+                      className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition shadow-sm text-sm"
+                    >
+                      <QrCode size={16} />
+                      ربط تطبيق الجوال (QR)
+                    </button>
+                  </div>
+                </div>
               </div>
 
               {/* ===== CARD: Local Snapshots ===== */}
@@ -1527,7 +1330,7 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                   </div>
                 </div>
 
-                {/* Google Sign-In & Mobile QR Pairing Banner */}
+                {/* Supabase Realtime Cloud Sync & Mobile QR Pairing Banner */}
                 <div className="mb-5 p-4 rounded-2xl border border-sky-100 dark:border-sky-900/50 bg-gradient-to-br from-sky-50/70 via-white to-blue-50/50 dark:from-sky-950/30 dark:via-gray-800 dark:to-gray-800 shadow-sm">
                   {sync.userEmail ? (
                     <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -1549,7 +1352,7 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                               {sync.userName || 'مستخدم مسجل'}
                             </span>
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
-                              {sync.authProvider === 'google' ? 'Google Account' : 'حساب سحابي'}
+                              سحابة Supabase
                             </span>
                           </div>
                           <span className="text-xs text-gray-600 dark:text-gray-300 block dir-ltr text-right sm:text-left mt-0.5">
@@ -1590,10 +1393,10 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                           </div>
                           <div>
                             <h4 className="text-xs font-bold text-gray-900 dark:text-white">
-                              المزامنة اللحظية الفورية بحساب Google
+                              المزامنة اللحظية السحابية عبر Supabase
                             </h4>
                             <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                              سجل دخولك بحساب Google ليتم ربط المتجر ومزامنة المبيعات تلقائياً بين الكمبيوتر والجوال
+                              نظامك متصل بسحابة Supabase ومُجهز لمزامنة المبيعات والمنتجات تلقائياً بين الكمبيوتر والجوال فوراً
                             </p>
                           </div>
                         </div>
@@ -1602,59 +1405,22 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                       <div className="flex flex-wrap items-center gap-2.5 pt-1">
                         <button
                           type="button"
-                          disabled={googleAuthBusy}
-                          onClick={handleGoogleSignIn}
-                          className="flex items-center gap-2 px-4 py-2.5 bg-white hover:bg-gray-50 text-gray-700 dark:bg-gray-700 dark:hover:bg-gray-650 dark:text-white border border-gray-300 dark:border-gray-600 rounded-xl text-xs font-bold transition shadow-sm disabled:opacity-50"
-                        >
-                          {googleAuthBusy ? (
-                            <Loader2 size={16} className="animate-spin text-sky-500" />
-                          ) : (
-                            <svg className="w-4 h-4" viewBox="0 0 24 24">
-                              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-                            </svg>
-                          )}
-                          <span>تسجيل الدخول باستخدام Google</span>
-                        </button>
-
-                        <button
-                          type="button"
                           onClick={handleOpenQrPairing}
                           className="flex items-center gap-1.5 px-4 py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold transition shadow-sm"
                         >
                           <QrCode size={16} />
                           <span>ربط تطبيق الجوال (QR)</span>
                         </button>
+                        <button
+                          type="button"
+                          onClick={handleSupabaseSnapshotBackup}
+                          disabled={supabaseBackupBusy}
+                          className="flex items-center gap-1.5 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-sm disabled:opacity-50"
+                        >
+                          {supabaseBackupBusy ? <Loader2 size={16} className="animate-spin" /> : <CloudUpload size={16} />}
+                          <span>أخذ لقطة سحابية كاملة</span>
+                        </button>
                       </div>
-
-                      {/* Google Client ID helper collapsible */}
-                      <details className="mt-2 text-[11px] text-gray-500 dark:text-gray-400">
-                        <summary className="cursor-pointer hover:underline text-sky-600 dark:text-sky-400 select-none">
-                          تعديل Google OAuth Client ID (اختياري)
-                        </summary>
-                        <div className="mt-2 flex gap-2">
-                          <input
-                            type="text"
-                            dir="ltr"
-                            value={googleClientIdDraft}
-                            onChange={e => setGoogleClientIdDraft(e.target.value)}
-                            placeholder="xxxxxx-xxxxxx.apps.googleusercontent.com"
-                            className="flex-1 p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white font-mono text-[11px]"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              saveGoogleClientId(googleClientIdDraft);
-                              setSyncMsg({ kind: 'ok', text: 'تم حفظ Google Client ID بنجاح ✅' });
-                            }}
-                            className="px-3 py-1 bg-gray-700 text-white rounded-lg font-bold text-xs"
-                          >
-                            حفظ
-                          </button>
-                        </div>
-                      </details>
                     </div>
                   )}
                 </div>
@@ -2119,7 +1885,7 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                     { label: 'الأيقونات', value: 'Lucide React' },
                     { label: 'أداة البناء', value: 'Vite 8' },
                     { label: 'التخزين', value: 'IndexedDB (متصفح)' },
-                    { label: 'النسخ الاحتياطي', value: 'يومي تلقائي + Google Drive' },
+                    { label: 'النسخ والمزامنة', value: 'سحابة Supabase اللحظية + نسخ محلي يومي' },
                   ].map(item => (
                     <div key={item.label} className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-700 last:border-0">
                       <span className="text-gray-500 dark:text-gray-400">{item.label}</span>

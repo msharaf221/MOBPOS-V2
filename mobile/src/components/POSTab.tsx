@@ -208,18 +208,46 @@ export const POSTab: React.FC<POSTabProps> = ({
     triggerHaptic('medium');
   };
 
-  // Barcode scanned callback
-  const handleBarcodeScan = (scannedCode: string) => {
-    const clean = scannedCode.trim().toLowerCase();
-    const found = metrics.inventoryList.find(
-      it => (it.barcode || '').toLowerCase() === clean || it.name.toLowerCase().includes(clean)
-    );
+  // Barcode / IMEI scanned callback with Supabase support
+  const [isSearchingBarcode, setIsSearchingBarcode] = useState(false);
 
-    if (found) {
-      handleAddToCart(found);
-    } else {
-      setSearchQuery(scannedCode);
-      triggerHaptic('warning');
+  const handleBarcodeScan = async (scannedCode: string) => {
+    const clean = scannedCode.trim();
+    if (!clean) return;
+
+    setIsSearchingBarcode(true);
+    try {
+      const match = await multiBranchManager.searchInventoryByBarcodeOrImei(activeBranch?.id || '', clean);
+
+      if (match) {
+        if (match.matchedType === 'imei' && match.imei) {
+          const already = cart.some(c => c.selectedImei === match.imei);
+          if (already) {
+            triggerHaptic('warning');
+            alert(`الجهاز ذو السيريال (${match.imei}) موجود بالفعل في السلة`);
+            return;
+          }
+          setCart(prev => [
+            ...prev,
+            {
+              item: match.item,
+              quantity: 1,
+              unitPrice: match.item.sellPrice || 0,
+              costPrice: match.item.costPrice || 0,
+              selectedImei: match.imei,
+            },
+          ]);
+          playBeep();
+          triggerHaptic('medium');
+        } else {
+          handleAddToCart(match.item);
+        }
+      } else {
+        setSearchQuery(clean);
+        triggerHaptic('warning');
+      }
+    } finally {
+      setIsSearchingBarcode(false);
     }
   };
 
@@ -371,10 +399,15 @@ export const POSTab: React.FC<POSTabProps> = ({
         <button
           type="button"
           onClick={() => setIsScannerOpen(true)}
-          className="p-3 rounded-2xl bg-gradient-to-r from-cyan-500 to-sky-500 text-slate-950 font-bold shadow-lg shadow-cyan-500/25 active:scale-95 transition flex items-center justify-center shrink-0"
+          disabled={isSearchingBarcode}
+          className="p-3 rounded-2xl bg-gradient-to-r from-cyan-500 to-sky-500 text-slate-950 font-bold shadow-lg shadow-cyan-500/25 active:scale-95 transition flex items-center justify-center shrink-0 disabled:opacity-50"
           title="مسح بالكاميرا"
         >
-          <Camera size={19} />
+          {isSearchingBarcode ? (
+            <span className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
+          ) : (
+            <Camera size={19} />
+          )}
         </button>
       </div>
 

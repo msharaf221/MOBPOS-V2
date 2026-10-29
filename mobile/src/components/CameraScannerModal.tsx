@@ -48,7 +48,7 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
     setCameraError(null);
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('الكاميرا غير مدعومة على هذا المتصفح');
+        throw new Error('الكاميرا غير مدعومة على هذا الجهاز أو المتصفح');
       }
 
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -63,8 +63,20 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
       streamRef.current = stream;
 
       if (videoRef.current) {
+        videoRef.current.playsInline = true;
+        videoRef.current.muted = true;
+        videoRef.current.autoplay = true;
+        videoRef.current.setAttribute('playsinline', 'true');
+        videoRef.current.setAttribute('webkit-playsinline', 'true');
         videoRef.current.srcObject = stream;
-        await videoRef.current.play();
+        try {
+          await videoRef.current.play();
+        } catch (playErr) {
+          console.warn('[Camera] Initial play failed, waiting for metadata:', playErr);
+          videoRef.current.onloadedmetadata = () => {
+            videoRef.current?.play().catch(e => console.warn('[Camera] Retry play failed:', e));
+          };
+        }
       }
 
       // Check for torch capability
@@ -85,7 +97,6 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
 
   const stopCamera = () => {
     isScanningRef.current = false;
-    // إيقاف قارئ ZXing لو كان يعمل بالوضع البديل
     try {
       zxingControlsRef.current?.stop();
     } catch { /* ignore */ }
@@ -114,23 +125,82 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
   };
 
   const runBarcodeDetection = async () => {
+    // 1. Try Native BarcodeDetector if available and supported
     const BarcodeDetectorClass = (window as any).BarcodeDetector;
+    let nativeDetectorWorked = false;
 
     if (BarcodeDetectorClass) {
       try {
-        const detector = new BarcodeDetectorClass({
-          formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'qr_code', 'upc_a', 'upc_e'],
-        });
+        let desiredFormats = ['ean_13', 'ean_8', 'code_128', 'code_39', 'qr_code', 'upc_a', 'upc_e'];
+        if (typeof BarcodeDetectorClass.getSupportedFormats === 'function') {
+          const supported: string[] = await BarcodeDetectorClass.getSupportedFormats();
+          desiredFormats = desiredFormats.filter(f => supported.includes(f));
+        }
 
-        const loop = async () => {
-          if (!isScanningRef.current || !videoRef.current) return;
+        if (desiredFormats.length > 0) {
+          const detector = new BarcodeDetectorClass({ formats: desiredFormats });
+          nativeDetectorWorked = true;
 
-          if (videoRef.current.readyState >= 2) {
+          const nativeLoop = async () => {
+            if (!isScanningRef.current || !videoRef.current) return;
+
+            if (videoRef.current.readyState >= 2) {
+              try {
+                const barcodes = await detector.detect(videoRef.current);
+                if (barcodes && barcodes.length > 0 && barcodes[0].rawValue) {
+                  const raw = barcodes[0].rawValue.trim();
+                  if (raw && isScanningRef.current) {
+                    playBeep();
+                    triggerHaptic('medium');
+                    onScan(raw);
+                    onClose();
+                    return;
+                  }
+                }
+              } catch {
+                // Ignore transient frame errors
+              }
+            }
+            if (isScanningRef.current) {
+              requestAnimationFrame(nativeLoop);
+            }
+          };
+
+          requestAnimationFrame(nativeLoop);
+          return;
+        }
+      } catch (e) {
+        console.info('[BarcodeDetector] Not available or unsupported, using ZXing canvas engine:', e);
+      }
+    }
+
+    // 2. High-reliability Canvas-based ZXing Engine (Android Webview & iOS WKWebView)
+    try {
+      const { BrowserMultiFormatReader } = await import('@zxing/browser');
+      const reader = new BrowserMultiFormatReader();
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+      let lastScanTime = 0;
+      const zxingLoop = () => {
+        if (!isScanningRef.current) return;
+        const video = videoRef.current;
+        const now = performance.now();
+
+        if (video && video.readyState >= 2 && now - lastScanTime > 140) {
+          lastScanTime = now;
+          if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+            canvas.width = video.videoWidth || 640;
+            canvas.height = video.videoHeight || 480;
+          }
+
+          if (ctx && canvas.width > 0 && canvas.height > 0) {
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             try {
-              const barcodes = await detector.detect(videoRef.current);
-              if (barcodes && barcodes.length > 0 && barcodes[0].rawValue) {
-                const raw = barcodes[0].rawValue.trim();
-                if (raw) {
+              const result = reader.decodeFromCanvas(canvas);
+              if (result && result.getText()) {
+                const raw = result.getText().trim();
+                if (raw && isScanningRef.current) {
                   playBeep();
                   triggerHaptic('medium');
                   onScan(raw);
@@ -138,37 +208,18 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
                   return;
                 }
               }
-            } catch (detectErr) {
-              // Ignore frame errors
+            } catch {
+              // Expected when no barcode is visible in frame
             }
           }
-          requestAnimationFrame(loop);
-        };
+        }
 
-        requestAnimationFrame(loop);
-        return;
-      } catch (e) {
-        console.info('[BarcodeDetector] Not available, falling back', e);
-      }
-    }
+        if (isScanningRef.current) {
+          requestAnimationFrame(zxingLoop);
+        }
+      };
 
-    // ── 🔴 FIX: الوضع البديل (ZXing) لأجهزة iOS WKWebView التي لا تدعم
-    // BarcodeDetector — كان الماسح يفتح الكاميرا فقط دون أي نتيجة أبداً. ──
-    try {
-      const { BrowserMultiFormatReader } = await import('@zxing/browser');
-      const reader = new BrowserMultiFormatReader();
-      const videoEl = videoRef.current;
-      if (!videoEl || !isScanningRef.current) return;
-
-      zxingControlsRef.current = await reader.decodeFromVideoElement(videoEl, (result) => {
-        if (!result) return;
-        const raw = result.getText().trim();
-        if (!raw || !isScanningRef.current) return;
-        playBeep();
-        triggerHaptic('medium');
-        onScan(raw);
-        onClose();
-      });
+      requestAnimationFrame(zxingLoop);
     } catch (zxingErr) {
       console.warn('[ZXing] Fallback scanner failed, enabling manual input:', zxingErr);
       setShowManualInput(true);
@@ -239,6 +290,7 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
           <video
             ref={videoRef}
             playsInline
+            autoPlay
             muted
             className="w-full h-full object-cover"
           />

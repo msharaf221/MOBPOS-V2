@@ -1008,6 +1008,199 @@ class MultiBranchManager {
   }
 
   /**
+   * البحث الفوري عن الصنف بالباركود أو رقم IMEI من الذاكرة ومن سحابة Supabase مباشرة
+   */
+  public async searchInventoryByBarcodeOrImei(
+    branchId: string,
+    scannedCode: string
+  ): Promise<{ item: InventoryItem; matchedType: 'barcode' | 'imei'; imei?: string } | null> {
+    const clean = scannedCode.trim();
+    if (!clean) return null;
+    const lower = clean.toLowerCase();
+
+    const branch = this.getBranches().find(b => b.id === branchId) || this.getBranches()[0];
+    const metrics = branch ? this.metricsCache.get(branch.id)?.metrics : null;
+
+    // 1. البحث في قائمة الأصناف المحلية بالذاكرة
+    if (metrics?.inventoryList) {
+      const foundDirect = metrics.inventoryList.find(
+        (it: InventoryItem) => (it.barcode || '').trim().toLowerCase() === lower || (it.id && it.id.toLowerCase() === lower)
+      );
+      if (foundDirect) {
+        return { item: foundDirect, matchedType: 'barcode' };
+      }
+    }
+
+    // 2. البحث في سحابة Supabase مباشرة إذا كان الفرع متصلاً
+    if (branch && branch.supabaseUrl && branch.supabaseAnonKey) {
+      const client = this.getClient(branch);
+      const tenantId = branch.tenantId ? branch.tenantId.trim() : '';
+      if (client) {
+        try {
+          // أ) البحث في mobpos_records عن الصنف بالباركود
+          let invQuery = client
+            .from('mobpos_records')
+            .select('data')
+            .eq('store', 'inventory')
+            .limit(100);
+          if (tenantId) invQuery = invQuery.eq('tenant_id', tenantId);
+
+          const { data: recData } = await invQuery;
+          if (Array.isArray(recData)) {
+            for (const r of recData) {
+              const d = r.data || {};
+              const bcode = String(d.barcode || d.code || '').trim().toLowerCase();
+              if (bcode === lower || String(d.id || '').toLowerCase() === lower) {
+                const item: InventoryItem = {
+                  id: d.id,
+                  name: d.name || 'منتج غير مسمى',
+                  category: d.category || '',
+                  quantity: Number(d.quantity) || 0,
+                  minQuantity: Number(d.minQuantity) || 2,
+                  costPrice: Number(d.costPrice) || 0,
+                  sellPrice: Number(d.sellPrice) || 0,
+                  barcode: d.barcode || d.code || clean,
+                  hasImei: Boolean(d.hasIMEI ?? d.hasImei),
+                  branchId: branch.id,
+                  branchName: branch.name,
+                };
+                if (metrics && !metrics.inventoryList.some((i: InventoryItem) => i.id === item.id)) {
+                  metrics.inventoryList.push(item);
+                }
+                return { item, matchedType: 'barcode' };
+              }
+            }
+          }
+
+          // ب) البحث في mobpos_records عن وحدات IMEI
+          let imeiQuery = client
+            .from('mobpos_records')
+            .select('data')
+            .eq('store', 'imei_units')
+            .limit(150);
+          if (tenantId) imeiQuery = imeiQuery.eq('tenant_id', tenantId);
+
+          const { data: imeiData } = await imeiQuery;
+          if (Array.isArray(imeiData)) {
+            for (const r of imeiData) {
+              const u = r.data || {};
+              const m1 = String(u.imei1 || '').trim().toLowerCase();
+              const m2 = String(u.imei2 || '').trim().toLowerCase();
+              const sn = String(u.serialNumber || '').trim().toLowerCase();
+              if (m1 === lower || m2 === lower || sn === lower) {
+                const invId = u.inventoryId;
+                let matchedItem = metrics?.inventoryList.find((i: InventoryItem) => i.id === invId);
+                if (!matchedItem && invId) {
+                  let fetchItemQuery = client
+                    .from('mobpos_records')
+                    .select('data')
+                    .eq('store', 'inventory')
+                    .eq('record_id', invId)
+                    .limit(1);
+                  if (tenantId) fetchItemQuery = fetchItemQuery.eq('tenant_id', tenantId);
+                  const { data: singleItem } = await fetchItemQuery;
+                  if (singleItem && singleItem[0]?.data) {
+                    const d = singleItem[0].data;
+                    matchedItem = {
+                      id: d.id,
+                      name: d.name || 'هاتف ذكي',
+                      category: d.category || 'موبايلات',
+                      quantity: Number(d.quantity) || 0,
+                      minQuantity: Number(d.minQuantity) || 2,
+                      costPrice: Number(u.costPrice ?? d.costPrice ?? 0),
+                      sellPrice: Number(u.sellingPrice ?? d.sellPrice ?? 0),
+                      barcode: d.barcode || clean,
+                      hasImei: true,
+                      branchId: branch.id,
+                      branchName: branch.name,
+                    };
+                    if (metrics) metrics.inventoryList.push(matchedItem);
+                  }
+                }
+                if (matchedItem) {
+                  return { item: matchedItem, matchedType: 'imei', imei: u.imei1 || clean };
+                }
+              }
+            }
+          }
+
+          // ج) البحث في لقطة mobpos_stores الشاملة
+          let storeQuery = client
+            .from('mobpos_stores')
+            .select('store_name, data')
+            .in('store_name', ['inventory', 'imei_units']);
+          if (tenantId) storeQuery = storeQuery.eq('tenant_id', tenantId);
+
+          const { data: storesData } = await storeQuery;
+          if (Array.isArray(storesData)) {
+            const invStore = storesData.find(s => s.store_name === 'inventory')?.data;
+            const imeiStore = storesData.find(s => s.store_name === 'imei_units')?.data;
+
+            if (Array.isArray(invStore)) {
+              const foundInStore = invStore.find(
+                (d: any) => String(d.barcode || d.code || '').trim().toLowerCase() === lower
+              );
+              if (foundInStore) {
+                const item: InventoryItem = {
+                  id: foundInStore.id,
+                  name: foundInStore.name || 'منتج',
+                  category: foundInStore.category || '',
+                  quantity: Number(foundInStore.quantity) || 0,
+                  minQuantity: Number(foundInStore.minQuantity) || 2,
+                  costPrice: Number(foundInStore.costPrice) || 0,
+                  sellPrice: Number(foundInStore.sellPrice) || 0,
+                  barcode: foundInStore.barcode || clean,
+                  hasImei: Boolean(foundInStore.hasIMEI ?? foundInStore.hasImei),
+                  branchId: branch.id,
+                  branchName: branch.name,
+                };
+                if (metrics && !metrics.inventoryList.some((i: InventoryItem) => i.id === item.id)) {
+                  metrics.inventoryList.push(item);
+                }
+                return { item, matchedType: 'barcode' };
+              }
+            }
+
+            if (Array.isArray(imeiStore)) {
+              const foundUnit = imeiStore.find(
+                (u: any) =>
+                  String(u.imei1 || '').trim().toLowerCase() === lower ||
+                  String(u.imei2 || '').trim().toLowerCase() === lower
+              );
+              if (foundUnit && Array.isArray(invStore)) {
+                const parentItem = invStore.find((i: any) => i.id === foundUnit.inventoryId);
+                if (parentItem) {
+                  const item: InventoryItem = {
+                    id: parentItem.id,
+                    name: parentItem.name || 'هاتف ذكي',
+                    category: parentItem.category || 'موبايلات',
+                    quantity: Number(parentItem.quantity) || 0,
+                    minQuantity: Number(parentItem.minQuantity) || 2,
+                    costPrice: Number(foundUnit.costPrice ?? parentItem.costPrice ?? 0),
+                    sellPrice: Number(foundUnit.sellingPrice ?? parentItem.sellPrice ?? 0),
+                    barcode: parentItem.barcode || clean,
+                    hasImei: true,
+                    branchId: branch.id,
+                    branchName: branch.name,
+                  };
+                  if (metrics && !metrics.inventoryList.some((i: InventoryItem) => i.id === item.id)) {
+                    metrics.inventoryList.push(item);
+                  }
+                  return { item, matchedType: 'imei', imei: foundUnit.imei1 || clean };
+                }
+              }
+            }
+          }
+        } catch (searchErr) {
+          console.warn('[MultiBranch] Barcode search in Supabase failed:', searchErr);
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * Pushes granular records directly to `mobpos_records` on the branch's Supabase instance.
    * Broadcasts immediately via Supabase Realtime to Desktop Electron and all mobile devices!
    */

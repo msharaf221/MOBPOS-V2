@@ -2,11 +2,10 @@
 //  نظام النسخ الاحتياطي — Backup Engine
 //  - نسخة احتياطية يومية تلقائية (محلية داخل IndexedDB)
 //  - تصدير / استعادة ملفات JSON
-//  - رفع تلقائي إلى Google Drive (انظر googleDrive.ts)
+//  - رفع وتزامن سحابي مع Supabase (SyncEngine)
 // ============================================================
 
 import { indexedDBUtils } from '../hooks/useIndexedDB';
-import { getAccessToken, uploadBackupToDrive, pruneDriveBackups } from './googleDrive';
 import { formatDateTime } from './format.ts';
 
 // ===== Types =====
@@ -371,45 +370,18 @@ export interface BackupRunResult {
   error?: string;
 }
 
-/** Create a backup now (local snapshot + optional Drive upload). */
-export async function runBackupNow(uploadToDrive: boolean): Promise<BackupRunResult> {
+/** Create a backup now (local snapshot). */
+export async function runBackupNow(_uploadToDrive: boolean = false): Promise<BackupRunResult> {
   try {
     const payload = await createBackupPayload();
     const snapshot = await saveLocalSnapshot(payload, false);
-
-    let driveUploaded = false;
-    let driveError: string | undefined;
-
-    if (uploadToDrive) {
-      try {
-        const settings = await getBackupSettings();
-        if (!settings.driveClientId) {
-          driveError = 'لم يتم ضبط Google Drive بعد';
-        } else {
-          const token = await getAccessToken(settings.driveClientId, false);
-          if (!token) {
-            driveError = 'تعذر الحصول على إذن الوصول إلى Google Drive';
-          } else {
-            await uploadBackupToDrive(token, payload);
-            await pruneDriveBackups(token, 15);
-            driveUploaded = true;
-            await saveBackupSettings({
-              lastDriveUploadAt: new Date().toISOString(),
-              lastDriveFileName: snapshot.name,
-            });
-          }
-        }
-      } catch (err) {
-        driveError = err instanceof Error ? err.message : 'خطأ غير معروف أثناء الرفع';
-      }
-    }
 
     await saveBackupSettings({
       lastBackupAt: snapshot.createdAt,
       lastBackupName: snapshot.name,
     });
 
-    return { ok: true, snapshotName: snapshot.name, driveUploaded, driveError };
+    return { ok: true, snapshotName: snapshot.name, driveUploaded: false };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'فشل إنشاء النسخة الاحتياطية' };
   }
@@ -443,31 +415,12 @@ export async function maybeRunScheduledBackup(): Promise<BackupRunResult | null>
     const payload = await createBackupPayload();
     const snapshot = await saveLocalSnapshot(payload, true);
 
-    // Attempt a silent upload to Google Drive (no popups; skip quietly if unavailable)
-    let driveUploaded = false;
-    if (settings.driveAutoUpload && settings.driveClientId) {
-      try {
-        const token = await getAccessToken(settings.driveClientId, true);
-        if (token) {
-          await uploadBackupToDrive(token, payload);
-          await pruneDriveBackups(token, 15);
-          driveUploaded = true;
-          await saveBackupSettings({
-            lastDriveUploadAt: new Date().toISOString(),
-            lastDriveFileName: snapshot.name,
-          });
-        }
-      } catch {
-        // silent — next attempt happens on the next run
-      }
-    }
-
     await saveBackupSettings({
       lastBackupAt: snapshot.createdAt,
       lastBackupName: snapshot.name,
     });
 
-    return { ok: true, snapshotName: snapshot.name, driveUploaded };
+    return { ok: true, snapshotName: snapshot.name, driveUploaded: false };
   } catch (err) {
     console.error('Scheduled backup failed:', err);
     return { ok: false, error: err instanceof Error ? err.message : 'فشل النسخ التلقائي' };

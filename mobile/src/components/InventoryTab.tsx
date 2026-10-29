@@ -8,9 +8,11 @@ import {
   Tag,
   Building2,
   Plus,
+  Camera,
 } from 'lucide-react';
 import type { InventoryItem } from '../types';
 import { formatCurrency, formatNumber } from '../utils/format';
+import { CameraScannerModal } from './CameraScannerModal';
 
 interface InventoryTabProps {
   inventory: InventoryItem[];
@@ -25,6 +27,7 @@ export const InventoryTab: React.FC<InventoryTabProps> = ({
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterMode, setFilterMode] = useState<'all' | 'lowStock' | 'imei'>('all');
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
 
   const filteredItems = useMemo(() => {
     return inventory.filter(item => {
@@ -102,6 +105,16 @@ export const InventoryTab: React.FC<InventoryTabProps> = ({
             </button>
           )}
         </div>
+
+        {/* Camera Barcode Scanner Button */}
+        <button
+          type="button"
+          onClick={() => setIsScannerOpen(true)}
+          className="p-3.5 rounded-2xl bg-slate-900 border border-white/[0.08] hover:border-cyan-500/50 text-cyan-400 font-bold shadow-lg active:scale-95 transition shrink-0"
+          title="مسح باركود الصنف"
+        >
+          <Camera size={18} />
+        </button>
 
         {onOpenAddProduct && (
           <button
@@ -258,6 +271,14 @@ export const InventoryTab: React.FC<InventoryTabProps> = ({
           })}
         </div>
       )}
+
+      {/* Camera Barcode Scanner Modal */}
+      <CameraScannerModal
+        isOpen={isScannerOpen}
+        onClose={() => setIsScannerOpen(false)}
+        onScan={code => setSearchQuery(code)}
+        title="مسح باركود للبحث في المخزن"
+      />
     </div>
   );
 };
