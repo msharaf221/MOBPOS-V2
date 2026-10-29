@@ -64,10 +64,31 @@ export interface Safe {
 export interface Transaction {
   id: string;
   date: string;
-  type: 'sale' | 'sale_return' | 'purchase' | 'purchase_return' | 'expense' | 'deposit' | 'withdrawal' | 'transfer';
+  createdAt?: string;
+  type:
+    | 'sale'
+    | 'sale_return'
+    | 'purchase'
+    | 'purchase_return'
+    | 'maintenance'
+    | 'maintenance_cost'
+    | 'expense'
+    | 'deposit'
+    | 'income'
+    | 'withdrawal'
+    | 'transfer'
+    | 'return'
+    | 'waste'
+    | 'inventory_adjustment'
+    | 'customer_payment'
+    | 'wallet_deposit'
+    | 'wallet_withdrawal'
+    | 'capital'
+    | 'side_account';
   amount: number;
   safeId: string;
   safeName?: string;
+  referenceId?: string;
   description: string;
   category?: string;
   userName?: string;
@@ -107,14 +128,21 @@ export interface MaintenanceOrder {
   ticketNumber?: string;
   customerName: string;
   customerPhone?: string;
+  deviceType?: string;
   deviceModel: string;
   problem: string;
-  status: 'received' | 'inspecting' | 'repairing' | 'ready' | 'delivered' | 'cancelled';
+  diagnosis?: string;
+  status: 'received' | 'inspecting' | 'repairing' | 'ready' | 'completed' | 'delivered' | 'cancelled';
   costPrice?: number;
   expectedPrice?: number;
   finalPrice?: number;
+  collectedAmount?: number;
+  profit?: number;
   receivedDate: string;
   deliveryDate?: string;
+  deliveredAt?: string;
+  receivedAt?: string;
+  safeId?: string;
   branchId?: string;
   branchName?: string;
 }
@@ -132,14 +160,28 @@ export interface BranchMetrics {
   branchId: string;
   branchName: string;
   branchColor: string;
+  // 1. مبيعات البضاعة (Sales)
   todaySalesTotal: number;
-  todayProfitTotal: number;
+  todaySalesProfit: number;
   todayInvoicesCount: number;
   todayCashCollected: number;
+  // 2. إيرادات وأرباح الصيانة (Maintenance)
+  todayMaintenanceIncome: number;
+  todayMaintenanceProfit: number;
+  todayMaintenanceCount: number;
+  activeMaintenanceCount: number;
+  // 3. الإيراد الشامل والأرباح الشاملة
+  todayTotalRevenue: number;
+  todayProfitTotal: number;
+  // 4. المصروفات والسيولة
   todayExpensesTotal: number;
   totalSafesBalance: number;
+  // 5. تقييم المخزون والبضاعة
+  inventoryCostValue: number;
+  inventorySellValue: number;
+  inventoryTotalItemsCount: number;
   lowStockCount: number;
-  activeMaintenanceCount: number;
+  // 6. ديون العملاء
   totalCustomerDebts: number;
   hourlySales: { hour: string; total: number }[];
   recentSales: SaleRecord[];

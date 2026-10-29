@@ -66,6 +66,19 @@ export const InventoryTab: React.FC<InventoryTabProps> = ({
     return map;
   }, [inventory]);
 
+  const inventoryStats = useMemo(() => {
+    let costVal = 0;
+    let sellVal = 0;
+    let totalPieces = 0;
+    inventory.forEach(i => {
+      const q = Number(i.quantity) || 0;
+      costVal += q * (Number(i.costPrice) || 0);
+      sellVal += q * (Number(i.sellPrice) || 0);
+      totalPieces += q;
+    });
+    return { costVal, sellVal, totalPieces };
+  }, [inventory]);
+
   return (
     <div className="space-y-3.5 pb-28 animate-in fade-in duration-200">
       {/* Search Input with clear button & Add Product Button */}
@@ -100,6 +113,26 @@ export const InventoryTab: React.FC<InventoryTabProps> = ({
             <Plus size={18} />
           </button>
         )}
+      </div>
+
+      {/* 📦 Inventory Value Summary Card */}
+      <div className="p-3.5 rounded-2xl glass-panel border border-cyan-500/20 bg-gradient-to-r from-cyan-950/30 via-slate-900 to-indigo-950/30 flex items-center justify-between">
+        <div className="space-y-0.5">
+          <span className="text-[10px] text-cyan-300 font-bold flex items-center gap-1">
+            <Package size={12} />
+            <span>رأس المال في بضاعة المخزن (بالتكلفة)</span>
+          </span>
+          <div className="text-lg font-black text-white font-mono">
+            {formatCurrency(inventoryStats.costVal, hideAmounts)}
+          </div>
+        </div>
+
+        <div className="text-left space-y-0.5">
+          <span className="text-[10px] text-slate-400">القيمة البيعية: <strong className="text-cyan-300 font-mono">{formatCurrency(inventoryStats.sellVal, hideAmounts)}</strong></span>
+          <div className="text-[10px] text-slate-400 font-medium">
+            إجمالي القطع: <strong className="text-white font-mono">{formatNumber(inventoryStats.totalPieces)}</strong> قطعة
+          </div>
+        </div>
       </div>
 
       {/* Filter Chips */}

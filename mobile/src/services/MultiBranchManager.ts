@@ -640,7 +640,7 @@ class MultiBranchManager {
 
       // 9. Normalize Maintenance Orders
       const normalizedMaintenance: MaintenanceOrder[] = (rawStores.maintenance || []).map((m: any) => {
-        let statusVal: 'received' | 'inspecting' | 'repairing' | 'ready' | 'delivered' | 'cancelled' = 'received';
+        let statusVal: 'received' | 'inspecting' | 'repairing' | 'ready' | 'completed' | 'delivered' | 'cancelled' = 'received';
         if (m.status === 'completed' || m.status === 'ready') statusVal = 'ready';
         else if (m.status === 'in_progress' || m.status === 'repairing') statusVal = 'repairing';
         else if (m.status === 'delivered') statusVal = 'delivered';
@@ -657,14 +657,21 @@ class MultiBranchManager {
           ticketNumber: m.ticketNumber || m.id?.slice(0, 6),
           customerName: m.customerName || 'عميل صيانة',
           customerPhone: m.customerPhone || '',
+          deviceType: m.deviceType || m.deviceModel || 'جهاز صيانة',
           deviceModel: m.deviceModel || m.deviceType || 'جهاز صيانة',
           problem: m.problem || m.diagnosis || 'فحص وإصلاح',
+          diagnosis: m.diagnosis || m.problem || 'فحص وإصلاح',
           status: statusVal,
           costPrice: Number(m.costPrice ?? partsCost ?? 0),
           expectedPrice: Number(m.estimatedCost ?? m.expectedPrice ?? 0),
-          finalPrice: Number(m.finalCost ?? m.finalPrice ?? m.estimatedCost ?? 0),
+          finalPrice: Number(m.finalCost ?? m.finalPrice ?? m.collectedAmount ?? m.estimatedCost ?? 0),
+          collectedAmount: Number(m.collectedAmount ?? m.finalCost ?? m.finalPrice ?? 0),
+          profit: Number(m.profit ?? 0),
           receivedDate: rawDate,
+          receivedAt: rawDate,
           deliveryDate: m.deliveredAt || m.deliveryDate,
+          deliveredAt: m.deliveredAt || m.deliveryDate,
+          safeId: m.safeId || '',
           branchId: branch.id,
           branchName: branch.name,
         };
@@ -680,26 +687,55 @@ class MultiBranchManager {
         branchName: branch.name,
       }));
 
-      // 11. Calculate Real KPIs
+      // 11. Calculate Real KPIs (Separating Sales, Maintenance, Revenue, Profit, Liquidity & Stock)
       const now = new Date();
       const todayDateStr = now.toISOString().slice(0, 10);
 
+      // A. Merchandise Sales
       const todaySales = normalizedSales.filter(s => {
         const d = (s.date || s.createdAt || '').slice(0, 10);
         return d === todayDateStr;
       });
-
       const todaySalesTotal = todaySales.reduce((acc, s) => acc + (Number(s.finalTotal) || 0), 0);
-      // 🔴 FIX: إزالة "الربح الوهمي" — كان يعرض 18% من الإجمالي كربح حقيقي لو حقل الربح مش موجود
-      const todayProfitTotal = todaySales.reduce(
+      const todaySalesProfit = todaySales.reduce(
         (acc, s) => acc + (s.profit && Number(s.profit) > 0 ? Number(s.profit) : 0),
         0
       );
-
       const todayCashCollected = todaySales.reduce((acc, s) => acc + (Number(s.paidAmount) || 0), 0);
 
+      // B. Maintenance Inflow & Profit (Delivered today)
+      const todayDeliveredMaintenance = normalizedMaintenance.filter(m => {
+        if (m.status !== 'delivered') return false;
+        const d = (m.deliveryDate || m.deliveredAt || '').slice(0, 10);
+        return d === todayDateStr;
+      });
+      const todayMaintTx = normalizedTransactions.filter(t => {
+        const d = (t.date || (t as any).createdAt || '').slice(0, 10);
+        return d === todayDateStr && (t.type === 'maintenance' || (t.category || '').includes('صيانة'));
+      });
+      const txMaintTotal = todayMaintTx.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+      const ticketMaintTotal = todayDeliveredMaintenance.reduce(
+        (acc, m) => acc + (Number(m.finalPrice) || Number(m.collectedAmount) || 0),
+        0
+      );
+      const todayMaintenanceIncome = Math.max(ticketMaintTotal, txMaintTotal);
+      const todayMaintenanceProfit = todayDeliveredMaintenance.reduce((acc, m) => {
+        const rev = Number(m.finalPrice) || Number(m.collectedAmount) || 0;
+        const cost = Number(m.costPrice) || 0;
+        return acc + Math.max(0, rev - cost);
+      }, 0);
+      const todayMaintenanceCount = todayDeliveredMaintenance.length;
+      const activeMaintenanceCount = normalizedMaintenance.filter(
+        m => m.status !== 'delivered' && m.status !== 'cancelled'
+      ).length;
+
+      // C. Total Revenue & Overall Profit
+      const todayTotalRevenue = todaySalesTotal + todayMaintenanceIncome;
+      const todayProfitTotal = todaySalesProfit + todayMaintenanceProfit;
+
+      // D. Expenses & Outflows
       const todayExpenses = normalizedTransactions.filter(t => {
-        const d = (t.date || '').slice(0, 10);
+        const d = (t.date || (t as any).createdAt || '').slice(0, 10);
         const isOutflow =
           t.type === 'expense' ||
           t.type === 'withdrawal' ||
@@ -711,9 +747,25 @@ class MultiBranchManager {
       });
       const todayExpensesTotal = todayExpenses.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
 
+      // E. Safes Cash Liquidity
       const totalSafesBalance = normalizedSafes.reduce((acc, s) => acc + (Number(s.balance) || 0), 0);
+
+      // F. Inventory Valuation (Capital locked in stock vs retail expected value)
+      const inventoryCostValue = normalizedInventory.reduce(
+        (acc, item) => acc + (Number(item.quantity) || 0) * (Number(item.costPrice) || 0),
+        0
+      );
+      const inventorySellValue = normalizedInventory.reduce(
+        (acc, item) => acc + (Number(item.quantity) || 0) * (Number(item.sellPrice) || 0),
+        0
+      );
+      const inventoryTotalItemsCount = normalizedInventory.reduce(
+        (acc, item) => acc + (Number(item.quantity) || 0),
+        0
+      );
       const lowStockCount = normalizedInventory.filter(i => (i.quantity || 0) <= (i.minQuantity || 2)).length;
-      const activeMaintenanceCount = normalizedMaintenance.filter(m => m.status !== 'delivered' && m.status !== 'cancelled').length;
+
+      // G. Debts
       const totalCustomerDebts = normalizedCustomers.reduce((acc, c) => acc + Math.max(0, Number(c.balance) || 0), 0);
 
       // Hourly breakdown for today (9 AM to 11 PM)
@@ -732,32 +784,40 @@ class MultiBranchManager {
       });
       const hourlySales = Object.entries(hourlyBuckets).map(([hour, total]) => ({ hour, total }));
 
-          return {
-            branchId: branch.id,
-            branchName: branch.name,
-            branchColor: branch.color,
-            todaySalesTotal,
-            todayProfitTotal,
-            todayInvoicesCount: todaySales.length,
-            todayCashCollected,
-            todayExpensesTotal,
-            totalSafesBalance,
-            lowStockCount,
-            activeMaintenanceCount,
-            totalCustomerDebts,
-            hourlySales,
-            recentSales: normalizedSales.slice(0, 100),
-            recentTransactions: normalizedTransactions.slice(0, 100),
-            safesList: normalizedSafes,
-            inventoryList: normalizedInventory,
-            maintenanceList: normalizedMaintenance,
-            customersList: normalizedCustomers,
-            lastSyncedAt: new Date().toISOString(),
-          };
-        })(),
-        BRANCH_FETCH_TIMEOUT_MS,
-        `انتهت مهلة الاتصال بالفرع (${branch.name}) بعد 18 ثانية`
-      );
+      return {
+        branchId: branch.id,
+        branchName: branch.name,
+        branchColor: branch.color,
+        todaySalesTotal,
+        todaySalesProfit,
+        todayInvoicesCount: todaySales.length,
+        todayCashCollected,
+        todayMaintenanceIncome,
+        todayMaintenanceProfit,
+        todayMaintenanceCount,
+        activeMaintenanceCount,
+        todayTotalRevenue,
+        todayProfitTotal,
+        todayExpensesTotal,
+        totalSafesBalance,
+        inventoryCostValue,
+        inventorySellValue,
+        inventoryTotalItemsCount,
+        lowStockCount,
+        totalCustomerDebts,
+        hourlySales,
+        recentSales: normalizedSales.slice(0, 100),
+        recentTransactions: normalizedTransactions.slice(0, 100),
+        safesList: normalizedSafes,
+        inventoryList: normalizedInventory,
+        maintenanceList: normalizedMaintenance,
+        customersList: normalizedCustomers,
+        lastSyncedAt: new Date().toISOString(),
+      };
+    })(),
+    BRANCH_FETCH_TIMEOUT_MS,
+    `انتهت مهلة الاتصال بالفرع (${branch.name}) بعد 18 ثانية`
+  );
 
       this.metricsCache.set(branch.id, { metrics, timestamp: Date.now() });
       this.updateBranch(branch.id, {
@@ -819,13 +879,21 @@ class MultiBranchManager {
       branchName: 'جميع الفروع مجمعة',
       branchColor: '#38bdf8',
       todaySalesTotal: perBranch.reduce((acc, m) => acc + m.todaySalesTotal, 0),
-      todayProfitTotal: perBranch.reduce((acc, m) => acc + m.todayProfitTotal, 0),
+      todaySalesProfit: perBranch.reduce((acc, m) => acc + (m.todaySalesProfit || 0), 0),
       todayInvoicesCount: perBranch.reduce((acc, m) => acc + m.todayInvoicesCount, 0),
       todayCashCollected: perBranch.reduce((acc, m) => acc + m.todayCashCollected, 0),
+      todayMaintenanceIncome: perBranch.reduce((acc, m) => acc + (m.todayMaintenanceIncome || 0), 0),
+      todayMaintenanceProfit: perBranch.reduce((acc, m) => acc + (m.todayMaintenanceProfit || 0), 0),
+      todayMaintenanceCount: perBranch.reduce((acc, m) => acc + (m.todayMaintenanceCount || 0), 0),
+      activeMaintenanceCount: perBranch.reduce((acc, m) => acc + m.activeMaintenanceCount, 0),
+      todayTotalRevenue: perBranch.reduce((acc, m) => acc + (m.todayTotalRevenue || m.todaySalesTotal), 0),
+      todayProfitTotal: perBranch.reduce((acc, m) => acc + m.todayProfitTotal, 0),
       todayExpensesTotal: perBranch.reduce((acc, m) => acc + m.todayExpensesTotal, 0),
       totalSafesBalance: perBranch.reduce((acc, m) => acc + m.totalSafesBalance, 0),
+      inventoryCostValue: perBranch.reduce((acc, m) => acc + (m.inventoryCostValue || 0), 0),
+      inventorySellValue: perBranch.reduce((acc, m) => acc + (m.inventorySellValue || 0), 0),
+      inventoryTotalItemsCount: perBranch.reduce((acc, m) => acc + (m.inventoryTotalItemsCount || 0), 0),
       lowStockCount: perBranch.reduce((acc, m) => acc + m.lowStockCount, 0),
-      activeMaintenanceCount: perBranch.reduce((acc, m) => acc + m.activeMaintenanceCount, 0),
       totalCustomerDebts: perBranch.reduce((acc, m) => acc + m.totalCustomerDebts, 0),
       hourlySales: this.combineHourly(perBranch),
       recentSales: perBranch
@@ -869,13 +937,21 @@ class MultiBranchManager {
       branchName: name,
       branchColor: color,
       todaySalesTotal: 0,
-      todayProfitTotal: 0,
+      todaySalesProfit: 0,
       todayInvoicesCount: 0,
       todayCashCollected: 0,
+      todayMaintenanceIncome: 0,
+      todayMaintenanceProfit: 0,
+      todayMaintenanceCount: 0,
+      activeMaintenanceCount: 0,
+      todayTotalRevenue: 0,
+      todayProfitTotal: 0,
       todayExpensesTotal: 0,
       totalSafesBalance: 0,
+      inventoryCostValue: 0,
+      inventorySellValue: 0,
+      inventoryTotalItemsCount: 0,
       lowStockCount: 0,
-      activeMaintenanceCount: 0,
       totalCustomerDebts: 0,
       hourlySales,
       recentSales: [],
@@ -1235,27 +1311,56 @@ class MultiBranchManager {
     order: MaintenanceOrder,
     safeForDeposit?: Safe
   ): Promise<{ success: boolean; error?: string }> {
+    const nowIso = new Date().toISOString();
+    const finalAmount = Number(order.finalPrice || order.expectedPrice || 0);
+    const costPrice = Number(order.costPrice || 0);
+    const profit = Math.max(0, finalAmount - costPrice);
+
+    // Map status for desktop compatibility (desktop uses: received, in_progress, completed, delivered, cancelled)
+    let desktopStatus: 'received' | 'in_progress' | 'completed' | 'delivered' | 'cancelled' = 'received';
+    if (order.status === 'delivered') desktopStatus = 'delivered';
+    else if (order.status === 'ready' || order.status === 'completed') desktopStatus = 'completed';
+    else if (order.status === 'repairing' || order.status === 'inspecting') desktopStatus = 'in_progress';
+    else if (order.status === 'cancelled') desktopStatus = 'cancelled';
+    else desktopStatus = 'received';
+
+    const maintenanceData = {
+      ...order,
+      deviceType: order.deviceType || order.deviceModel || 'جهاز صيانة',
+      deviceModel: order.deviceModel || order.deviceType || 'جهاز صيانة',
+      problem: order.problem || 'صيانة عامة',
+      diagnosis: order.diagnosis || order.problem || 'فحص وإصلاح',
+      status: desktopStatus,
+      estimatedCost: Number(order.expectedPrice || order.finalPrice || 0),
+      finalCost: finalAmount,
+      collectedAmount: order.status === 'delivered' ? finalAmount : 0,
+      costPrice,
+      profit: order.status === 'delivered' ? profit : 0,
+      receivedAt: order.receivedDate || order.receivedAt || nowIso,
+      receivedDate: order.receivedDate || order.receivedAt || nowIso,
+      deliveredAt: order.status === 'delivered' ? (order.deliveryDate || order.deliveredAt || nowIso) : '',
+      deliveryDate: order.status === 'delivered' ? (order.deliveryDate || order.deliveredAt || nowIso) : '',
+      safeId: safeForDeposit ? safeForDeposit.id : (order.safeId || ''),
+      branchId: branch.id,
+      branchName: branch.name,
+    };
+
     const records: Array<{ store: string; recordId: string; data: any; version?: number }> = [
       {
         store: 'maintenance',
         recordId: order.id,
-        data: {
-          ...order,
-          branchId: branch.id,
-          branchName: branch.name,
-        },
+        data: maintenanceData,
       },
     ];
 
     // If order was delivered and finalPrice was collected into a safe:
-    if (order.status === 'delivered' && (Number(order.finalPrice) || 0) > 0 && safeForDeposit) {
+    if (order.status === 'delivered' && finalAmount > 0 && safeForDeposit) {
       // 🔴 FIX RMW: رصيد الخزنة من النسخة السحابية الأحدث قبل إضافة إيراد الصيانة
       const freshSafeMap = await this.fetchFreshRecords(branch, 'safes', [safeForDeposit.id]);
       const freshSafe = freshSafeMap.get(safeForDeposit.id);
       const { merged: baseSafe, version: safeVersion } = this.applyFreshData(safeForDeposit as any, freshSafe, ['balance']);
 
-      const price = Number(order.finalPrice);
-      const newBal = (Number(baseSafe.balance) || 0) + price;
+      const newBal = (Number(baseSafe.balance) || 0) + finalAmount;
       const txId = `tx_maint_${Date.now()}`;
 
       records.push(
@@ -1273,13 +1378,15 @@ class MultiBranchManager {
           recordId: txId,
           data: {
             id: txId,
-            type: 'sale',
-            amount: price,
+            type: 'maintenance', // 🔴 FIX: type must be 'maintenance' (NOT 'sale')
+            amount: finalAmount,
             safeId: safeForDeposit.id,
             safeName: safeForDeposit.name,
+            referenceId: order.id,
             description: `إيراد تسليم صيانة #${order.ticketNumber || order.id.slice(0, 8)} (${order.deviceModel})`,
             category: 'صيانة',
-            date: new Date().toISOString(),
+            createdAt: nowIso, // 🔴 FIX: Desktop reports filter strictly by createdAt!
+            date: nowIso,
             userName: 'تطبيق الموبايل',
             branchId: branch.id,
             branchName: branch.name,

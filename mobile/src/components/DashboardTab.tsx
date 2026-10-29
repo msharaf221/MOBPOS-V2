@@ -15,6 +15,9 @@ import {
   Clock,
   Send,
   Zap,
+  CircleDollarSign,
+  Boxes,
+  Layers,
 } from 'lucide-react';
 import type { BranchMetrics, SaleRecord } from '../types';
 import type { NavTab } from './BottomNav';
@@ -100,71 +103,159 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
         </div>
       )}
 
-      {/* Hero Bento: Today's Total Sales */}
-      <div
-        onClick={() => onNavigateToTab('sales')}
-        className="relative p-5 rounded-3xl overflow-hidden cursor-pointer transition-all duration-200 border border-cyan-500/25 active:scale-[0.985] group"
-        style={{
-          background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.14) 0%, rgba(15, 23, 42, 0.95) 45%, rgba(15, 23, 42, 0.85) 100%)',
-          backdropFilter: 'blur(20px)',
-          boxShadow: '0 20px 40px -15px rgba(6, 182, 212, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.12)',
-        }}
-      >
-        {/* Ambient Decorative Blurs */}
-        <div className="absolute -top-16 -left-16 w-40 h-40 rounded-full bg-cyan-500/20 blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-16 -right-16 w-40 h-40 rounded-full bg-indigo-500/15 blur-3xl pointer-events-none" />
+      {/* 🌟 Pillar 1: عمليات اليوم (مبيعات البضاعة + إيرادات الصيانة) */}
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between px-1">
+          <span className="text-[11px] font-bold text-slate-300 flex items-center gap-1.5">
+            <TrendingUp size={14} className="text-cyan-400" />
+            <span>حركة اليوم التشغيلية (فواتير وصيانة)</span>
+          </span>
+          <span className="text-[10px] text-slate-500 font-mono">تحديث فوري</span>
+        </div>
 
-        <div className="relative z-10 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-cyan-300 text-xs font-bold">
-              <span className="p-1.5 rounded-xl bg-cyan-500/20 text-cyan-400 shadow-sm border border-cyan-500/30">
-                <TrendingUp size={16} />
-              </span>
-              <span>مبيعات اليوم الإجمالية</span>
-            </div>
+        {/* Dual Bento: Merchandise Sales & Maintenance */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          {/* Card 1: Merchandise Sales */}
+          <div
+            onClick={() => onNavigateToTab('sales')}
+            className="relative p-4 rounded-3xl overflow-hidden cursor-pointer transition-all duration-200 border border-cyan-500/25 active:scale-[0.985] group"
+            style={{
+              background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.12) 0%, rgba(15, 23, 42, 0.95) 45%, rgba(15, 23, 42, 0.85) 100%)',
+              backdropFilter: 'blur(20px)',
+              boxShadow: '0 15px 30px -10px rgba(6, 182, 212, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.1)',
+            }}
+          >
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-cyan-300 text-xs font-bold">
+                  <span className="p-1 rounded-lg bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
+                    <Receipt size={14} />
+                  </span>
+                  <span>مبيعات البضاعة والأجهزة</span>
+                </div>
 
-            <div className="flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-xl bg-cyan-500/15 text-cyan-300 border border-cyan-500/25 font-mono shadow-sm">
-              <Receipt size={12} />
-              <span>{formatNumber(metrics.todayInvoicesCount)} فواتير</span>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-cyan-500/15 text-cyan-300 border border-cyan-500/25 font-mono">
+                  {formatNumber(metrics.todayInvoicesCount)} فواتير
+                </span>
+              </div>
+
+              <div>
+                <h2 className="text-2xl sm:text-3xl font-black text-white font-mono tracking-tight">
+                  {formatCurrency(metrics.todaySalesTotal, hideAmounts)}
+                </h2>
+                <div className="flex items-center justify-between text-[10px] text-slate-400 mt-1">
+                  <span>المحصل كاش: <strong className="text-emerald-400 font-mono font-bold">{formatCurrency(metrics.todayCashCollected, hideAmounts)}</strong></span>
+                  <span>ربح البيع: <strong className="text-cyan-300 font-mono font-bold">+{formatCurrency(metrics.todaySalesProfit, hideAmounts)}</strong></span>
+                </div>
+              </div>
+
+              {/* Cash Collection Bar */}
+              <div className="pt-1.5 border-t border-white/[0.08]">
+                <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-cyan-400 transition-all duration-700"
+                    style={{ width: `${cashCollectionPct}%` }}
+                  />
+                </div>
+              </div>
             </div>
           </div>
 
-          <div className="flex items-baseline justify-between pt-1">
-            <div className="space-y-0.5">
-              <h1 className="text-3xl sm:text-4xl font-black text-white font-mono tracking-tight drop-shadow-md">
-                {formatCurrency(metrics.todaySalesTotal, hideAmounts)}
-              </h1>
-              <p className="text-[11px] text-slate-400 font-medium flex items-center gap-1">
-                <span>متوسط الفاتورة:</span>
-                <strong className="text-slate-200 font-mono">{formatCurrency(avgOrderValue, hideAmounts)}</strong>
-              </p>
-            </div>
+          {/* Card 2: Maintenance Workshop */}
+          <div
+            onClick={onOpenMaintenanceModal}
+            className="relative p-4 rounded-3xl overflow-hidden cursor-pointer transition-all duration-200 border border-amber-500/25 active:scale-[0.985] group"
+            style={{
+              background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.12) 0%, rgba(15, 23, 42, 0.95) 45%, rgba(15, 23, 42, 0.85) 100%)',
+              backdropFilter: 'blur(20px)',
+              boxShadow: '0 15px 30px -10px rgba(245, 158, 11, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.1)',
+            }}
+          >
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-amber-300 text-xs font-bold">
+                  <span className="p-1 rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                    <Wrench size={14} />
+                  </span>
+                  <span>إيرادات قسم الصيانة</span>
+                </div>
 
-            <div className="w-8 h-8 rounded-full bg-white/[0.06] border border-white/10 flex items-center justify-center text-slate-400 group-hover:text-cyan-400 group-hover:-translate-x-1 transition-all">
-              <ChevronLeft size={16} />
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-amber-500/15 text-amber-300 border border-amber-500/25 font-mono">
+                  {formatNumber(metrics.todayMaintenanceCount)} تم تسليمها
+                </span>
+              </div>
+
+              <div>
+                <h2 className="text-2xl sm:text-3xl font-black text-white font-mono tracking-tight">
+                  {formatCurrency(metrics.todayMaintenanceIncome, hideAmounts)}
+                </h2>
+                <div className="flex items-center justify-between text-[10px] text-slate-400 mt-1">
+                  <span>صافي ربح الصيانة: <strong className="text-amber-400 font-mono font-bold">+{formatCurrency(metrics.todayMaintenanceProfit, hideAmounts)}</strong></span>
+                  <span>قيد العمل: <strong className="text-orange-400 font-mono font-bold">{metrics.activeMaintenanceCount} جهاز</strong></span>
+                </div>
+              </div>
+
+              <div className="pt-1.5 border-t border-white/[0.08] flex items-center justify-between text-[10px] text-amber-300/80">
+                <span>اضغط لفتح كشف تذاكر الصيانة والتسليم</span>
+                <ChevronLeft size={13} className="group-hover:-translate-x-0.5 transition-transform" />
+              </div>
             </div>
           </div>
+        </div>
+      </div>
 
-          {/* Cash Collection Progress Bar */}
-          <div className="pt-2 border-t border-white/[0.08] space-y-1.5">
-            <div className="flex items-center justify-between text-[11px]">
-              <span className="text-slate-300 font-medium flex items-center gap-1">
-                <span>التحصيل النقدي:</span>
-                <strong className="text-emerald-400 font-mono font-bold">
-                  {formatCurrency(metrics.todayCashCollected, hideAmounts)}
-                </strong>
-              </span>
-              <span className="text-slate-400 font-mono text-[10px]">
-                {cashCollectionPct}% كاش فوري
-              </span>
-            </div>
-            <div className="w-full h-2 rounded-full bg-slate-800/80 overflow-hidden p-0.5">
-              <div
-                className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-cyan-400 transition-all duration-700 shadow-sm shadow-emerald-500/50"
-                style={{ width: `${cashCollectionPct}%` }}
-              />
-            </div>
+      {/* 🌟 Pillar 2: محصلة اليوم المالي (الإيرادات الإجمالية + صافي الربح الحقيقي) */}
+      <div className="grid grid-cols-2 gap-2.5">
+        {/* Total Revenues (Sales + Maintenance) */}
+        <div
+          className="p-4 rounded-3xl glass-panel relative overflow-hidden space-y-1.5 border border-purple-500/25"
+          style={{
+            background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.1) 0%, rgba(15, 23, 42, 0.9) 100%)',
+          }}
+        >
+          <div className="flex items-center justify-between text-xs font-bold text-purple-300">
+            <span className="flex items-center gap-1.5">
+              <CircleDollarSign size={15} className="text-purple-400" />
+              إجمالي الإيرادات
+            </span>
+            <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 font-mono">
+              اليوم
+            </span>
           </div>
+
+          <div className="text-2xl font-black text-purple-200 font-mono tracking-tight">
+            {formatCurrency(metrics.todayTotalRevenue, hideAmounts)}
+          </div>
+
+          <p className="text-[10px] text-slate-400 leading-tight">
+            مبيعات بضاعة ({formatCurrency(metrics.todaySalesTotal, hideAmounts)}) + صيانة ({formatCurrency(metrics.todayMaintenanceIncome, hideAmounts)})
+          </p>
+        </div>
+
+        {/* Net Profit (Sales Profit + Maintenance Profit) */}
+        <div
+          className="p-4 rounded-3xl glass-panel relative overflow-hidden space-y-1.5 border border-emerald-500/25"
+          style={{
+            background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(15, 23, 42, 0.9) 100%)',
+          }}
+        >
+          <div className="flex items-center justify-between text-xs font-bold text-emerald-300">
+            <span className="flex items-center gap-1.5">
+              <Coins size={15} className="text-emerald-400" />
+              صافي الأرباح
+            </span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 font-black font-mono">
+              ~{profitMarginPct}%
+            </span>
+          </div>
+
+          <div className="text-2xl font-black text-emerald-400 font-mono tracking-tight">
+            +{formatCurrency(metrics.todayProfitTotal, hideAmounts)}
+          </div>
+
+          <p className="text-[10px] text-slate-400 leading-tight">
+            ربح بضاعة (+{formatCurrency(metrics.todaySalesProfit, hideAmounts)}) + ربح صيانة (+{formatCurrency(metrics.todayMaintenanceProfit, hideAmounts)})
+          </p>
         </div>
       </div>
 
@@ -207,89 +298,95 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
         </button>
       </div>
 
-      {/* Secondary KPI Grid (3 Bento Cards) */}
-      <div className="grid grid-cols-2 gap-2.5">
-        {/* Card 1: Today's Net Profit */}
-        <div
-          className="p-4 rounded-3xl glass-panel relative overflow-hidden space-y-2 border border-emerald-500/20"
-          style={{
-            background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(15, 23, 42, 0.85) 100%)',
-          }}
-        >
-          <div className="flex items-center justify-between text-slate-400 text-xs font-bold">
-            <span className="flex items-center gap-1.5 text-emerald-300">
-              <Coins size={15} className="text-emerald-400" />
-              صافي الأرباح
-            </span>
-            <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 font-black font-mono">
-              ~{profitMarginPct}%
-            </span>
+      {/* 🌟 Pillar 3: الأصول ورأس المال والسيولة والمخزن (مستقل تماماً عن مبيعات اليوم) */}
+      <div className="space-y-1.5">
+        <span className="text-[11px] font-bold text-slate-300 px-1 flex items-center gap-1.5">
+          <Layers size={14} className="text-amber-400" />
+          <span>الأصول ورأس المال والسيولة النقدية</span>
+        </span>
+
+        <div className="grid grid-cols-2 gap-2.5">
+          {/* Card 1: Liquid Cash in Safes */}
+          <div
+            onClick={() => onNavigateToTab('safes')}
+            className="p-4 rounded-3xl glass-panel relative overflow-hidden space-y-1.5 border border-amber-500/25 cursor-pointer active:scale-95 transition group"
+            style={{
+              background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, rgba(15, 23, 42, 0.9) 100%)',
+            }}
+          >
+            <div className="flex items-center justify-between text-xs font-bold text-amber-300">
+              <span className="flex items-center gap-1.5">
+                <Wallet size={15} className="text-amber-400" />
+                السيولة النقدية (الكاش)
+              </span>
+              <ChevronLeft size={13} className="text-slate-500 group-hover:-translate-x-0.5 transition-transform" />
+            </div>
+
+            <div className="text-2xl font-black text-amber-300 font-mono tracking-tight">
+              {formatCurrency(metrics.totalSafesBalance, hideAmounts)}
+            </div>
+
+            <p className="text-[10px] text-slate-400 leading-tight">
+              نقدية حقيقية بالأدراج والمحافظ والبنك
+            </p>
           </div>
 
-          <div className="text-2xl font-black text-emerald-400 font-mono tracking-tight">
-            {formatCurrency(metrics.todayProfitTotal, hideAmounts)}
+          {/* Card 2: Inventory Capital Locked */}
+          <div
+            onClick={() => onNavigateToTab('inventory')}
+            className="p-4 rounded-3xl glass-panel relative overflow-hidden space-y-1.5 border border-cyan-500/25 cursor-pointer active:scale-95 transition group"
+            style={{
+              background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.1) 0%, rgba(15, 23, 42, 0.9) 100%)',
+            }}
+          >
+            <div className="flex items-center justify-between text-xs font-bold text-cyan-300">
+              <span className="flex items-center gap-1.5">
+                <Boxes size={15} className="text-cyan-400" />
+                قيمة بضاعة المخزن
+              </span>
+              <ChevronLeft size={13} className="text-slate-500 group-hover:-translate-x-0.5 transition-transform" />
+            </div>
+
+            <div className="text-2xl font-black text-cyan-300 font-mono tracking-tight">
+              {formatCurrency(metrics.inventoryCostValue, hideAmounts)}
+            </div>
+
+            <p className="text-[10px] text-slate-400 leading-tight">
+              رأس مال التكلفة • بيع: {formatCurrency(metrics.inventorySellValue, hideAmounts)} ({metrics.inventoryTotalItemsCount} قطعة)
+            </p>
           </div>
 
-          <p className="text-[10px] text-slate-400 leading-tight">
-            بعد خصم تكاليف الشراء وهامش الصافي
-          </p>
-        </div>
-
-        {/* Card 2: Liquid Cash in Safes */}
-        <div
-          onClick={() => onNavigateToTab('safes')}
-          className="p-4 rounded-3xl glass-panel relative overflow-hidden space-y-2 border border-amber-500/20 cursor-pointer active:scale-95 transition group"
-          style={{
-            background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, rgba(15, 23, 42, 0.85) 100%)',
-          }}
-        >
-          <div className="flex items-center justify-between text-slate-400 text-xs font-bold">
-            <span className="flex items-center gap-1.5 text-amber-300">
-              <Wallet size={15} className="text-amber-400" />
-              السيولة بالخزن
-            </span>
-            <ChevronLeft size={13} className="text-slate-500 group-hover:-translate-x-0.5 transition-transform" />
-          </div>
-
-          <div className="text-2xl font-black text-amber-300 font-mono tracking-tight">
-            {formatCurrency(metrics.totalSafesBalance, hideAmounts)}
-          </div>
-
-          <p className="text-[10px] text-slate-400 leading-tight">
-            أدراج الكاشير + المحافظ الإلكترونية
-          </p>
-        </div>
-
-        {/* Card 3: Expenses Today */}
-        <div
-          onClick={() => onNavigateToTab('safes')}
-          className="p-3.5 rounded-2xl glass-card flex items-center justify-between cursor-pointer active:scale-95 transition"
-        >
-          <div className="space-y-0.5 min-w-0">
-            <span className="text-[11px] font-bold text-slate-400 block truncate">مصروفات اليوم</span>
-            <span className="text-base font-black text-rose-400 font-mono block">
-              {formatCurrency(metrics.todayExpensesTotal, hideAmounts)}
-            </span>
-          </div>
-          <span className="text-[10px] text-slate-500 bg-rose-500/10 px-2 py-1 rounded-lg text-rose-300 font-bold shrink-0">
-            سحب ومصروف
-          </span>
-        </div>
-
-        {/* Card 4: Debts in Market */}
-        <div
-          onClick={onOpenDebtsModal}
-          className="p-3.5 rounded-2xl glass-card flex items-center justify-between cursor-pointer active:scale-95 transition"
-        >
-          <div className="space-y-0.5 min-w-0">
-            <span className="text-[11px] font-bold text-slate-400 block truncate">ديون العملاء</span>
-            <span className="text-base font-black text-sky-400 font-mono block">
-              {formatCurrency(metrics.totalCustomerDebts, hideAmounts)}
+          {/* Card 3: Expenses Today */}
+          <div
+            onClick={() => onNavigateToTab('safes')}
+            className="p-3.5 rounded-2xl glass-card flex items-center justify-between cursor-pointer active:scale-95 transition"
+          >
+            <div className="space-y-0.5 min-w-0">
+              <span className="text-[11px] font-bold text-slate-400 block truncate">مصروفات وسحوبات اليوم</span>
+              <span className="text-base font-black text-rose-400 font-mono block">
+                {formatCurrency(metrics.todayExpensesTotal, hideAmounts)}
+              </span>
+            </div>
+            <span className="text-[10px] text-slate-500 bg-rose-500/10 px-2 py-1 rounded-lg text-rose-300 font-bold shrink-0">
+              خرج من الخزينة
             </span>
           </div>
-          <span className="text-[10px] text-slate-500 bg-sky-500/10 px-2 py-1 rounded-lg text-sky-300 font-bold shrink-0">
-            آجل بالسوق
-          </span>
+
+          {/* Card 4: Debts in Market */}
+          <div
+            onClick={onOpenDebtsModal}
+            className="p-3.5 rounded-2xl glass-card flex items-center justify-between cursor-pointer active:scale-95 transition"
+          >
+            <div className="space-y-0.5 min-w-0">
+              <span className="text-[11px] font-bold text-slate-400 block truncate">ديون العملاء (الآجل)</span>
+              <span className="text-base font-black text-sky-400 font-mono block">
+                {formatCurrency(metrics.totalCustomerDebts, hideAmounts)}
+              </span>
+            </div>
+            <span className="text-[10px] text-slate-500 bg-sky-500/10 px-2 py-1 rounded-lg text-sky-300 font-bold shrink-0">
+              متبقي بالسوق
+            </span>
+          </div>
         </div>
       </div>
 

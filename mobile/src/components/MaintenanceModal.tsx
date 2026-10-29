@@ -51,9 +51,20 @@ export const MaintenanceModal: React.FC<MaintenanceModalProps> = ({
 
   // Deliver modal state
   const [deliveringOrder, setDeliveringOrder] = useState<MaintenanceOrder | null>(null);
+  const [deliverCollectedAmount, setDeliverCollectedAmount] = useState('');
+  const [deliverCostPrice, setDeliverCostPrice] = useState('');
   const [deliveredSafeId, setDeliveredSafeId] = useState<string>(safesList[0]?.id || '');
 
   const activeBranch = branches.find(b => b.id === selectedBranchId) || branches[0];
+
+  const openDeliverModal = (order: MaintenanceOrder) => {
+    setDeliveringOrder(order);
+    setDeliverCollectedAmount(String(order.finalPrice || order.expectedPrice || ''));
+    setDeliverCostPrice(String(order.costPrice || ''));
+    if (!deliveredSafeId && safesList[0]) {
+      setDeliveredSafeId(safesList[0].id);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -137,12 +148,20 @@ export const MaintenanceModal: React.FC<MaintenanceModalProps> = ({
     if (!deliveringOrder || !activeBranch) return;
     const safe = safesList.find(s => s.id === deliveredSafeId) || safesList[0];
 
+    const collected = Number(deliverCollectedAmount) || deliveringOrder.finalPrice || deliveringOrder.expectedPrice || 0;
+    const cost = Number(deliverCostPrice) || deliveringOrder.costPrice || 0;
+    const profit = Math.max(0, collected - cost);
+
     try {
       const updated: MaintenanceOrder = {
         ...deliveringOrder,
         status: 'delivered',
-        finalPrice: deliveringOrder.finalPrice || deliveringOrder.expectedPrice || 0,
+        finalPrice: collected,
+        collectedAmount: collected,
+        costPrice: cost,
+        profit,
         deliveryDate: new Date().toISOString(),
+        deliveredAt: new Date().toISOString(),
       };
 
       const res = await multiBranchManager.submitMaintenanceOrder(activeBranch, updated, safe);
@@ -156,7 +175,7 @@ export const MaintenanceModal: React.FC<MaintenanceModalProps> = ({
       setDeliveringOrder(null);
       onRefresh();
     } catch (e: any) {
-      alert(e.message || 'حدث خطأ');
+      alert(e.message || 'حدث خطأ أثناء تسليم الجهاز');
     }
   };
 
@@ -376,7 +395,7 @@ export const MaintenanceModal: React.FC<MaintenanceModalProps> = ({
                   {order.status !== 'delivered' && (
                     <button
                       type="button"
-                      onClick={() => setDeliveringOrder(order)}
+                      onClick={() => openDeliverModal(order)}
                       className="flex-1 py-1.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 font-bold text-[11px] transition flex items-center justify-center gap-1"
                     >
                       <Coins size={13} />
@@ -406,7 +425,10 @@ export const MaintenanceModal: React.FC<MaintenanceModalProps> = ({
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
           <div className="w-full max-w-sm bg-slate-900 border border-slate-750 rounded-3xl p-5 space-y-3.5 shadow-2xl text-xs">
             <div className="flex items-center justify-between pb-2 border-b border-white/[0.08]">
-              <h4 className="font-bold text-white text-xs">تسليم الجهاز وتحصيل النقدية</h4>
+              <h4 className="font-bold text-white text-xs flex items-center gap-1.5">
+                <Coins size={15} className="text-cyan-400" />
+                <span>تسليم الجهاز وتحصيل النقدية</span>
+              </h4>
               <button
                 type="button"
                 onClick={() => setDeliveringOrder(null)}
@@ -416,12 +438,46 @@ export const MaintenanceModal: React.FC<MaintenanceModalProps> = ({
               </button>
             </div>
 
-            <p className="text-slate-300 text-xs leading-relaxed">
-              تأكيد تسليم <strong>{deliveringOrder.deviceModel}</strong> للعميل <strong>{deliveringOrder.customerName}</strong> وتحصيل مبلغ{' '}
-              <strong className="text-emerald-400 font-mono">
-                {formatCurrency(deliveringOrder.finalPrice || deliveringOrder.expectedPrice || 0, hideAmounts)}
+            <div className="p-2.5 rounded-xl bg-slate-950/80 border border-white/[0.06] space-y-1">
+              <div className="font-bold text-white text-xs">{deliveringOrder.deviceModel}</div>
+              <div className="text-[11px] text-slate-400">العميل: {deliveringOrder.customerName}</div>
+              <div className="text-[10px] text-amber-400/90">العطل: {deliveringOrder.problem}</div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[10px] font-bold text-slate-300 block mb-1">المبلغ المحصل (ج.م) *</label>
+                <input
+                  type="number"
+                  value={deliverCollectedAmount}
+                  onChange={e => setDeliverCollectedAmount(e.target.value)}
+                  placeholder="0"
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-white/[0.1] text-emerald-400 font-bold font-mono text-center focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold text-slate-300 block mb-1">تكلفة القطع / الصيانة</label>
+                <input
+                  type="number"
+                  value={deliverCostPrice}
+                  onChange={e => setDeliverCostPrice(e.target.value)}
+                  placeholder="0 (اختياري)"
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-white/[0.1] text-rose-300 font-bold font-mono text-center focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+            </div>
+
+            {/* Profit preview */}
+            <div className="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-between text-[11px]">
+              <span className="text-slate-300 font-medium">صافي ربح الصيانة:</span>
+              <strong className="text-emerald-400 font-mono font-bold">
+                +{formatCurrency(
+                  Math.max(0, (Number(deliverCollectedAmount) || 0) - (Number(deliverCostPrice) || 0)),
+                  hideAmounts
+                )}
               </strong>
-            </p>
+            </div>
 
             <div>
               <label className="text-[11px] font-bold text-slate-300 block mb-1">الخزينة المودع فيها الإيراد:</label>
@@ -442,7 +498,7 @@ export const MaintenanceModal: React.FC<MaintenanceModalProps> = ({
               <button
                 type="button"
                 onClick={handleConfirmDeliver}
-                className="flex-1 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold transition shadow"
+                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-bold transition shadow-lg shadow-emerald-500/20"
               >
                 تأكيد التسليم والإيداع
               </button>
