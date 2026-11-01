@@ -2,7 +2,7 @@
   <img src="build/icon.png" alt="MOBPOS Logo" width="120" />
 </p>
 
-<h1 align="center">📱 MOBPOS — نظام إدارة محلات الموبايلات المتكامل (v1.0.30)</h1>
+<h1 align="center">📱 MOBPOS — نظام إدارة محلات الموبايلات المتكامل (v1.0.31)</h1>
 
 <p align="center">
   <b>المنظومة السحابية والهجينة الأولى في الوطن العربي المتخصصة 100% في إدارة محلات الموبايلات والإكسسوارات والصيانة</b><br/>
@@ -13,7 +13,7 @@
   <a href="https://github.com/msharaf221/MOBPOS-V2/releases/latest">
     <img src="https://img.shields.io/github/v/release/msharaf221/MOBPOS-V2?style=for-the-badge&color=2563eb&label=%D8%A3%D8%AD%D8%AF%D8%AB%20%D8%A5%D8%B5%D8%AF%D8%A7%D8%B1" alt="Latest Release" />
   </a>
-  <img src="https://img.shields.io/badge/Version-1.0.30-blue?style=for-the-badge" alt="Version 1.0.30" />
+  <img src="https://img.shields.io/badge/Version-1.0.31-blue?style=for-the-badge" alt="Version 1.0.31" />
   <img src="https://img.shields.io/badge/React-19.2-61DAFB?style=for-the-badge&logo=react&logoColor=white" alt="React 19" />
   <img src="https://img.shields.io/badge/TypeScript-5.9-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript 5.9" />
   <img src="https://img.shields.io/badge/Electron-44-47848F?style=for-the-badge&logo=electron&logoColor=white" alt="Electron 44" />
@@ -36,14 +36,14 @@
 
 ## 📥 روابط التحميل المباشرة (Direct Downloads)
 
-يمكنك دائماً تنزيل أحدث الإصدارات الجاهزة للعمل والإنتاج من صفحة [GitHub Releases v1.0.30](https://github.com/msharaf221/MOBPOS-V2/releases/latest):
+يمكنك دائماً تنزيل أحدث الإصدارات الجاهزة للعمل والإنتاج من صفحة [GitHub Releases v1.0.31](https://github.com/msharaf221/MOBPOS-V2/releases/latest):
 
 | المنصة | نوع الملف | الوصف | رابط التحميل |
 |---|---|---|:---:|
-| 💻 **ويندوز (سطح المكتب)** | `MOBPOS-Setup-1.0.30.exe` | برنامج التثبيت الرسمي لويندوز مع التحديث التلقائي | [تحميل Setup EXE](https://github.com/msharaf221/MOBPOS-V2/releases/download/v1.0.30/MOBPOS-Setup-1.0.30.exe) |
-| 🧳 **ويندوز (نسخة محمولة)** | `MOBPOS-1.0.30-Portable.exe` | تشغيل فوري من فلاشة USB بدون تثبيت | [تحميل Portable EXE](https://github.com/msharaf221/MOBPOS-V2/releases/download/v1.0.30/MOBPOS-1.0.30-Portable.exe) |
-| 🤖 **أندرويد (تطبيق الكاشير والمدير)** | `mobpos-companion-v1.0.30.apk` | تطبيق أندرويد نيتف سريع وخفيف للأجهزة اللوحية والموبايل مع فحص التحديثات | [تحميل Android APK](https://github.com/msharaf221/MOBPOS-V2/releases/download/v1.0.30/mobpos-companion-v1.0.30.apk) |
-| 🍏 **آيفون / آيباد (iOS)** | `mobpos-companion-ios-v1.0.30.zip` | حزمة Xcode و IPA لتثبيت التطبيق على أجهزة أبل | [تحميل حزمة iOS](https://github.com/msharaf221/MOBPOS-V2/releases/download/v1.0.30/mobpos-companion-ios-v1.0.30.zip) |
+| 💻 **ويندوز (سطح المكتب)** | `MOBPOS-Setup-1.0.31.exe` | برنامج التثبيت الرسمي لويندوز مع التحديث التلقائي | [تحميل Setup EXE](https://github.com/msharaf221/MOBPOS-V2/releases/download/v1.0.31/MOBPOS-Setup-1.0.31.exe) |
+| 🧳 **ويندوز (نسخة محمولة)** | `MOBPOS-1.0.31-Portable.exe` | تشغيل فوري من فلاشة USB بدون تثبيت | [تحميل Portable EXE](https://github.com/msharaf221/MOBPOS-V2/releases/download/v1.0.31/MOBPOS-1.0.31-Portable.exe) |
+| 🤖 **أندرويد (تطبيق الكاشير والمدير)** | `mobpos-companion-v1.0.31.apk` | تطبيق أندرويد نيتف سريع وخفيف للأجهزة اللوحية والموبايل مع فحص التحديثات | [تحميل Android APK](https://github.com/msharaf221/MOBPOS-V2/releases/download/v1.0.31/mobpos-companion-v1.0.31.apk) |
+| 🍏 **آيفون / آيباد (iOS)** | `mobpos-companion-ios-v1.0.31.zip` | حزمة Xcode و IPA لتثبيت التطبيق على أجهزة أبل | [تحميل حزمة iOS](https://github.com/msharaf221/MOBPOS-V2/releases/download/v1.0.31/mobpos-companion-ios-v1.0.31.zip) |
 | 🌐 **تطبيق الويب و PWA** | Web Browser / LAN | تشغيل عبر المتصفح المحلي أو شبكة الواي فاي بدون إنترنت | [افتح المتصفح](http://127.0.0.1:8420) |
 
 ---
