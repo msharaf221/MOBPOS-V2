@@ -27,7 +27,10 @@ export const LICENSE_PUBLIC_KEY: JsonWebKey = {
  *
  * اتركه فارغاً للعمل بدون سيرفر (سيتم ربط المفتاح بالجهاز محلياً فقط).
  */
-export const ACTIVATION_SERVER_URL: string = 'https://mobpos.onrender.com';
+export const ACTIVATION_SERVER_URL: string =
+  (typeof import.meta !== 'undefined' &&
+    ((import.meta as ImportMeta & { env?: Record<string, string> }).env?.VITE_ACTIVATION_SERVER_URL)) ||
+  'https://mobpos-7ea73.containers.snapdeploy.app';
 
 /**
  * توكن عميل سيرفر التفعيل — يطابق ACTIVATION_TOKEN على السيرفر (لحماية /activate و /verify).
