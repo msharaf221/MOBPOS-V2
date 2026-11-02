@@ -40,6 +40,7 @@ interface CartEntry {
   unitPrice: number;
   costPrice: number;
   selectedImei?: string;
+  imeiUnitId?: string;
 }
 
 export const POSTab: React.FC<POSTabProps> = ({
@@ -124,9 +125,17 @@ export const POSTab: React.FC<POSTabProps> = ({
 
   // Add Item to Cart
   const handleAddToCart = (item: InventoryItem) => {
-    if ((item.quantity || 0) <= 0) {
+    // 🔴 FIX: منتجات IMEI في الديسكتوب كميتها 0 والاعتماد على وحدات IMEI المتاحة
+    const available = item.hasImei
+      ? Number(item.availableImeiCount || 0)
+      : Number(item.quantity || 0);
+    if (available <= 0) {
       triggerHaptic('warning');
-      alert(`المنتج "${item.name}" غير متوفر في رصيد المخزن حالياً`);
+      alert(
+        item.hasImei
+          ? `لا توجد أجهزة IMEI متاحة للمنتج "${item.name}" حالياً`
+          : `المنتج "${item.name}" غير متوفر في رصيد المخزن حالياً`
+      );
       return;
     }
 
@@ -165,7 +174,7 @@ export const POSTab: React.FC<POSTabProps> = ({
     triggerHaptic('light');
   };
 
-  const handleConfirmImei = (imei: string) => {
+  const handleConfirmImei = (imei: string, unitId?: string) => {
     if (!imeiModalItem) return;
     setCart(prev => [
       ...prev,
@@ -175,6 +184,7 @@ export const POSTab: React.FC<POSTabProps> = ({
         unitPrice: imeiModalItem.sellPrice || 0,
         costPrice: imeiModalItem.costPrice || 0,
         selectedImei: imei.trim(),
+        imeiUnitId: unitId,
       },
     ]);
     setImeiModalItem(null);
@@ -235,6 +245,7 @@ export const POSTab: React.FC<POSTabProps> = ({
               unitPrice: match.item.sellPrice || 0,
               costPrice: match.item.costPrice || 0,
               selectedImei: match.imei,
+              imeiUnitId: match.imeiUnitId,
             },
           ]);
           playBeep();
@@ -282,6 +293,21 @@ export const POSTab: React.FC<POSTabProps> = ({
       const customerName = chosenCustomer?.name || customCustomerName.trim() || 'عميل نقدي';
       const customerPhone = chosenCustomer?.phone || customCustomerPhone.trim() || '';
 
+      // 🔴 FIX: لو المستخدم كتب اسم/تليفون عميل جديد أو باع بالآجل، لازم ننشئ
+      // سجل عميل فعلي في السحابة — قبل كده كان الاسم يتبعت كنص فقط والدين يضيع.
+      const customerForSale: Customer | undefined =
+        chosenCustomer ||
+        (customCustomerName.trim() || customCustomerPhone.trim() || remainingDebtAmount > 0
+          ? {
+              id: `cust_mobile_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+              name: customerName,
+              phone: customerPhone,
+              balance: 0,
+              branchId: activeBranch.id,
+              branchName: activeBranch.name,
+            }
+          : undefined);
+
       const now = new Date();
       const invoiceNumber = `INV-${now.getFullYear().toString().slice(-2)}${(now.getMonth() + 1).toString().padStart(2, '0')}-${Math.floor(1000 + Math.random() * 9000)}`;
 
@@ -302,6 +328,7 @@ export const POSTab: React.FC<POSTabProps> = ({
         total: Number(c.unitPrice * c.quantity),
         returnedQuantity: 0,
         imei: c.selectedImei,
+        imeiUnitId: c.imeiUnitId,
       }));
 
       const totalCost = cart.reduce((acc, c) => {
@@ -325,7 +352,7 @@ export const POSTab: React.FC<POSTabProps> = ({
         safeId: chosenSafe?.id,
         safeName: chosenSafe?.name || 'الخزينة الرئيسية',
         cashierName: 'كاشير الموبايل',
-        customerId: chosenCustomer?.id,
+        customerId: customerForSale?.id,
         customerName,
         customerPhone,
         items: saleItems,
@@ -342,7 +369,7 @@ export const POSTab: React.FC<POSTabProps> = ({
       const res = await multiBranchManager.submitSale(activeBranch, saleRecord, {
         safe: chosenSafe,
         deductions,
-        customer: chosenCustomer || undefined,
+        customer: customerForSale,
       });
 
       if (!res.success) {
@@ -775,41 +802,81 @@ export const POSTab: React.FC<POSTabProps> = ({
               </button>
             </div>
 
-            <form
-              onSubmit={e => {
-                e.preventDefault();
-                if (manualImeiInput.trim()) {
-                  handleConfirmImei(manualImeiInput);
-                }
-              }}
-              className="space-y-3"
-            >
-              <input
-                type="text"
-                autoFocus
-                value={manualImeiInput}
-                onChange={e => setManualImeiInput(e.target.value)}
-                placeholder="اكتب أو الصق رقم IMEI هنا (15 رقم)..."
-                className="w-full px-3 py-3 rounded-xl bg-slate-950 border border-white/[0.1] text-xs text-white font-mono text-center tracking-widest focus:outline-none focus:border-cyan-400"
-              />
+            {(() => {
+              const availableUnits = metrics.imeiUnitsList.filter(unit => {
+                const productId = unit.inventoryId || unit.productId;
+                return productId === imeiModalItem.id && unit.status === 'available';
+              });
 
-              <div className="flex gap-2">
-                <button
-                  type="submit"
-                  disabled={!manualImeiInput.trim()}
-                  className="flex-1 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-bold text-xs transition active:scale-95"
-                >
-                  إضافة للسلة
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleConfirmImei('بدون سيريال')}
-                  className="px-3 py-2.5 rounded-xl bg-slate-800 text-slate-300 text-xs"
-                >
-                  تخطي السيريال
-                </button>
-              </div>
-            </form>
+              return (
+                <>
+                  {availableUnits.length > 0 && (
+                    <div className="max-h-56 overflow-y-auto space-y-2">
+                      {availableUnits.map(unit => {
+                        const serial = unit.imei1 || unit.imei || unit.serialNumber || '';
+                        const details = [unit.color, unit.storage].filter(Boolean).join(' • ');
+                        return (
+                          <button
+                            key={unit.id}
+                            type="button"
+                            onClick={() => handleConfirmImei(serial, unit.id)}
+                            className="w-full text-right px-3 py-2.5 rounded-xl bg-slate-950 border border-white/[0.08] hover:border-cyan-400/60 hover:bg-slate-800/60 transition"
+                          >
+                            <span className="block text-[11px] text-white font-mono tracking-wider" dir="ltr">
+                              {serial || 'بدون IMEI'}
+                            </span>
+                            {details && (
+                              <span className="block text-[10px] text-slate-400 mt-0.5">{details}</span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {availableUnits.length === 0 && (
+                    <p className="text-[10px] text-amber-400/90 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2">
+                      لا توجد أجهزة متاحة مسجّلة بهذا المنتج. يمكنك كتابة الـIMEI يدوياً.
+                    </p>
+                  )}
+
+                  <form
+                    onSubmit={e => {
+                      e.preventDefault();
+                      if (manualImeiInput.trim()) {
+                        handleConfirmImei(manualImeiInput);
+                      }
+                    }}
+                    className="space-y-3"
+                  >
+                    <input
+                      type="text"
+                      value={manualImeiInput}
+                      onChange={e => setManualImeiInput(e.target.value)}
+                      placeholder="أو اكتب/الصق IMEI يدوياً (15 رقم)..."
+                      className="w-full px-3 py-3 rounded-xl bg-slate-950 border border-white/[0.1] text-xs text-white font-mono text-center tracking-widest focus:outline-none focus:border-cyan-400"
+                    />
+
+                    <div className="flex gap-2">
+                      <button
+                        type="submit"
+                        disabled={!manualImeiInput.trim()}
+                        className="flex-1 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-bold text-xs transition active:scale-95"
+                      >
+                        إضافة للسلة
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleConfirmImei('بدون سيريال')}
+                        className="px-3 py-2.5 rounded-xl bg-slate-800 text-slate-300 text-xs"
+                      >
+                        تخطي السيريال
+                      </button>
+                    </div>
+                  </form>
+                </>
+              );
+            })()}
           </div>
         </div>
       )}

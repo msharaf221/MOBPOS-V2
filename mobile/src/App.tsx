@@ -57,6 +57,8 @@ export default function App() {
     inventoryList: [],
     maintenanceList: [],
     customersList: [],
+    imeiUnitsList: [],
+    pendingOutboxCount: 0,
   }));
 
   const [perBranchMetrics, setPerBranchMetrics] = useState<BranchMetrics[]>([]);
@@ -289,6 +291,7 @@ export default function App() {
           onRefresh={handleManualRefresh}
           onOpenSettings={() => setActiveTab('settings')}
           lastSyncedAt={metrics.lastSyncedAt}
+          pendingOutboxCount={metrics.pendingOutboxCount}
         />
 
         {/* Tab Content */}

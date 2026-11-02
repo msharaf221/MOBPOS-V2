@@ -8,6 +8,7 @@ import {
   Zap,
   Plus,
   Settings,
+  CloudUpload,
 } from 'lucide-react';
 import type { BranchConfig } from '../types';
 
@@ -22,6 +23,7 @@ interface HeaderProps {
   onRefresh: () => void;
   onOpenSettings?: () => void;
   lastSyncedAt?: string;
+  pendingOutboxCount?: number;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -34,6 +36,8 @@ export const Header: React.FC<HeaderProps> = ({
   isRefreshing,
   onRefresh,
   onOpenSettings,
+  lastSyncedAt,
+  pendingOutboxCount = 0,
 }) => {
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
@@ -171,6 +175,19 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Right Tools (Privacy Eye & Refresh) */}
         <div className="flex items-center gap-1.5">
+          {/* Pending outbox indicator */}
+          {pendingOutboxCount > 0 && (
+            <div
+              title={`${pendingOutboxCount} عملية في انتظار المزامنة — هتترفع تلقائياً أول ما النت يرجع`}
+              className="relative p-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400"
+            >
+              <CloudUpload size={16} />
+              <span className="absolute -top-1.5 -left-1.5 min-w-[16px] h-4 px-1 rounded-full bg-amber-500 text-slate-950 text-[9px] font-black flex items-center justify-center">
+                {pendingOutboxCount > 99 ? '99+' : pendingOutboxCount}
+              </span>
+            </div>
+          )}
+
           {/* Privacy Eye Toggle */}
           <button
             type="button"
@@ -192,7 +209,11 @@ export const Header: React.FC<HeaderProps> = ({
             onClick={onRefresh}
             disabled={isRefreshing}
             aria-label="تحديث البيانات لحظياً"
-            title="تحديث البيانات"
+            title={
+              lastSyncedAt
+                ? `آخر مزامنة: ${new Date(lastSyncedAt).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}`
+                : 'تحديث البيانات'
+            }
             className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-white transition disabled:opacity-50"
           >
             <RefreshCw size={16} className={isRefreshing ? 'animate-spin text-sky-400' : ''} />

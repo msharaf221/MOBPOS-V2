@@ -15,6 +15,13 @@ import type {
   SyncRecordRow,
   MobilePairingPayload,
 } from '../types/sync.ts';
+import {
+  canonicalStoreName,
+  normalizeCategoryType,
+  normalizeRecord,
+} from '../../shared/sync/index.ts';
+
+type AnyRecord = Record<string, unknown>;
 
 export function isValidJwt(token?: string | null): boolean {
   if (!token) return false;
@@ -96,6 +103,11 @@ class SyncEngine {
   private lastAutoSnapshotTime = 0;
   private unsubscribeDelta: (() => void) | null = null;
   private initialized = false;
+
+  /** مؤشر مستقل لسحب التغييرات الجاية من الأجهزة التانية (الموبايل/فرع آخر). */
+  private remoteCursor: string | null = null;
+  private remoteCursorLoaded = false;
+  private isPulling = false;
 
   private dirtySnapshotStores = new Set<string>();
   private isPushingSnapshot = false;
@@ -349,22 +361,34 @@ class SyncEngine {
     void this.selfHealFromIndexedDB();
 
     // Zero-Touch Background Worker:
-    // Runs silent check every 30s to drain pending records and auto-push fresh snapshot
+    // كل 30 ثانية: رفع المعلّق، سحب أي كتابات جديدة من الموبايل/الأجهزة
+    // التانية، ثم تحديث اللقطات السحابية عشان أي جهاز جديد يلاقي بيانات حديثة.
     this.heartbeatTimer = setInterval(() => {
-      if (this.state.isOnline && this.state.status !== 'disabled') {
-        // 🔴 FIX: إزالة قيد consecutiveErrors<5 — كان يجعل نبض الخلفية يتوقف عن
-        // إعادة المحاولة للأبد بعد 5 أخطاء متتالية (مثلاً انقطاع ليلي طويل)،
-        // فتلازم السجلات معلقة حتى إعادة تشغيل التطبيق يدوياً. الـ backoff الداخلي
-        // الخاص بـ triggerDrain كفيل بمنع الضغط على الشبكة.
-        if (this.state.pendingCount > 0 && !this.isDraining) {
-          void this.triggerDrain(false);
+      if (!this.state.isOnline || this.state.status === 'disabled') return;
+
+      // 🔴 FIX: إزالة قيد consecutiveErrors<5 — كان يجعل نبض الخلفية يتوقف عن
+      // إعادة المحاولة للأبد بعد 5 أخطاء متتالية (مثلاً انقطاع ليلي طويل)،
+      // فتلازم السجلات معلقة حتى إعادة تشغيل التطبيق يدوياً. الـ backoff الداخلي
+      // الخاص بـ triggerDrain كفيل بمنع الضغط على الشبكة.
+      if (this.state.pendingCount > 0 && !this.isDraining) {
+        void this.triggerDrain(false);
+      }
+
+      // 🔴 FIX الجوهري: السحب الدوري (catch-up) — كان الديسكتوب يعتمد على
+      // Realtime فقط، فأي مصروف/فاتورة/منتج اتسجل من الموبايل وقت انقطاع
+      // الـ WebSocket كان يضيع تماماً حتى الضغط اليدوي على "مزامنة".
+      void (async () => {
+        try {
+          await this.pullCatchUp();
+        } catch (err) {
+          console.warn('[SyncEngine] Periodic catch-up notice:', err);
         }
 
         // Auto-refresh snapshot every 3 minutes silently so mobpos_stores is never stale
         if (Date.now() - this.lastAutoSnapshotTime > 180000 && !this.isPushingSnapshot) {
           void this.autoPushSnapshotInBackground();
         }
-      }
+      })();
     }, 30000);
   }
 
@@ -490,6 +514,10 @@ class SyncEngine {
     this.backoffMs = INITIAL_BACKOFF_MS;
     this.evaluateStatus();
     void this.triggerDrain(false);
+    // بعد أي انقطاع، اسحب فوراً كل ما فاتك من الموبايل أو الأجهزة التانية
+    void this.pullCatchUp().catch(err => {
+      console.warn('[SyncEngine] Catch-up after reconnect failed:', err);
+    });
     this.setupRealtimeSubscription();
   };
 
@@ -554,6 +582,9 @@ class SyncEngine {
       this.evaluateStatus();
       if (this.state.isOnline) {
         void this.triggerDrain(false);
+        void this.pullCatchUp().catch(err => {
+          console.warn('[SyncEngine] Initial catch-up notice:', err);
+        });
       }
     } catch (err) {
       console.error('[SyncEngine] Client init failed:', err);
@@ -680,6 +711,9 @@ class SyncEngine {
    * توليد نص مشفر لرمز QR للاقتران الفوري مع تطبيق الجوال
    */
   public generateMobilePairingCode(): string {
+    // 🔴 SECURITY: ممنوع نضع refreshToken في رمز QR — أي حد يصوّر الرمز
+    // كان ياخد جلسة الدخول الكاملة. الرمز بقى صالح 10 دقايق فقط وبيحتوي
+    // بيانات الربط العامة (URL + anon key + tenant) اللازمة للموبايل.
     const payload: MobilePairingPayload = {
       v: 1,
       app: 'mobpos',
@@ -690,7 +724,7 @@ class SyncEngine {
       userEmail: this.config.userEmail,
       userName: this.config.userName,
       userAvatarUrl: this.config.userAvatarUrl,
-      refreshToken: this.config.refreshToken,
+      expiresAt: Date.now() + 10 * 60 * 1000,
       timestamp: Date.now(),
     };
     const jsonStr = JSON.stringify(payload);
@@ -719,6 +753,9 @@ class SyncEngine {
       if (!data.url || !data.key) {
         return { ok: false, error: 'رمز الاقتران غير صالح (بيانات الرابط أو المفتاح مفقودة)' };
       }
+      if (data.expiresAt && Date.now() > data.expiresAt) {
+        return { ok: false, error: 'انتهت صلاحية رمز الاقتران — أنشئ رمزاً جديداً من الديسكتوب' };
+      }
       this.saveConfig({
         url: data.url,
         anonKey: data.key,
@@ -727,7 +764,6 @@ class SyncEngine {
         userEmail: data.userEmail,
         userName: data.userName,
         userAvatarUrl: data.userAvatarUrl,
-        refreshToken: data.refreshToken,
         authProvider: data.userEmail ? (data.userName ? 'google' : 'password') : 'anon',
       });
       return { ok: true };
@@ -1123,11 +1159,28 @@ class SyncEngine {
   private async handleIncomingRemoteRow(row: SyncRecordRow): Promise<void> {
     // 1. Echo suppression: Ignore changes made by this device
     if (row.client_id === this.state.clientId) return;
-    if (!SYNCABLE_STORES.has(row.store)) return;
+
+    // 🔴 FIX: تطبيع اسم المخزن — نسخ الموبايل القديمة كانت تبعت `imei_units`
+    // بدل `imeiUnits`، وكان الديسكتوب يرفض السجل بالكامل فيضيع الجهاز/المنتج.
+    const store = canonicalStoreName(row.store);
+    if (!store || !SYNCABLE_STORES.has(store)) return;
 
     try {
-      // 2. Conflict Resolution: Last-Write-Wins (LWW)
-      const existing = await this.getLocalRecord(row.store, row.record_id);
+      // 2. تطبيع شكل السجل لسكيما الديسكتوب (حتى لو جاي من نسخة موبايل قديمة)
+      const normalized = normalizeRecord(store, row.data, {
+        id: row.record_id,
+        updatedAt: row.updated_at,
+      });
+
+      // 2.b المنتجات القديمة كانت بتبعت اسم القسم فقط بدون categoryId —
+      // نربطها بقسم موجود أو ننشئ قسم جديد عشان تظهر صح في شاشة المخزن.
+      if (store === 'inventory') {
+        const categoryId = await this.resolveInventoryCategory(normalized);
+        if (categoryId) normalized.categoryId = categoryId;
+      }
+
+      // 3. Conflict Resolution: Last-Write-Wins (LWW)
+      const existing = await this.getLocalRecord(store, row.record_id);
       if (existing) {
         // 🔴 FIX: المقارنة فقط عندما يوجد updated_at صريح على الجهاز. سابقاً كان
         // يستخدم createdAt كاحتياطي — فيتجاهل تحديثات السحابة لسجل أُنشئ محلياً
@@ -1144,25 +1197,25 @@ class SyncEngine {
         }
       }
 
-      // 3. Apply change locally with suppression flag
+      // 4. Apply change locally with suppression flag
       setRemoteApplying(true);
       try {
         if (row.deleted_at) {
           // Soft delete: remove from IndexedDB and React state
-          await indexedDBUtils.remove(row.store, row.record_id);
+          await indexedDBUtils.remove(store, row.record_id);
           if (this.storeDispatcher) {
-            this.storeDispatcher(row.store, { type: 'delete', id: row.record_id });
+            this.storeDispatcher(store, { type: 'delete', id: row.record_id });
           }
         } else {
           // Upsert: save to IndexedDB and update React state
           const recordToSave = {
-            ...row.data,
+            ...normalized,
             id: row.record_id,
             updated_at: row.updated_at,
-          };
-          await indexedDBUtils.put(row.store, recordToSave);
+          } as { id: string; [key: string]: unknown };
+          await indexedDBUtils.put(store, recordToSave);
           if (this.storeDispatcher) {
-            this.storeDispatcher(row.store, { type: 'upsert', item: recordToSave });
+            this.storeDispatcher(store, { type: 'upsert', item: recordToSave });
           }
         }
         await this.saveLastSyncedTime(new Date());
@@ -1171,6 +1224,39 @@ class SyncEngine {
       }
     } catch (err) {
       console.error('[SyncEngine] Error applying remote change:', err);
+    }
+  }
+
+  /**
+   * يضمن وجود قسم (Category) للمنتج القادم من الموبايل.
+   * بيرجع `categoryId` الموجود أو المنشأ حديثاً، و`''` لو مفيش اسم قسم.
+   */
+  private async resolveInventoryCategory(item: AnyRecord): Promise<string> {
+    const directId = String(item.categoryId || '').trim();
+    if (directId) return directId;
+
+    const name = String(item.category || item.categoryName || '').trim();
+    if (!name) return '';
+
+    try {
+      const categories = await indexedDBUtils.getAll<{ id: string; name: string; type: string }>(
+        indexedDBUtils.STORES.categories
+      );
+      const match = categories.find(category => String(category.name || '').trim() === name);
+      if (match) return match.id;
+
+      const category = {
+        id: `cat_mobile_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        name,
+        type: normalizeCategoryType(item.hasIMEI ? 'device' : 'accessory'),
+      };
+      // الكتابة دي مش جوه setRemoteApplying عشان تتسجل في outbox وتوصل للموبايل.
+      await indexedDBUtils.put(indexedDBUtils.STORES.categories, category);
+      this.storeDispatcher?.('categories', { type: 'upsert', item: category });
+      return category.id;
+    } catch (err) {
+      console.warn('[SyncEngine] Could not resolve remote product category:', err);
+      return '';
     }
   }
 
@@ -1189,50 +1275,102 @@ class SyncEngine {
   // Reconnect Catch-Up / Reconciliation
   // ------------------------------------------------------------
 
+  /**
+   * سحب كل التغييرات اللي حصلت من أجهزة تانية (موبايل/ديسكتوب تاني).
+   *
+   * بيستخدم مؤشر مستقل (`remote_catchup_cursor`) بدل `lastSyncedAt`،
+   * لأن `lastSyncedAt` بيتحدث مع أي رفع محلي — فكان ممكن يتخطى سجلات
+   * الموبايل اللي اتكتبت بنفس اللحظة أو بساعة جهاز مختلفة.
+   * بنرجع 60 ثانية للخلف كهامش أمان (إعادة التطبيق idempotent).
+   */
   public async pullCatchUp(): Promise<number> {
-    if (!this.supabase || !this.state.isOnline) return 0;
+    if (!this.supabase || !this.state.isOnline || !this.config.autoSyncEnabled) return 0;
+    if (this.isPulling) return 0;
+
+    this.isPulling = true;
     const tenantId = this.state.tenantId;
 
     // 🔴 FIX: ترقيم الصفحات — سابقاً limit(500) بلا تنقل بين الصفحات يعني
     // أن الجهاز المتأخر جداً (أكثر من 500 تغيير) لا يستلم باقي التحديثات أبداً.
     const PAGE_SIZE = 500;
-    let cursor = this.state.lastSyncedAt ? this.state.lastSyncedAt.toISOString() : null;
     let appliedCount = 0;
 
-    while (true) {
-      let query = this.supabase
-        .from('mobpos_records')
-        .select('*')
-        .eq('tenant_id', tenantId)
-        .order('updated_at', { ascending: true })
-        .limit(PAGE_SIZE);
+    try {
+      const storedCursor = await this.loadRemoteCursor();
+      const since = storedCursor
+        ? new Date(Math.max(0, new Date(storedCursor).getTime() - 60_000)).toISOString()
+        : null;
+      let cursor = since;
 
-      if (cursor) {
-        query = query.gt('updated_at', cursor);
-      }
+      while (true) {
+        let query = this.supabase
+          .from('mobpos_records')
+          .select('*')
+          .eq('tenant_id', tenantId)
+          .order('updated_at', { ascending: true })
+          .limit(PAGE_SIZE);
 
-      const { data, error } = await query;
-      if (error || !data) break;
-
-      const rows = data as SyncRecordRow[];
-      for (const row of rows) {
-        await this.handleIncomingRemoteRow(row);
-        appliedCount++;
-      }
-
-      if (rows.length > 0) {
-        const latest = rows[rows.length - 1]?.updated_at;
-        if (latest) {
-          cursor = latest;
-          await this.saveLastSyncedTime(new Date(latest));
+        if (cursor) {
+          query = query.gt('updated_at', cursor);
         }
+
+        const { data, error } = await query;
+        if (error || !data) break;
+
+        const rows = data as SyncRecordRow[];
+        for (const row of rows) {
+          // تجاهل صدى الكتابات المحلية، لكن برضه بنحسبها عشان المؤشر يتقدم
+          await this.handleIncomingRemoteRow(row);
+          appliedCount++;
+        }
+
+        if (rows.length > 0) {
+          const latest = rows[rows.length - 1]?.updated_at;
+          if (latest) {
+            // لو الصفحة كلها بنفس التوقيت بالظبط، منقدرش نتقدم — نخرج عشان
+            // ما ندخلش في حلقة لا نهائية.
+            if (cursor && latest <= cursor) break;
+            cursor = latest;
+            await this.saveRemoteCursor(latest);
+          }
+        }
+
+        // صفحة غير مكتملة → وصلنا لآخر البيانات
+        if (rows.length < PAGE_SIZE) break;
       }
 
-      // صفحة غير مكتملة → وصلنا لآخر البيانات
-      if (rows.length < PAGE_SIZE) break;
+      if (appliedCount > 0) {
+        this.emitState();
+      }
+      return appliedCount;
+    } finally {
+      this.isPulling = false;
     }
+  }
 
-    return appliedCount;
+  private async loadRemoteCursor(): Promise<string | null> {
+    if (this.remoteCursorLoaded) return this.remoteCursor;
+    this.remoteCursorLoaded = true;
+    try {
+      const meta = await indexedDBUtils.getAll<{ id: string; value: string }>(indexedDBUtils.STORES.syncMeta);
+      this.remoteCursor = meta.find(item => item.id === 'remote_catchup_cursor')?.value || null;
+    } catch {
+      this.remoteCursor = null;
+    }
+    return this.remoteCursor;
+  }
+
+  private async saveRemoteCursor(iso: string): Promise<void> {
+    this.remoteCursor = iso;
+    this.remoteCursorLoaded = true;
+    try {
+      await indexedDBUtils.put(indexedDBUtils.STORES.syncMeta, {
+        id: 'remote_catchup_cursor',
+        value: iso,
+      });
+    } catch {
+      // ignore — المؤشر هيتبني من آخر قيمة ناجحة
+    }
   }
 
   // ------------------------------------------------------------
@@ -1455,19 +1593,47 @@ class SyncEngine {
 
     if (error || !data) throw new Error(`فشل جلب لقطات المتاجر: ${error?.message || 'لا توجد بيانات'}`);
 
-    const stores: Record<string, { id: string }[]> = {};
+    // 🔴 FIX: ما نستبدلش مخزن لسه فيه كتابات محلية معلّقة في outbox،
+    // وإلا اللقطة القديمة تمحي شغل المستخدم اللي لسه ما اترفعش.
+    const pendingStores = new Set<string>();
+    try {
+      const outbox = await indexedDBUtils.getAll<OutboxItem>(indexedDBUtils.STORES.syncOutbox);
+      for (const item of outbox) {
+        const store = canonicalStoreName(item.store);
+        if (store) pendingStores.add(store);
+      }
+    } catch {
+      // ignore
+    }
+
+    const stores: Record<string, AnyRecord[]> = {};
     for (const row of data as { tenant_id: string; store: string; data: unknown }[]) {
-      if (row.tenant_id !== tenantId || !SYNCABLE_STORES.has(row.store) || !Array.isArray(row.data)) continue;
-      stores[row.store] = row.data as { id: string }[];
+      const store = canonicalStoreName(row.store);
+      if (row.tenant_id !== tenantId || !store || !SYNCABLE_STORES.has(store) || !Array.isArray(row.data)) continue;
+      if (pendingStores.has(store)) continue;
+
+      stores[store] = row.data.map(item =>
+        normalizeRecord(store, item, {
+          id: typeof (item as AnyRecord)?.id === 'string' ? String((item as AnyRecord).id) : undefined,
+        })
+      );
     }
 
     setRemoteApplying(true);
     try {
       await indexedDBUtils.flushPendingWrites();
-      await indexedDBUtils.replaceStoresData(stores);
+      await indexedDBUtils.replaceStoresData(stores as unknown as Record<string, { id: string }[]>);
       await indexedDBUtils.flushPendingWrites();
     } finally {
       setRemoteApplying(false);
+    }
+
+    // 🔴 FIX: بعد استبدال IndexedDB لازم نبلّغ واجهة React كمان —
+    // قبل كده كانت الشاشات تفضل على البيانات القديمة لحد إعادة التشغيل.
+    if (this.storeDispatcher) {
+      for (const [store, items] of Object.entries(stores)) {
+        this.storeDispatcher(store, { type: 'replace', items });
+      }
     }
 
     await this.saveLastSyncedTime(new Date());

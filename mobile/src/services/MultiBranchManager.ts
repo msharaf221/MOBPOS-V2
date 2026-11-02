@@ -9,7 +9,23 @@ import type {
   InventoryItem,
   MaintenanceOrder,
   Customer,
+  ImeiUnit,
 } from '../types';
+import { canonicalStoreName } from '../../../shared/sync/contract.ts';
+import {
+  adaptCustomer,
+  adaptInventoryItem,
+  adaptImeiUnit,
+  adaptMaintenance,
+  adaptSale,
+  adaptSafe,
+  adaptTransaction,
+  countAvailableImeiByInventory,
+  normalizeIncoming,
+  toMap,
+} from './sync/records';
+import { normalizeRecord } from '../../../shared/sync/normalize.ts';
+import { enqueueOutbox, flushOutbox, getOutboxCount } from './sync/outbox';
 
 const STORAGE_KEY_BRANCHES = 'mobpos_companion_branches_v1';
 const BRANCH_FETCH_TIMEOUT_MS = 18_000;
@@ -162,10 +178,14 @@ class MultiBranchManager {
         tenantSecret?: string;
         userEmail?: string;
         userName?: string;
+        expiresAt?: number;
       };
 
       if (!data.url || !data.key) {
         return { ok: false, error: 'رمز الاقتران غير صالح أو مفقود الرابط/المفتاح' };
+      }
+      if (data.expiresAt && Date.now() > data.expiresAt) {
+        return { ok: false, error: 'انتهت صلاحية رمز الاقتران — اطلب رمزاً جديداً من الديسكتوب' };
       }
 
       const branches = this.getBranches();
@@ -337,6 +357,54 @@ class MultiBranchManager {
    * Merges baseline snapshots from `mobpos_stores` with recent deltas from `mobpos_records`.
    * Normalizes desktop models to mobile types with 100% schema alignment.
    */
+  // ------------------------------------------------------------
+  //  Offline cache — آخر لقطة ناجحة لكل فرع
+  // ------------------------------------------------------------
+  private metricsCacheKey(branch: BranchConfig): string {
+    const tenant = (branch.tenantId || '').trim();
+    return `mobpos_metrics_cache_v1_${branch.id}_${tenant}`;
+  }
+
+  /** يحفظ لقطة مبسطة من آخر قراءة ناجحة عشان الشاشات تفضل شغالة أوفلاين. */
+  private persistMetricsCache(branch: BranchConfig, metrics: BranchMetrics): void {
+    try {
+      if (typeof localStorage === 'undefined') return;
+      const slim: BranchMetrics = {
+        ...metrics,
+        recentSales: metrics.recentSales.slice(0, 40),
+        recentTransactions: metrics.recentTransactions.slice(0, 40),
+        inventoryList: metrics.inventoryList.slice(0, 1500),
+        imeiUnitsList: metrics.imeiUnitsList.slice(0, 2500),
+      };
+      localStorage.setItem(
+        this.metricsCacheKey(branch),
+        JSON.stringify({ savedAt: Date.now(), metrics: slim })
+      );
+    } catch {
+      // التخزين ممتلئ — الكاش في الذاكرة كفاية
+    }
+  }
+
+  /** يرجّع آخر لقطة محفوظة (أو null لو مفيش). */
+  private loadMetricsCache(branch: BranchConfig): BranchMetrics | null {
+    try {
+      if (typeof localStorage === 'undefined') return null;
+      const raw = localStorage.getItem(this.metricsCacheKey(branch));
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as { savedAt?: number; metrics?: BranchMetrics };
+      if (!parsed?.metrics) return null;
+      return {
+        ...parsed.metrics,
+        branchId: branch.id,
+        branchName: branch.name,
+        branchColor: branch.color,
+        pendingOutboxCount: getOutboxCount(branch.id),
+      };
+    } catch {
+      return null;
+    }
+  }
+
   public async fetchBranchMetrics(branch: BranchConfig, forceRefresh = false): Promise<BranchMetrics> {
     const client = this.getClient(branch);
 
@@ -346,6 +414,15 @@ class MultiBranchManager {
         errorMessage: 'يرجى إدخال Supabase URL ومفتاح Anon Key في إعدادات الفرع',
       });
       return this.getEmptyMetrics(branch.id, branch.name, branch.color);
+    }
+
+    // إعادة إرسال أي كتابات فشلت قبل قراءة البيانات عشان المستخدم يشوفها فوراً
+    if (getOutboxCount(branch.id) > 0) {
+      try {
+        await this.flushPendingRecords(branch);
+      } catch (flushErr) {
+        console.warn('[MultiBranch] Outbox flush before read failed:', flushErr);
+      }
     }
 
     if (!forceRefresh) {
@@ -397,7 +474,7 @@ class MultiBranchManager {
             }
           }
 
-      // Raw store containers
+      // Raw store containers — canonical desktop names only
       const rawStores: Record<string, any[]> = {
         inventory: [],
         imeiUnits: [],
@@ -410,6 +487,23 @@ class MultiBranchManager {
         transactions: [],
       };
 
+      const overlayRecord = (store: string, record: any, updatedAt?: string) => {
+        const normalized = normalizeIncoming(store, record, {
+          id: record?.id,
+          updatedAt,
+        });
+        const list = rawStores[store];
+        if (!list) return;
+        const recordId = String(normalized.id || '');
+        if (!recordId) return;
+        const index = list.findIndex((item: any) => String(item.id) === recordId);
+        if (index >= 0) {
+          list[index] = { ...list[index], ...normalized };
+        } else {
+          list.unshift({ ...normalized, id: recordId });
+        }
+      };
+
       // 2. Fetch Baseline Snapshots from mobpos_stores
       try {
         let storeQuery = client.from('mobpos_stores').select('*');
@@ -418,15 +512,16 @@ class MultiBranchManager {
         }
         const { data: storeRows, error: storeErr } = await storeQuery;
 
-        // 🔴 FIX: إزالة "الشفاء الذاتي" غير المفلتر الذي كان يتبنى بيانات أي tenant آخر
-        // عندما يكون tenant الفرع فارغاً أو لا يحتوي بيانات. الآن بدون tenant محدد
-        // نعرض رسالة واضحة بدل عرض بيانات غريبة.
-
         if (storeRows && storeRows.length > 0) {
           for (const row of storeRows) {
-            if (row.store && Array.isArray(row.data)) {
-              rawStores[row.store] = row.data;
-            }
+            // 🔴 FIX: العمود اسمه `store` (مش store_name)، والمخزن القانوني
+            // لـ IMEI هو `imeiUnits` (مش imei_units). دعم الأسماء القديمة هنا
+            // بيرجّع المنتجات والأجهزة اللي كانت مختفية.
+            const store = canonicalStoreName(row.store);
+            if (!store || !Array.isArray(row.data)) continue;
+            rawStores[store] = row.data.map((record: any) =>
+              normalizeIncoming(store, record, { id: record?.id })
+            );
           }
         }
       } catch (storeFetchErr) {
@@ -444,31 +539,33 @@ class MultiBranchManager {
         const { data: deltaRows, error: deltaErr } = await deltaQuery;
 
         if (deltaRows && deltaRows.length > 0 && !deltaErr) {
-          // Overlay deltas onto corresponding store arrays
+          // Overlay deltas onto corresponding store arrays (الأحدث الأول)
           for (const row of deltaRows) {
-            const storeName = row.store;
+            const store = canonicalStoreName(row.store);
+            if (!store) continue;
             const recordData = row.data;
             const recordId = row.record_id || recordData?.id;
-            if (!storeName || !recordId) continue;
+            if (!recordId) continue;
 
-            if (!rawStores[storeName]) {
-              rawStores[storeName] = [];
+            if (!rawStores[store]) {
+              rawStores[store] = [];
             }
 
-            // حذف ناعم: نشيل السجل من العرض بدل إعادة إضافته
             if (row.deleted_at) {
-              const dIdx = rawStores[storeName].findIndex((item: any) => item.id === recordId);
-              if (dIdx >= 0) rawStores[storeName].splice(dIdx, 1);
+              const dIdx = rawStores[store].findIndex((item: any) => item.id === recordId);
+              if (dIdx >= 0) rawStores[store].splice(dIdx, 1);
               continue;
             }
             if (!recordData) continue;
 
-            const existingIdx = rawStores[storeName].findIndex((item: any) => item.id === recordId);
+            // الأحدث الأول: مش بنستبدل سجل موجود أحدث بنسخة أقدم
+            const existingIdx = rawStores[store].findIndex((item: any) => item.id === recordId);
             if (existingIdx >= 0) {
-              rawStores[storeName][existingIdx] = { ...rawStores[storeName][existingIdx], ...recordData };
-            } else {
-              rawStores[storeName].unshift({ ...recordData, id: recordId });
+              const existingUpdated = String(rawStores[store][existingIdx]?.updated_at || '');
+              const incomingUpdated = String(row.updated_at || '');
+              if (existingUpdated && incomingUpdated && existingUpdated > incomingUpdated) continue;
             }
+            overlayRecord(store, { ...recordData, id: recordId }, row.updated_at);
           }
         }
       } catch (deltaFetchErr) {
@@ -476,248 +573,67 @@ class MultiBranchManager {
       }
 
       // 4. Build Lookup Maps for Schema Normalization
-      const inventoryMap = new Map<string, any>();
-      (rawStores.inventory || []).forEach((item: any) => {
-        if (item.id) inventoryMap.set(item.id, item);
-      });
+      const inventoryMap = toMap(rawStores.inventory || []);
+      const imeiMap = toMap(rawStores.imeiUnits || []);
+      const customersMap = toMap(rawStores.customers || []);
+      const usersMap = toMap(rawStores.users || []);
+      const safesMap = toMap(rawStores.safes || []);
+      const categoriesMap = toMap(rawStores.categories || []);
 
-      const imeiMap = new Map<string, any>();
-      (rawStores.imeiUnits || []).forEach((item: any) => {
-        if (item.id) imeiMap.set(item.id, item);
-      });
+      const branchLike = { id: branch.id, name: branch.name, color: branch.color };
 
-      const customersMap = new Map<string, any>();
-      (rawStores.customers || []).forEach((item: any) => {
-        if (item.id) customersMap.set(item.id, item);
-      });
+      // 5. Normalize IMEI Units + counts
+      const normalizedImeiUnits: ImeiUnit[] = (rawStores.imeiUnits || [])
+        .map((unit: any) => adaptImeiUnit(unit, branchLike))
+        .filter((unit: ImeiUnit) => Boolean(unit.id));
+      const availableImeiCounts = countAvailableImeiByInventory(normalizedImeiUnits);
 
-      const usersMap = new Map<string, any>();
-      (rawStores.users || []).forEach((item: any) => {
-        if (item.id) usersMap.set(item.id, item);
-      });
-
-      const safesMap = new Map<string, any>();
-      (rawStores.safes || []).forEach((item: any) => {
-        if (item.id) safesMap.set(item.id, item);
-      });
-
-      const categoriesMap = new Map<string, any>();
-      (rawStores.categories || []).forEach((item: any) => {
-        if (item.id) categoriesMap.set(item.id, item);
-      });
-
-      // 5. Normalize Sales Records
-      const normalizedSales: SaleRecord[] = (rawStores.sales || []).map((s: any) => {
-        const customer = s.customerId ? customersMap.get(s.customerId) : null;
-        const cashier = s.cashierId ? usersMap.get(s.cashierId) : null;
-        const safe = s.safeId ? safesMap.get(s.safeId) : null;
-
-        // In desktop schema:
-        // s.total is net total after discount
-        // s.subtotal is gross total before discount
-        // s.paid is amount collected
-        // s.remaining is debt
-        const finalTotal = Number(s.total ?? s.finalTotal ?? 0);
-        const discount = Number(s.discount ?? 0);
-        const subtotal = Number(s.subtotal ?? (s.total && s.total > 0 && discount > 0 ? s.total + discount : (s.finalTotal ?? finalTotal)));
-        const paidAmount = Number(s.paid ?? s.paidAmount ?? finalTotal);
-        const remainingAmount = Number(s.remaining ?? s.remainingAmount ?? Math.max(0, finalTotal - paidAmount));
-        const rawDate = s.createdAt || s.date || new Date().toISOString();
-
-        // Normalize line items
-        const rawItems = Array.isArray(s.items) ? s.items : [];
-        let totalItemsCost = 0;
-        let hasKnownCost = false;
-
-        const items: SaleItem[] = rawItems.map((it: any, idx: number) => {
-          const invId = it.inventoryId || it.id;
-          const inv = invId ? inventoryMap.get(invId) : null;
-          const imeiObj = it.imeiUnitId ? imeiMap.get(it.imeiUnitId) : null;
-          const unitPrice = Number(it.unitPrice ?? it.price ?? inv?.sellPrice ?? 0);
-          const rawCost = Number(it.costPrice ?? it.cost ?? inv?.costPrice ?? 0);
-          const costPrice = Number.isFinite(rawCost) && rawCost >= 0 ? rawCost : 0;
-          const qty = Number(it.quantity) || 1;
-          const lineTotal = Number(it.total ?? (unitPrice * qty));
-          const imeiStr = it.imei || (imeiObj ? (imeiObj.imei1 || imeiObj.imei2) : undefined);
-
-          if (costPrice > 0) {
-            totalItemsCost += costPrice * qty;
-            hasKnownCost = true;
-          }
-
-          return {
-            id: it.id || invId || `item_${idx}`,
-            inventoryId: invId,
-            name: it.name || inv?.name || 'صنف مبيعات',
-            quantity: qty,
-            price: unitPrice,
-            unitPrice,
-            cost: costPrice,
-            costPrice,
-            total: lineTotal,
-            returnedQuantity: Number(it.returnedQuantity) || 0,
-            imei: imeiStr,
-          };
-        });
-
-        // 🔴 حساب ربح الفاتورة محاسبياً بدقة:
-        // إذا كان الربح المسجل مساوياً للإيراد بالكامل (وهو الخطأ المحاسبي الشائع لعدم إدخال التكلفة وقت البيع)،
-        // أو كان الربح غير مسجل (undefined/0)، فإننا نسترجع التكلفة الحقيقية من المخزون ونطرحها من الصافي.
-        let verifiedProfit = Number(s.profit ?? 0);
-        if (hasKnownCost && totalItemsCost > 0) {
-          verifiedProfit = Math.max(0, finalTotal - totalItemsCost);
-        } else if (verifiedProfit >= finalTotal && finalTotal > 0 && !hasKnownCost) {
-          // إذا كانت التكلفة غير مسجلة إطلاقاً لا في الفاتورة ولا في كارت الصنف:
-          // لا يجوز اعتبار الإيراد ربحاً بنسبة 100% لبضاعة تجارية
-          verifiedProfit = 0;
-        }
-
-        let paymentMethodLabel = s.paymentMethod || 'نقدي (كاش)';
-        const pmLower = String(s.paymentMethod || '').toLowerCase();
-        if (pmLower === 'cash' || pmLower.includes('نقدي') || pmLower.includes('كاش')) paymentMethodLabel = 'نقدي (كاش)';
-        else if (pmLower === 'card' || pmLower.includes('فيزا') || pmLower.includes('بطاقة')) paymentMethodLabel = 'بطاقة / فيزا';
-        else if (pmLower.includes('instapay') || pmLower.includes('إنستاباي') || pmLower.includes('محفظة')) paymentMethodLabel = 'إنستاباي / محفظة';
-        else if (pmLower === 'installment' || pmLower.includes('تقسيط') || pmLower.includes('آجل') || pmLower.includes('debt')) paymentMethodLabel = 'آجل / تقسيط';
-
-        return {
-          id: s.id,
-          invoiceNumber: s.invoiceNumber || s.id?.slice(0, 8),
-          date: rawDate,
-          createdAt: rawDate,
-          subtotal,
-          total: subtotal,
-          discount,
-          finalTotal,
-          paidAmount,
-          remainingAmount,
-          profit: verifiedProfit,
-          paymentMethod: paymentMethodLabel,
-          safeId: s.safeId,
-          safeName: safe?.name || s.safeName || 'الخزينة الرئيسية',
-          cashierName: cashier?.name || s.cashierName || 'كاشير المحل',
-          customerName: customer?.name || s.customerName || (s.customerId ? 'عميل مسجل' : 'عميل نقدي'),
-          customerPhone: customer?.phone || s.customerPhone || '',
-          customerId: s.customerId,
-          items,
-          notes: s.notes,
-          branchId: branch.id,
-          branchName: branch.name,
-          branchColor: branch.color,
-        };
-      });
+      // 6. Normalize Sales Records
+      const normalizedSales: SaleRecord[] = (rawStores.sales || [])
+        .map((sale: any) => adaptSale(sale, {
+          inventory: inventoryMap,
+          imei: imeiMap,
+          customers: customersMap,
+          users: usersMap,
+          safes: safesMap,
+        }, branchLike))
+        .filter((sale: SaleRecord) => Boolean(sale.id));
 
       // Sort sales descending by date
       normalizedSales.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-      // 6. Normalize Inventory Items
-      const normalizedInventory: InventoryItem[] = (rawStores.inventory || []).map((it: any) => {
-        const cat = it.categoryId ? categoriesMap.get(it.categoryId) : null;
-        return {
-          id: it.id,
-          name: it.name || 'منتج غير مسمى',
-          category: cat?.name || it.category || '',
-          quantity: Number(it.quantity) || 0,
-          minQuantity: Number(it.minQuantity) || 2,
-          costPrice: Number(it.costPrice) || 0,
-          sellPrice: Number(it.sellPrice) || 0,
-          barcode: it.barcode || it.code || '',
-          hasImei: Boolean(it.hasIMEI ?? it.hasImei),
-          branchId: branch.id,
-          branchName: branch.name,
-        };
-      });
+      // 7. Normalize Inventory Items
+      const normalizedInventory: InventoryItem[] = (rawStores.inventory || [])
+        .map((item: any) => adaptInventoryItem(
+          item,
+          branchLike,
+          categoriesMap,
+          availableImeiCounts.get(String(item.id)) || 0
+        ))
+        .filter((item: InventoryItem) => Boolean(item.id));
 
-      // 7. Normalize Safes
-      const normalizedSafes: Safe[] = (rawStores.safes || []).map((s: any) => {
-        let typeVal: 'cash' | 'bank' | 'wallet' | 'card' = 'cash';
-        if (s.type === 'ewallet' || s.type === 'wallet') typeVal = 'wallet';
-        else if (s.type === 'bank') typeVal = 'bank';
-        else if (s.type === 'card') typeVal = 'card';
+      // 8. Normalize Safes
+      const normalizedSafes: Safe[] = (rawStores.safes || [])
+        .map((safe: any) => adaptSafe(safe, branchLike))
+        .filter((safe: Safe) => Boolean(safe.id));
 
-        return {
-          id: s.id,
-          name: s.name || 'خزينة',
-          type: typeVal,
-          balance: Number(s.balance) || 0,
-          isDefault: Boolean(s.isDefault),
-          branchId: branch.id,
-          branchName: branch.name,
-        };
-      });
-
-      // 8. Normalize Transactions
-      const normalizedTransactions: Transaction[] = (rawStores.transactions || []).map((t: any) => {
-        const safe = t.safeId ? safesMap.get(t.safeId) : null;
-        const user = t.userId ? usersMap.get(t.userId) : null;
-        const rawDate = t.createdAt || t.date || new Date().toISOString();
-
-        return {
-          id: t.id,
-          date: rawDate,
-          type: t.type || 'expense',
-          amount: Number(t.amount) || 0,
-          safeId: t.safeId,
-          safeName: safe?.name || t.safeName || '',
-          description: t.description || 'حركة نقدية',
-          category: t.category || '',
-          userName: user?.name || t.userName || '',
-          branchId: branch.id,
-          branchName: branch.name,
-          branchColor: branch.color,
-        };
-      });
+      // 9. Normalize Transactions
+      const normalizedTransactions: Transaction[] = (rawStores.transactions || [])
+        .map((tx: any) => adaptTransaction(tx, branchLike, { safes: safesMap, users: usersMap }))
+        .filter((tx: Transaction) => Boolean(tx.id));
 
       // Sort transactions descending by date
       normalizedTransactions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-      // 9. Normalize Maintenance Orders
-      const normalizedMaintenance: MaintenanceOrder[] = (rawStores.maintenance || []).map((m: any) => {
-        let statusVal: 'received' | 'inspecting' | 'repairing' | 'ready' | 'completed' | 'delivered' | 'cancelled' = 'received';
-        if (m.status === 'completed' || m.status === 'ready') statusVal = 'ready';
-        else if (m.status === 'in_progress' || m.status === 'repairing') statusVal = 'repairing';
-        else if (m.status === 'delivered') statusVal = 'delivered';
-        else if (m.status === 'cancelled') statusVal = 'cancelled';
-        else if (m.status === 'inspecting') statusVal = 'inspecting';
+      // 10. Normalize Maintenance Orders
+      const normalizedMaintenance: MaintenanceOrder[] = (rawStores.maintenance || [])
+        .map((order: any) => adaptMaintenance(order, branchLike))
+        .filter((order: MaintenanceOrder) => Boolean(order.id));
 
-        const rawDate = m.receivedAt || m.receivedDate || m.createdAt || new Date().toISOString();
-        const partsCost = Array.isArray(m.parts)
-          ? m.parts.reduce((sum: number, p: any) => sum + (Number(p.total) || 0), 0)
-          : 0;
-
-        return {
-          id: m.id,
-          ticketNumber: m.ticketNumber || m.id?.slice(0, 6),
-          customerName: m.customerName || 'عميل صيانة',
-          customerPhone: m.customerPhone || '',
-          deviceType: m.deviceType || m.deviceModel || 'جهاز صيانة',
-          deviceModel: m.deviceModel || m.deviceType || 'جهاز صيانة',
-          problem: m.problem || m.diagnosis || 'فحص وإصلاح',
-          diagnosis: m.diagnosis || m.problem || 'فحص وإصلاح',
-          status: statusVal,
-          costPrice: Number(m.costPrice ?? partsCost ?? 0),
-          expectedPrice: Number(m.estimatedCost ?? m.expectedPrice ?? 0),
-          finalPrice: Number(m.finalCost ?? m.finalPrice ?? m.collectedAmount ?? m.estimatedCost ?? 0),
-          collectedAmount: Number(m.collectedAmount ?? m.finalCost ?? m.finalPrice ?? 0),
-          profit: Number(m.profit ?? 0),
-          receivedDate: rawDate,
-          receivedAt: rawDate,
-          deliveryDate: m.deliveredAt || m.deliveryDate,
-          deliveredAt: m.deliveredAt || m.deliveryDate,
-          safeId: m.safeId || '',
-          branchId: branch.id,
-          branchName: branch.name,
-        };
-      });
-
-      // 10. Normalize Customers
-      const normalizedCustomers: Customer[] = (rawStores.customers || []).map((c: any) => ({
-        id: c.id,
-        name: c.name || 'عميل',
-        phone: c.phone || '',
-        balance: Number(c.balance) || 0,
-        branchId: branch.id,
-        branchName: branch.name,
-      }));
+      // 11. Normalize Customers
+      const normalizedCustomers: Customer[] = (rawStores.customers || [])
+        .map((customer: any) => adaptCustomer(customer, branchLike))
+        .filter((customer: Customer) => Boolean(customer.id));
 
       // 11. Calculate Real KPIs (Separating Sales, Maintenance, Revenue, Profit, Liquidity & Stock)
       const now = new Date();
@@ -851,6 +767,8 @@ class MultiBranchManager {
         inventoryList: normalizedInventory,
         maintenanceList: normalizedMaintenance,
         customersList: normalizedCustomers,
+        imeiUnitsList: normalizedImeiUnits,
+        pendingOutboxCount: getOutboxCount(branch.id),
         lastSyncedAt: new Date().toISOString(),
       };
     })(),
@@ -859,6 +777,7 @@ class MultiBranchManager {
   );
 
       this.metricsCache.set(branch.id, { metrics, timestamp: Date.now() });
+      this.persistMetricsCache(branch, metrics);
       this.updateBranch(branch.id, {
         status: 'connected',
         lastSyncAt: metrics.lastSyncedAt,
@@ -872,10 +791,15 @@ class MultiBranchManager {
         status: 'error',
         errorMessage: errMsg,
       });
-      // Return cached metrics if available, or clean empty metrics (NEVER fake mock data)
+      // الرجوع لكاش الذاكرة ثم الكاش المحفوظ (عشان البيع يشتغل أوفلاين)
       const cached = this.metricsCache.get(branch.id);
       if (cached) {
         return cached.metrics;
+      }
+      const offline = this.loadMetricsCache(branch);
+      if (offline) {
+        this.metricsCache.set(branch.id, { metrics: offline, timestamp: Date.now() });
+        return offline;
       }
       return this.getEmptyMetrics(branch.id, branch.name, branch.color);
     }
@@ -949,6 +873,8 @@ class MultiBranchManager {
       inventoryList: perBranch.flatMap(m => m.inventoryList),
       maintenanceList: perBranch.flatMap(m => m.maintenanceList),
       customersList: perBranch.flatMap(m => m.customersList),
+      imeiUnitsList: perBranch.flatMap(m => m.imeiUnitsList),
+      pendingOutboxCount: perBranch.reduce((acc, m) => acc + (m.pendingOutboxCount || 0), 0),
       lastSyncedAt: new Date().toISOString(),
     };
 
@@ -1003,17 +929,29 @@ class MultiBranchManager {
       inventoryList: [],
       maintenanceList: [],
       customersList: [],
+      imeiUnitsList: [],
+      pendingOutboxCount: 0,
       lastSyncedAt: undefined,
     };
   }
 
   /**
-   * البحث الفوري عن الصنف بالباركود أو رقم IMEI من الذاكرة ومن سحابة Supabase مباشرة
+   * البحث الفوري عن الصنف بالباركود أو رقم IMEI من الذاكرة ومن سحابة Supabase مباشرة.
+   *
+   * 🔴 FIX: كانت الدالة تقرأ عمود `store_name` والمخزن `imei_units`، وده مش
+   * موجود في قاعدة البيانات (العمود `store` والمخزن `imeiUnits`) — فكان البحث
+   * السحابي بيرجع فاضي دايماً. كمان بترجّع `imeiUnitId` عشان البيع يعلّم
+   * الوحدة مباعة بدل ما يفضل الجهاز "متاح" في الديسكتوب.
    */
   public async searchInventoryByBarcodeOrImei(
     branchId: string,
     scannedCode: string
-  ): Promise<{ item: InventoryItem; matchedType: 'barcode' | 'imei'; imei?: string } | null> {
+  ): Promise<{
+    item: InventoryItem;
+    matchedType: 'barcode' | 'imei';
+    imei?: string;
+    imeiUnitId?: string;
+  } | null> {
     const clean = scannedCode.trim();
     if (!clean) return null;
     const lower = clean.toLowerCase();
@@ -1021,13 +959,59 @@ class MultiBranchManager {
     const branch = this.getBranches().find(b => b.id === branchId) || this.getBranches()[0];
     const metrics = branch ? this.metricsCache.get(branch.id)?.metrics : null;
 
+    const buildItem = (raw: any, branchRef: BranchConfig, parent?: any): InventoryItem => {
+      const source = parent || raw;
+      const hasImei = Boolean(source.hasIMEI ?? source.hasImei ?? Boolean(parent));
+      return {
+        id: String(source.id),
+        name: source.name || 'منتج غير مسمى',
+        category: source.category || (hasImei ? 'موبايلات' : ''),
+        categoryId: source.categoryId || undefined,
+        quantity: Number(source.quantity) || 0,
+        minQuantity: Number(source.minQuantity) || 2,
+        costPrice: Number(raw.costPrice ?? raw.purchasePrice ?? source.costPrice) || 0,
+        sellPrice: Number(raw.sellPrice ?? raw.sellingPrice ?? source.sellPrice) || 0,
+        code: source.code || undefined,
+        barcode: source.barcode || source.code || '',
+        hasImei,
+        hasIMEI: hasImei,
+        createdAt: source.createdAt || undefined,
+        branchId: branchRef.id,
+        branchName: branchRef.name,
+      };
+    };
+
     // 1. البحث في قائمة الأصناف المحلية بالذاكرة
     if (metrics?.inventoryList) {
       const foundDirect = metrics.inventoryList.find(
-        (it: InventoryItem) => (it.barcode || '').trim().toLowerCase() === lower || (it.id && it.id.toLowerCase() === lower)
+        (it: InventoryItem) =>
+          (it.barcode || '').trim().toLowerCase() === lower ||
+          (it.code || '').trim().toLowerCase() === lower ||
+          (it.id && it.id.toLowerCase() === lower)
       );
       if (foundDirect) {
         return { item: foundDirect, matchedType: 'barcode' };
+      }
+
+      // مطابقة IMEI من القائمة المحلية (لو الأجهزة محمّلة بالفعل)
+      const localUnit = (metrics.imeiUnitsList || []).find(unit => {
+        const m1 = String(unit.imei1 || unit.imei || '').trim().toLowerCase();
+        const m2 = String(unit.imei2 || '').trim().toLowerCase();
+        const sn = String(unit.serialNumber || '').trim().toLowerCase();
+        return m1 === lower || m2 === lower || sn === lower;
+      });
+      if (localUnit) {
+        const parent =
+          metrics.inventoryList.find(i => i.id === (localUnit.inventoryId || localUnit.productId)) ||
+          metrics.inventoryList.find(i => i.name === localUnit.productName);
+        if (parent) {
+          return {
+            item: parent,
+            matchedType: 'imei',
+            imei: localUnit.imei1 || localUnit.imei || clean,
+            imeiUnitId: localUnit.id,
+          };
+        }
       }
     }
 
@@ -1036,159 +1020,133 @@ class MultiBranchManager {
       const client = this.getClient(branch);
       const tenantId = branch.tenantId ? branch.tenantId.trim() : '';
       if (client) {
+        const cacheItem = (item: InventoryItem) => {
+          if (metrics && !metrics.inventoryList.some((i: InventoryItem) => i.id === item.id)) {
+            metrics.inventoryList.push(item);
+          }
+        };
+
         try {
           // أ) البحث في mobpos_records عن الصنف بالباركود
           let invQuery = client
             .from('mobpos_records')
             .select('data')
             .eq('store', 'inventory')
-            .limit(100);
+            .is('deleted_at', null)
+            .limit(200);
           if (tenantId) invQuery = invQuery.eq('tenant_id', tenantId);
 
           const { data: recData } = await invQuery;
           if (Array.isArray(recData)) {
             for (const r of recData) {
-              const d = r.data || {};
+              const d = r?.data || {};
               const bcode = String(d.barcode || d.code || '').trim().toLowerCase();
               if (bcode === lower || String(d.id || '').toLowerCase() === lower) {
-                const item: InventoryItem = {
-                  id: d.id,
-                  name: d.name || 'منتج غير مسمى',
-                  category: d.category || '',
-                  quantity: Number(d.quantity) || 0,
-                  minQuantity: Number(d.minQuantity) || 2,
-                  costPrice: Number(d.costPrice) || 0,
-                  sellPrice: Number(d.sellPrice) || 0,
-                  barcode: d.barcode || d.code || clean,
-                  hasImei: Boolean(d.hasIMEI ?? d.hasImei),
-                  branchId: branch.id,
-                  branchName: branch.name,
-                };
-                if (metrics && !metrics.inventoryList.some((i: InventoryItem) => i.id === item.id)) {
-                  metrics.inventoryList.push(item);
-                }
+                const item = buildItem(d, branch);
+                cacheItem(item);
                 return { item, matchedType: 'barcode' };
               }
             }
           }
 
-          // ب) البحث في mobpos_records عن وحدات IMEI
+          // ب) البحث في mobpos_records عن وحدات IMEI (المخزن القانوني imeiUnits)
           let imeiQuery = client
             .from('mobpos_records')
             .select('data')
-            .eq('store', 'imei_units')
-            .limit(150);
+            .eq('store', 'imeiUnits')
+            .is('deleted_at', null)
+            .limit(300);
           if (tenantId) imeiQuery = imeiQuery.eq('tenant_id', tenantId);
 
           const { data: imeiData } = await imeiQuery;
           if (Array.isArray(imeiData)) {
             for (const r of imeiData) {
-              const u = r.data || {};
-              const m1 = String(u.imei1 || '').trim().toLowerCase();
+              const u = r?.data || {};
+              const m1 = String(u.imei1 || u.imei || '').trim().toLowerCase();
               const m2 = String(u.imei2 || '').trim().toLowerCase();
               const sn = String(u.serialNumber || '').trim().toLowerCase();
-              if (m1 === lower || m2 === lower || sn === lower) {
-                const invId = u.inventoryId;
-                let matchedItem = metrics?.inventoryList.find((i: InventoryItem) => i.id === invId);
-                if (!matchedItem && invId) {
-                  let fetchItemQuery = client
-                    .from('mobpos_records')
-                    .select('data')
-                    .eq('store', 'inventory')
-                    .eq('record_id', invId)
-                    .limit(1);
-                  if (tenantId) fetchItemQuery = fetchItemQuery.eq('tenant_id', tenantId);
-                  const { data: singleItem } = await fetchItemQuery;
-                  if (singleItem && singleItem[0]?.data) {
-                    const d = singleItem[0].data;
-                    matchedItem = {
-                      id: d.id,
-                      name: d.name || 'هاتف ذكي',
-                      category: d.category || 'موبايلات',
-                      quantity: Number(d.quantity) || 0,
-                      minQuantity: Number(d.minQuantity) || 2,
-                      costPrice: Number(u.costPrice ?? d.costPrice ?? 0),
-                      sellPrice: Number(u.sellingPrice ?? d.sellPrice ?? 0),
-                      barcode: d.barcode || clean,
-                      hasImei: true,
-                      branchId: branch.id,
-                      branchName: branch.name,
-                    };
-                    if (metrics) metrics.inventoryList.push(matchedItem);
-                  }
-                }
-                if (matchedItem) {
-                  return { item: matchedItem, matchedType: 'imei', imei: u.imei1 || clean };
+              if (m1 !== lower && m2 !== lower && sn !== lower) continue;
+
+              const invId = u.inventoryId || u.productId;
+              let matchedItem = metrics?.inventoryList.find((i: InventoryItem) => i.id === invId);
+              if (!matchedItem && invId) {
+                let fetchItemQuery = client
+                  .from('mobpos_records')
+                  .select('data')
+                  .eq('store', 'inventory')
+                  .eq('record_id', invId)
+                  .is('deleted_at', null)
+                  .limit(1);
+                if (tenantId) fetchItemQuery = fetchItemQuery.eq('tenant_id', tenantId);
+                const { data: singleItem } = await fetchItemQuery;
+                if (singleItem && singleItem[0]?.data) {
+                  matchedItem = buildItem(singleItem[0].data, branch);
+                  cacheItem(matchedItem);
                 }
               }
+              if (matchedItem) {
+                return {
+                  item: matchedItem,
+                  matchedType: 'imei',
+                  imei: u.imei1 || u.imei || clean,
+                  imeiUnitId: String(u.id),
+                };
+              }
+              // لو المنتج الأب مش موجود، نرجّع بيانات الوحدة نفسها كصنف
+              const fallbackItem = buildItem(u, branch);
+              cacheItem(fallbackItem);
+              return {
+                item: fallbackItem,
+                matchedType: 'imei',
+                imei: u.imei1 || u.imei || clean,
+                imeiUnitId: String(u.id),
+              };
             }
           }
 
-          // ج) البحث في لقطة mobpos_stores الشاملة
+          // ج) البحث في لقطة mobpos_stores الشاملة (العمود store وليس store_name)
           let storeQuery = client
             .from('mobpos_stores')
-            .select('store_name, data')
-            .in('store_name', ['inventory', 'imei_units']);
+            .select('store, data')
+            .in('store', ['inventory', 'imeiUnits']);
           if (tenantId) storeQuery = storeQuery.eq('tenant_id', tenantId);
 
           const { data: storesData } = await storeQuery;
           if (Array.isArray(storesData)) {
-            const invStore = storesData.find(s => s.store_name === 'inventory')?.data;
-            const imeiStore = storesData.find(s => s.store_name === 'imei_units')?.data;
+            const invStore = storesData.find(s => s.store === 'inventory')?.data;
+            const imeiStore = storesData.find(s => s.store === 'imeiUnits')?.data;
+            const invList: any[] = Array.isArray(invStore) ? invStore : [];
+            const imeiList: any[] = Array.isArray(imeiStore) ? imeiStore : [];
 
-            if (Array.isArray(invStore)) {
-              const foundInStore = invStore.find(
-                (d: any) => String(d.barcode || d.code || '').trim().toLowerCase() === lower
-              );
-              if (foundInStore) {
-                const item: InventoryItem = {
-                  id: foundInStore.id,
-                  name: foundInStore.name || 'منتج',
-                  category: foundInStore.category || '',
-                  quantity: Number(foundInStore.quantity) || 0,
-                  minQuantity: Number(foundInStore.minQuantity) || 2,
-                  costPrice: Number(foundInStore.costPrice) || 0,
-                  sellPrice: Number(foundInStore.sellPrice) || 0,
-                  barcode: foundInStore.barcode || clean,
-                  hasImei: Boolean(foundInStore.hasIMEI ?? foundInStore.hasImei),
-                  branchId: branch.id,
-                  branchName: branch.name,
-                };
-                if (metrics && !metrics.inventoryList.some((i: InventoryItem) => i.id === item.id)) {
-                  metrics.inventoryList.push(item);
-                }
-                return { item, matchedType: 'barcode' };
-              }
+            const foundInStore = invList.find(
+              (d: any) =>
+                String(d.barcode || d.code || '').trim().toLowerCase() === lower ||
+                String(d.id || '').toLowerCase() === lower
+            );
+            if (foundInStore) {
+              const item = buildItem(foundInStore, branch);
+              cacheItem(item);
+              return { item, matchedType: 'barcode' };
             }
 
-            if (Array.isArray(imeiStore)) {
-              const foundUnit = imeiStore.find(
-                (u: any) =>
-                  String(u.imei1 || '').trim().toLowerCase() === lower ||
-                  String(u.imei2 || '').trim().toLowerCase() === lower
+            const foundUnit = imeiList.find((u: any) => {
+              const m1 = String(u.imei1 || u.imei || '').trim().toLowerCase();
+              const m2 = String(u.imei2 || '').trim().toLowerCase();
+              const sn = String(u.serialNumber || '').trim().toLowerCase();
+              return m1 === lower || m2 === lower || sn === lower;
+            });
+            if (foundUnit) {
+              const parentItem = invList.find(
+                (i: any) => String(i.id) === String(foundUnit.inventoryId || foundUnit.productId)
               );
-              if (foundUnit && Array.isArray(invStore)) {
-                const parentItem = invStore.find((i: any) => i.id === foundUnit.inventoryId);
-                if (parentItem) {
-                  const item: InventoryItem = {
-                    id: parentItem.id,
-                    name: parentItem.name || 'هاتف ذكي',
-                    category: parentItem.category || 'موبايلات',
-                    quantity: Number(parentItem.quantity) || 0,
-                    minQuantity: Number(parentItem.minQuantity) || 2,
-                    costPrice: Number(foundUnit.costPrice ?? parentItem.costPrice ?? 0),
-                    sellPrice: Number(foundUnit.sellingPrice ?? parentItem.sellPrice ?? 0),
-                    barcode: parentItem.barcode || clean,
-                    hasImei: true,
-                    branchId: branch.id,
-                    branchName: branch.name,
-                  };
-                  if (metrics && !metrics.inventoryList.some((i: InventoryItem) => i.id === item.id)) {
-                    metrics.inventoryList.push(item);
-                  }
-                  return { item, matchedType: 'imei', imei: foundUnit.imei1 || clean };
-                }
-              }
+              const item = buildItem(foundUnit, branch, parentItem);
+              cacheItem(item);
+              return {
+                item,
+                matchedType: 'imei',
+                imei: foundUnit.imei1 || foundUnit.imei || clean,
+                imeiUnitId: String(foundUnit.id),
+              };
             }
           }
         } catch (searchErr) {
@@ -1206,20 +1164,31 @@ class MultiBranchManager {
    */
   public async pushRecordsToBranch(
     branch: BranchConfig,
-    records: Array<{ store: string; recordId: string; data: any; isDelete?: boolean }>
+    records: Array<{ store: string; recordId: string; data: any; isDelete?: boolean; version?: number }>,
+    options?: { skipOutbox?: boolean }
   ): Promise<{ success: boolean; error?: string }> {
+    const queueForRetry = (error: string) => {
+      if (options?.skipOutbox) return;
+      try {
+        enqueueOutbox(branch.id, records, error);
+      } catch (queueErr) {
+        console.warn('[MultiBranch] Could not persist outbox:', queueErr);
+      }
+    };
+
     const client = this.getClient(branch);
     if (!client) {
-      return { success: false, error: 'الفرع غير مهيأ بالربط السحابي (Supabase)' };
+      const error = 'الفرع غير مهيأ بالربط السحابي (Supabase)';
+      queueForRetry(error);
+      return { success: false, error };
     }
 
     const tenantId = branch.tenantId ? branch.tenantId.trim() : '';
     if (!tenantId) {
       console.error(`[MultiBranch] Cannot push to ${branch.name}: missing Tenant ID`);
-      return {
-        success: false,
-        error: 'يرجى تحديد معرف المتجر (Tenant ID) من إعدادات الفرع قبل إرسال البيانات للسحابة',
-      };
+      const error = 'يرجى تحديد معرف المتجر (Tenant ID) من إعدادات الفرع قبل إرسال البيانات للسحابة';
+      // مش بنحطها في الـoutbox لأنها مش هتنجح غير بعد تعديل الإعدادات
+      return { success: false, error };
     }
     const nowIso = new Date().toISOString();
     const clientId = getDeviceClientId();
@@ -1229,8 +1198,8 @@ class MultiBranchManager {
       store: r.store,
       record_id: r.recordId,
       data: r.isDelete ? {} : (r.data || {}),
-      // 🔴 FIX: ترقية الإصدار بدل تثبيت version:1 دائماً حتى تُوثَّق التعارضات
-      version: (Number((r as { version?: number }).version) || 0) + 1,
+      // ترقية الإصدار بدل تثبيت version:1 دائماً حتى تُوثَّق التعارضات
+      version: (Number(r.version) || 0) + 1,
       client_id: clientId,
       updated_at: nowIso,
       deleted_at: r.isDelete ? nowIso : null,
@@ -1243,6 +1212,7 @@ class MultiBranchManager {
 
       if (error) {
         console.error(`[MultiBranch] Failed to push records to ${branch.name}:`, error);
+        queueForRetry(error.message);
         return { success: false, error: error.message };
       }
 
@@ -1252,8 +1222,22 @@ class MultiBranchManager {
       return { success: true };
     } catch (e: any) {
       console.error(`[MultiBranch] Exception pushing records to ${branch.name}:`, e);
-      return { success: false, error: e?.message || 'خطأ أثناء إرسال البيانات للسحابة' };
+      const error = e?.message || 'خطأ أثناء إرسال البيانات للسحابة';
+      queueForRetry(error);
+      return { success: false, error };
     }
+  }
+
+  /**
+   * يعيد إرسال كل السجلات المعلّقة لفرع معيّن.
+   * بيُستدعى قبل قراءة البيانات وفي أي retry دوري.
+   */
+  public async flushPendingRecords(
+    branch: BranchConfig
+  ): Promise<{ sent: number; error?: string }> {
+    return flushOutbox(branch.id, records =>
+      this.pushRecordsToBranch(branch, records as any, { skipOutbox: true })
+    );
   }
 
   /**
@@ -1327,7 +1311,11 @@ class MultiBranchManager {
    * 1. Records sale invoice in `mobpos_records` (`sales`)
    * 2. Updates safe balance and logs cash transaction (`safes`, `transactions`)
    * 3. Deducts sold quantities from inventory (`inventory`)
-   * 4. Updates customer debt balance if applicable (`customers`)
+   * 4. Marks sold IMEI units and links them to the invoice (`imeiUnits`)
+   * 5. Creates/updates the customer and his debt (`customers`)
+   *
+   * كل سجل بيتطبّع بـ`normalizeRecord` قبل الإرسال عشان يطابق سكيما الديسكتوب
+   * حتى لو الواجهة بعتت حقول بأسماء مختلفة.
    */
   public async submitSale(
     branch: BranchConfig,
@@ -1338,7 +1326,6 @@ class MultiBranchManager {
       customer?: Customer;
     }
   ): Promise<{ success: boolean; error?: string }> {
-    const recordsToPush: Array<{ store: string; recordId: string; data: any }> = [];
     const tenantId = branch.tenantId ? branch.tenantId.trim() : '';
     if (!tenantId) {
       return {
@@ -1347,25 +1334,45 @@ class MultiBranchManager {
       };
     }
 
+    const nowIso = new Date().toISOString();
+    const branchCtx = { branchId: branch.id, branchName: branch.name, now: nowIso };
+
     // ── Read-Modify-Write: جلب الحالة الحالية من السحابة قبل الحساب ──
     const safeId = options?.safe?.id;
     const customerId = options?.customer?.id;
     const deductionIds = (options?.deductions || []).map(d => d.item.id).filter(Boolean);
-    const freshIds = [...new Set([...(safeId ? [safeId] : []), ...(customerId ? [customerId] : []), ...deductionIds])];
+    const imeiUnitIds = sale.items
+      .map(item => item.imeiUnitId)
+      .filter((id): id is string => Boolean(id));
 
     const freshSafes = safeId ? await this.fetchFreshRecords(branch, 'safes', [safeId]) : new Map();
     const freshCustomers = customerId ? await this.fetchFreshRecords(branch, 'customers', [customerId]) : new Map();
-    const freshInventory = deductionIds.length > 0 ? await this.fetchFreshRecords(branch, 'inventory', deductionIds) : new Map();
+    const freshInventory = deductionIds.length > 0
+      ? await this.fetchFreshRecords(branch, 'inventory', deductionIds)
+      : new Map();
+    const freshImei = imeiUnitIds.length > 0
+      ? await this.fetchFreshRecords(branch, 'imeiUnits', imeiUnitIds)
+      : new Map();
 
     // 1. Sale invoice — متوافقة 100% مع واجهة ديسكتوب ومحرك المزامنة
     let desktopPaymentMethod: 'cash' | 'card' | 'installment' = 'cash';
     const pmLower = String(sale.paymentMethod || '').toLowerCase();
-    if (pmLower.includes('card') || pmLower.includes('فيزا') || pmLower.includes('بطاقة') || pmLower.includes('instapay') || pmLower.includes('إنستاباي') || pmLower.includes('محفظة')) {
+    if (
+      pmLower.includes('card') ||
+      pmLower.includes('فيزا') ||
+      pmLower.includes('بطاقة') ||
+      pmLower.includes('instapay') ||
+      pmLower.includes('إنستاباي') ||
+      pmLower.includes('محفظة')
+    ) {
       desktopPaymentMethod = 'card';
-    } else if (pmLower.includes('installment') || pmLower.includes('آجل') || pmLower.includes('تقسيط') || pmLower.includes('debt')) {
+    } else if (
+      pmLower.includes('installment') ||
+      pmLower.includes('آجل') ||
+      pmLower.includes('تقسيط') ||
+      pmLower.includes('debt')
+    ) {
       desktopPaymentMethod = 'installment';
-    } else {
-      desktopPaymentMethod = 'cash';
     }
 
     const netTotal = Number(sale.finalTotal) || 0;
@@ -1373,17 +1380,22 @@ class MultiBranchManager {
     const grossSubtotal = Number(sale.total) || (netTotal + discountVal);
     const paidVal = Number(sale.paidAmount ?? netTotal);
     const remainingVal = Number(sale.remainingAmount ?? Math.max(0, netTotal - paidVal));
+    const resolvedCustomerId = sale.customerId || options?.customer?.id || '';
+    const resolvedCustomerName =
+      sale.customerName || options?.customer?.name || (resolvedCustomerId ? 'عميل مسجل' : 'عميل نقدي');
+    const resolvedCustomerPhone = sale.customerPhone || options?.customer?.phone || '';
 
     const normalizedSaleItems = sale.items.map((it, idx) => {
       const invId = it.inventoryId || it.id || `item_${idx}`;
       const unitPrice = Number(it.unitPrice ?? it.price ?? 0);
       const costPrice = Number(it.costPrice ?? it.cost ?? 0);
       const qty = Number(it.quantity) || 1;
-      const lineTotal = Number(it.total ?? (unitPrice * qty));
+      const lineTotal = Number(it.total ?? unitPrice * qty);
 
       return {
         id: it.id || `sale_item_${idx}`,
         inventoryId: invId,
+        imeiUnitId: it.imeiUnitId || '',
         name: it.name,
         quantity: qty,
         unitPrice,
@@ -1394,114 +1406,177 @@ class MultiBranchManager {
       };
     });
 
-    const totalCost = normalizedSaleItems.reduce((acc, it) => acc + (it.costPrice * it.quantity), 0);
-    const finalProfit = totalCost > 0 ? Math.max(0, netTotal - totalCost) : (sale.profit && sale.profit < netTotal ? sale.profit : 0);
+    const totalCost = normalizedSaleItems.reduce((acc, it) => acc + it.costPrice * it.quantity, 0);
+    const finalProfit = totalCost > 0
+      ? Math.max(0, netTotal - totalCost)
+      : (sale.profit && sale.profit < netTotal ? sale.profit : 0);
+
+    const recordsToPush: Array<{
+      store: string;
+      recordId: string;
+      data: Record<string, unknown>;
+      version?: number;
+      isDelete?: boolean;
+    }> = [];
 
     recordsToPush.push({
       store: 'sales',
       recordId: sale.id,
-      data: {
-        id: sale.id,
-        invoiceNumber: sale.invoiceNumber,
-        date: sale.date || new Date().toISOString(),
-        createdAt: sale.createdAt || sale.date || new Date().toISOString(),
-        subtotal: grossSubtotal,
-        discount: discountVal,
-        total: netTotal, // 🔴 في الديسكتوب: total هو الصافي بعد الخصم
-        finalTotal: netTotal,
-        paid: paidVal,
-        paidAmount: paidVal,
-        remaining: remainingVal,
-        remainingAmount: remainingVal,
-        profit: finalProfit,
-        paymentMethod: desktopPaymentMethod,
-        safeId: sale.safeId || options?.safe?.id || '',
-        safeName: sale.safeName || options?.safe?.name || 'الخزينة الرئيسية',
-        cashierId: 'mobile_pos',
-        cashierName: sale.cashierName || 'كاشير الموبايل',
-        customerId: sale.customerId || options?.customer?.id || '',
-        customerName: sale.customerName || options?.customer?.name || 'عميل نقدي',
-        customerPhone: sale.customerPhone || options?.customer?.phone || '',
-        items: normalizedSaleItems,
-        notes: sale.notes || `فاتورة مبيعات من تطبيق الموبايل (${branch.name})`,
-        branchId: branch.id,
-        branchName: branch.name,
-      },
+      data: normalizeRecord(
+        'sales',
+        {
+          id: sale.id,
+          invoiceNumber: sale.invoiceNumber,
+          date: sale.date,
+          createdAt: sale.createdAt || sale.date || nowIso,
+          subtotal: grossSubtotal,
+          discount: discountVal,
+          total: netTotal, // في الديسكتوب: total هو الصافي بعد الخصم
+          finalTotal: netTotal,
+          paid: paidVal,
+          paidAmount: paidVal,
+          remaining: remainingVal,
+          remainingAmount: remainingVal,
+          profit: finalProfit,
+          paymentMethod: desktopPaymentMethod,
+          safeId: sale.safeId || safeId || '',
+          safeName: sale.safeName || options?.safe?.name || 'الخزينة الرئيسية',
+          cashierId: 'mobile_pos',
+          cashierName: sale.cashierName || 'كاشير الموبايل',
+          customerId: resolvedCustomerId,
+          customerName: resolvedCustomerName,
+          customerPhone: resolvedCustomerPhone,
+          items: normalizedSaleItems,
+          notes: sale.notes || `فاتورة مبيعات من تطبيق الموبايل (${branch.name})`,
+        },
+        { ...branchCtx, id: sale.id }
+      ),
     });
 
-    // 2. Safe balance and transaction
+    // 2. Safe balance and cash transaction
     const cashCollected = Number(sale.paidAmount ?? sale.finalTotal) || 0;
     if (cashCollected > 0 && options?.safe) {
-      // 🔴 FIX RMW: الرصيد الجديد يُحسب من آخر نسخة سحابية (وليس الكاش المحلي)
+      // الرصيد الجديد يُحسب من آخر نسخة سحابية (وليس الكاش المحلي)
       const freshSafe = freshSafes.get(options.safe.id);
-      const { merged: baseSafe, version: safeVersion } = this.applyFreshData(options.safe as any, freshSafe, ['balance']);
-      const updatedSafe: Safe = {
-        ...baseSafe,
-        balance: (Number(baseSafe.balance) || 0) + cashCollected,
-      };
+      const { merged: baseSafe, version: safeVersion } = this.applyFreshData(
+        options.safe as any,
+        freshSafe,
+        ['balance']
+      );
       recordsToPush.push({
         store: 'safes',
         recordId: options.safe.id,
         version: safeVersion,
-        data: updatedSafe,
-      } as any);
+        data: normalizeRecord(
+          'safes',
+          { ...baseSafe, balance: (Number(baseSafe.balance) || 0) + cashCollected },
+          { ...branchCtx, id: options.safe.id }
+        ),
+      });
 
-      const txId = `tx_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      const txId = `tx_sale_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
       recordsToPush.push({
         store: 'transactions',
         recordId: txId,
-        data: {
-          id: txId,
-          type: 'sale',
-          amount: cashCollected,
-          safeId: options.safe.id,
-          safeName: options.safe.name,
-          description: `مبيعات فاتورة #${sale.invoiceNumber || sale.id.slice(0, 8)}`,
-          date: sale.date || new Date().toISOString(),
-          userName: sale.cashierName || 'كاشير الموبايل',
-          branchId: branch.id,
-          branchName: branch.name,
-        },
+        data: normalizeRecord(
+          'transactions',
+          {
+            id: txId,
+            type: 'sale',
+            amount: cashCollected,
+            safeId: options.safe.id,
+            safeName: options.safe.name,
+            referenceId: sale.id,
+            description: `مبيعات فاتورة #${sale.invoiceNumber || sale.id.slice(0, 8)}`,
+            // 🔴 مهم: الديسكتوب بيفلتر التقارير بـcreatedAt
+            createdAt: sale.createdAt || sale.date || nowIso,
+            date: sale.createdAt || sale.date || nowIso,
+            userName: sale.cashierName || 'كاشير الموبايل',
+          },
+          { ...branchCtx, id: txId }
+        ),
       });
     }
 
     // 3. Inventory deduction
     if (options?.deductions && options.deductions.length > 0) {
       for (const d of options.deductions) {
-        // 🔴 FIX RMW: الخصم من الكمية السحابية الحالية (وليس الكاش القديم) →
-        // لا مزيد بيع زائد عند البيع المتزامن من أكثر من جهاز
+        // الخصم من الكمية السحابية الحالية (وليس الكاش القديم)
         const freshItem = freshInventory.get(d.item.id);
-        const { merged: baseItem, version: itemVersion } = this.applyFreshData(d.item as any, freshItem, ['quantity']);
+        const { merged: baseItem, version: itemVersion } = this.applyFreshData(
+          d.item as any,
+          freshItem,
+          ['quantity']
+        );
         const newQty = Math.max(0, (Number(baseItem.quantity) || 0) - d.quantity);
         recordsToPush.push({
           store: 'inventory',
           recordId: d.item.id,
           version: itemVersion,
-          data: {
-            ...baseItem,
-            quantity: newQty,
-            updatedAt: new Date().toISOString(),
-          },
-        } as any);
+          data: normalizeRecord(
+            'inventory',
+            { ...baseItem, quantity: newQty, updatedAt: nowIso },
+            { ...branchCtx, id: d.item.id }
+          ),
+        });
       }
     }
 
-    // 4. Customer balance update if remaining debt exists
-    const remaining = Number(sale.remainingAmount) || 0;
-    if (remaining > 0 && options?.customer) {
-      // 🔴 FIX RMW: رصيد العميل من النسخة السحابية الأحدث
+    // 4. Mark sold IMEI units (وإلا تفضل "متاحة" في الديسكتوب)
+    if (imeiUnitIds.length > 0) {
+      const localUnits = this.metricsCache.get(branch.id)?.metrics.imeiUnitsList || [];
+      for (const unitId of imeiUnitIds) {
+        const freshUnit = freshImei.get(unitId);
+        const cachedUnit = localUnits.find(unit => unit.id === unitId);
+        const baseUnit = freshUnit?.data || (cachedUnit as unknown as Record<string, unknown> | undefined);
+        if (!baseUnit) continue;
+
+        recordsToPush.push({
+          store: 'imeiUnits',
+          recordId: unitId,
+          version: freshUnit?.version,
+          data: normalizeRecord(
+            'imeiUnits',
+            {
+              ...baseUnit,
+              id: unitId,
+              status: 'sold',
+              saleId: sale.id,
+              customerId: resolvedCustomerId,
+              sellPrice: Number(sale.finalTotal) || Number(baseUnit.sellPrice) || 0,
+              updatedAt: nowIso,
+            },
+            { ...branchCtx, id: unitId }
+          ),
+        });
+      }
+    }
+
+    // 5. Customer & debt
+    if (options?.customer) {
       const freshCustomer = freshCustomers.get(options.customer.id);
-      const { merged: baseCustomer, version: customerVersion } = this.applyFreshData(options.customer as any, freshCustomer, ['balance']);
-      const newCustomerBalance = (Number(baseCustomer.balance) || 0) + remaining;
+      const { merged: baseCustomer, version: customerVersion } = this.applyFreshData(
+        options.customer as any,
+        freshCustomer,
+        ['balance']
+      );
+      const newCustomerBalance =
+        (Number(baseCustomer.balance) || 0) + Math.max(0, remainingVal);
       recordsToPush.push({
         store: 'customers',
         recordId: options.customer.id,
         version: customerVersion,
-        data: {
-          ...baseCustomer,
-          balance: newCustomerBalance,
-        },
-      } as any);
+        data: normalizeRecord(
+          'customers',
+          {
+            ...baseCustomer,
+            name: baseCustomer.name || options.customer.name,
+            phone: baseCustomer.phone || options.customer.phone,
+            balance: newCustomerBalance,
+          },
+          { ...branchCtx, id: options.customer.id }
+        ),
+      });
     }
 
     return await this.pushRecordsToBranch(branch, recordsToPush);
@@ -1533,38 +1608,50 @@ class MultiBranchManager {
       };
     }
 
-    // 🔴 FIX RMW: رصيد الخزنة يُحسب من آخر نسخة سحابية — لا من الكاش المحلي
+    // رصيد الخزنة يُحسب من آخر نسخة سحابية — لا من الكاش المحلي
     const freshSafeMap = await this.fetchFreshRecords(branch, 'safes', [tx.safe.id]);
     const freshSafe = freshSafeMap.get(tx.safe.id);
-    const { merged: baseSafe, version: safeVersion } = this.applyFreshData(tx.safe as any, freshSafe, ['balance']);
+    const { merged: baseSafe, version: safeVersion } = this.applyFreshData(
+      tx.safe as any,
+      freshSafe,
+      ['balance']
+    );
     const newSafeBalance = (Number(baseSafe.balance) || 0) + (isOutflow ? -amountVal : amountVal);
+    const branchCtx = { branchId: branch.id, branchName: branch.name, now: nowIso };
 
+    // 🔴 FIX: `deposit` مش نوع موجود في الديسكتوب — normalizeRecord بيحوله
+    // لـ`capital`، وكمان بيضيف createdAt اللي التقارير بتفلتر بيه.
     const records = [
       {
         store: 'transactions',
         recordId: txId,
-        data: {
-          id: txId,
-          type: tx.type,
-          amount: amountVal,
-          safeId: tx.safe.id,
-          safeName: tx.safe.name,
-          description: tx.description,
-          category: tx.category || (isOutflow ? 'مصروفات عامة' : 'إيداع نقدي'),
-          date: nowIso,
-          userName: tx.userName || 'تطبيق الموبايل',
-          branchId: branch.id,
-          branchName: branch.name,
-        },
+        data: normalizeRecord(
+          'transactions',
+          {
+            id: txId,
+            type: tx.type,
+            amount: amountVal,
+            safeId: tx.safe.id,
+            safeName: tx.safe.name,
+            description: tx.description,
+            category: tx.category || (isOutflow ? 'مصروفات عامة' : 'إيداع نقدي'),
+            createdAt: nowIso,
+            date: nowIso,
+            userId: 'mobile_pos',
+            userName: tx.userName || 'تطبيق الموبايل',
+          },
+          { ...branchCtx, id: txId }
+        ),
       },
       {
         store: 'safes',
         recordId: tx.safe.id,
         version: safeVersion,
-        data: {
-          ...baseSafe,
-          balance: newSafeBalance,
-        },
+        data: normalizeRecord(
+          'safes',
+          { ...baseSafe, balance: newSafeBalance },
+          { ...branchCtx, id: tx.safe.id }
+        ),
       },
     ];
 
@@ -1583,6 +1670,7 @@ class MultiBranchManager {
     const finalAmount = Number(order.finalPrice || order.expectedPrice || 0);
     const costPrice = Number(order.costPrice || 0);
     const profit = Math.max(0, finalAmount - costPrice);
+    const branchCtx = { branchId: branch.id, branchName: branch.name, now: nowIso };
 
     // Map status for desktop compatibility (desktop uses: received, in_progress, completed, delivered, cancelled)
     let desktopStatus: 'received' | 'in_progress' | 'completed' | 'delivered' | 'cancelled' = 'received';
@@ -1590,7 +1678,6 @@ class MultiBranchManager {
     else if (order.status === 'ready' || order.status === 'completed') desktopStatus = 'completed';
     else if (order.status === 'repairing' || order.status === 'inspecting') desktopStatus = 'in_progress';
     else if (order.status === 'cancelled') desktopStatus = 'cancelled';
-    else desktopStatus = 'received';
 
     let safeToUse = safeForDeposit;
     if (!safeToUse && order.status === 'delivered' && order.safeId) {
@@ -1612,28 +1699,36 @@ class MultiBranchManager {
       }
     }
 
-    const maintenanceData = {
-      ...order,
-      deviceType: order.deviceType || order.deviceModel || 'جهاز صيانة',
-      deviceModel: order.deviceModel || order.deviceType || 'جهاز صيانة',
-      problem: order.problem || 'صيانة عامة',
-      diagnosis: order.diagnosis || order.problem || 'فحص وإصلاح',
-      status: desktopStatus,
-      estimatedCost: Number(order.expectedPrice || order.finalPrice || 0),
-      finalCost: finalAmount,
-      collectedAmount: order.status === 'delivered' ? finalAmount : 0,
-      costPrice,
-      profit: order.status === 'delivered' ? profit : 0,
-      receivedAt: order.receivedDate || order.receivedAt || nowIso,
-      receivedDate: order.receivedDate || order.receivedAt || nowIso,
-      deliveredAt: order.status === 'delivered' ? (order.deliveryDate || order.deliveredAt || nowIso) : '',
-      deliveryDate: order.status === 'delivered' ? (order.deliveryDate || order.deliveredAt || nowIso) : '',
-      safeId: safeToUse ? safeToUse.id : (order.safeId || ''),
-      branchId: branch.id,
-      branchName: branch.name,
-    };
+    const maintenanceData = normalizeRecord(
+      'maintenance',
+      {
+        ...order,
+        deviceType: order.deviceType || order.deviceModel || 'جهاز صيانة',
+        deviceModel: order.deviceModel || order.deviceType || 'جهاز صيانة',
+        problem: order.problem || 'صيانة عامة',
+        diagnosis: order.diagnosis || order.problem || 'فحص وإصلاح',
+        status: desktopStatus,
+        estimatedCost: Number(order.expectedPrice || order.finalPrice || 0),
+        finalCost: finalAmount,
+        collectedAmount: order.status === 'delivered' ? finalAmount : 0,
+        costPrice,
+        profit: order.status === 'delivered' ? profit : 0,
+        receivedAt: order.receivedDate || order.receivedAt || nowIso,
+        receivedDate: order.receivedDate || order.receivedAt || nowIso,
+        deliveredAt: order.status === 'delivered' ? (order.deliveryDate || order.deliveredAt || nowIso) : '',
+        deliveryDate: order.status === 'delivered' ? (order.deliveryDate || order.deliveredAt || nowIso) : '',
+        safeId: safeToUse ? safeToUse.id : (order.safeId || ''),
+        createdAt: (order as any).createdAt || nowIso,
+      },
+      { ...branchCtx, id: order.id }
+    );
 
-    const records: Array<{ store: string; recordId: string; data: any; version?: number }> = [
+    const records: Array<{
+      store: string;
+      recordId: string;
+      data: Record<string, unknown>;
+      version?: number;
+    }> = [
       {
         store: 'maintenance',
         recordId: order.id,
@@ -1643,10 +1738,13 @@ class MultiBranchManager {
 
     // If order was delivered and finalPrice was collected into a safe:
     if (order.status === 'delivered' && finalAmount > 0 && safeToUse) {
-      // 🔴 FIX RMW: رصيد الخزنة من النسخة السحابية الأحدث قبل إضافة إيراد الصيانة
       const freshSafeMap = await this.fetchFreshRecords(branch, 'safes', [safeToUse.id]);
       const freshSafe = freshSafeMap.get(safeToUse.id);
-      const { merged: baseSafe, version: safeVersion } = this.applyFreshData(safeToUse as any, freshSafe, ['balance']);
+      const { merged: baseSafe, version: safeVersion } = this.applyFreshData(
+        safeToUse as any,
+        freshSafe,
+        ['balance']
+      );
 
       const newBal = (Number(baseSafe.balance) || 0) + finalAmount;
       const txId = `tx_maint_${Date.now()}`;
@@ -1656,34 +1754,81 @@ class MultiBranchManager {
           store: 'safes',
           recordId: safeToUse.id,
           version: safeVersion,
-          data: {
-            ...baseSafe,
-            balance: newBal,
-          },
+          data: normalizeRecord(
+            'safes',
+            { ...baseSafe, balance: newBal },
+            { ...branchCtx, id: safeToUse.id }
+          ),
         },
         {
           store: 'transactions',
           recordId: txId,
-          data: {
-            id: txId,
-            type: 'maintenance', // 🔴 FIX: type must be 'maintenance' (NOT 'sale')
-            amount: finalAmount,
-            safeId: safeToUse.id,
-            safeName: safeToUse.name,
-            referenceId: order.id,
-            description: `إيراد تسليم صيانة #${order.ticketNumber || order.id.slice(0, 8)} (${order.deviceModel})`,
-            category: 'صيانة',
-            createdAt: nowIso, // 🔴 FIX: Desktop reports filter strictly by createdAt!
-            date: nowIso,
-            userName: 'تطبيق الموبايل',
-            branchId: branch.id,
-            branchName: branch.name,
-          },
+          data: normalizeRecord(
+            'transactions',
+            {
+              id: txId,
+              type: 'maintenance',
+              amount: finalAmount,
+              safeId: safeToUse.id,
+              safeName: safeToUse.name,
+              referenceId: order.id,
+              description: `إيراد تسليم صيانة #${order.ticketNumber || order.id.slice(0, 8)} (${order.deviceModel})`,
+              category: 'صيانة',
+              createdAt: nowIso, // الديسكتوب بيفلتر التقارير بـcreatedAt
+              date: nowIso,
+              userId: 'mobile_pos',
+              userName: 'تطبيق الموبايل',
+            },
+            { ...branchCtx, id: txId }
+          ),
         }
       );
     }
 
     return await this.pushRecordsToBranch(branch, records);
+  }
+
+  /**
+   * يضمن وجود قسم (Category) للمنتج القادم من الموبايل.
+   * بيرجع `categoryId` الموجود أو المنشأ حديثاً.
+   */
+  private async resolveCategoryForItem(
+    branch: BranchConfig,
+    name: string,
+    hasIMEI: boolean
+  ): Promise<{ categoryId: string; categoryRecord?: { id: string; name: string; type: string } }> {
+    const cleanName = name.trim();
+    if (!cleanName) return { categoryId: '' };
+
+    const client = this.getClient(branch);
+    const tenantId = branch.tenantId ? branch.tenantId.trim() : '';
+    if (!client || !tenantId) return { categoryId: '' };
+
+    try {
+      const { data } = await client
+        .from('mobpos_records')
+        .select('record_id, data')
+        .eq('tenant_id', tenantId)
+        .eq('store', 'categories')
+        .is('deleted_at', null)
+        .limit(500);
+
+      const rows = (data || []) as Array<{ record_id?: string; data?: any }>;
+      const match = rows.find(row => String(row.data?.name || '').trim() === cleanName);
+      if (match) {
+        return { categoryId: match.record_id || match.data?.id || '' };
+      }
+
+      const categoryRecord = {
+        id: `cat_mobile_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        name: cleanName,
+        type: hasIMEI ? 'device' : 'accessory',
+      };
+      return { categoryId: categoryRecord.id, categoryRecord };
+    } catch (err) {
+      console.warn('[MultiBranch] Could not resolve product category:', err);
+      return { categoryId: '' };
+    }
   }
 
   /**
@@ -1693,17 +1838,51 @@ class MultiBranchManager {
     branch: BranchConfig,
     item: InventoryItem
   ): Promise<{ success: boolean; error?: string }> {
-    return await this.pushRecordsToBranch(branch, [
-      {
-        store: 'inventory',
-        recordId: item.id,
-        data: {
-          ...item,
+    const nowIso = new Date().toISOString();
+    const hasIMEI = Boolean(item.hasIMEI ?? item.hasImei);
+    const categoryName = String(item.category || '').trim();
+
+    let categoryId = String(item.categoryId || '').trim();
+    let categoryRecord: { id: string; name: string; type: string } | undefined;
+    if (!categoryId && categoryName) {
+      const resolved = await this.resolveCategoryForItem(branch, categoryName, hasIMEI);
+      categoryId = resolved.categoryId;
+      categoryRecord = resolved.categoryRecord;
+    }
+
+    const records: Array<{ store: string; recordId: string; data: Record<string, unknown> }> = [];
+
+    if (categoryRecord) {
+      records.push({
+        store: 'categories',
+        recordId: categoryRecord.id,
+        data: normalizeRecord('categories', categoryRecord, {
+          id: categoryRecord.id,
           branchId: branch.id,
           branchName: branch.name,
+          now: nowIso,
+        }),
+      });
+    }
+
+    records.push({
+      store: 'inventory',
+      recordId: item.id,
+      data: normalizeRecord(
+        'inventory',
+        {
+          ...item,
+          hasIMEI,
+          categoryId,
+          category: categoryName,
+          createdAt: item.createdAt || nowIso,
+          updatedAt: nowIso,
         },
-      },
-    ]);
+        { id: item.id, branchId: branch.id, branchName: branch.name, now: nowIso }
+      ),
+    });
+
+    return await this.pushRecordsToBranch(branch, records);
   }
 }
 

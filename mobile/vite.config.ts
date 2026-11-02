@@ -15,5 +15,9 @@ export default defineConfig({
   server: {
     port: 5174,
     host: true,
+    fs: {
+      // الطبقة المشتركة بين الموبايل والديسكتوب موجودة خارج مجلد mobile
+      allow: ['..'],
+    },
   },
 })

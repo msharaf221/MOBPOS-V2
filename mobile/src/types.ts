@@ -25,6 +25,8 @@ export interface SaleItem {
   price: number;
   cost?: number;
   inventoryId?: string;
+  /** معرّف وحدة IMEI المبيعة — لازم يوصل للديسكتوب عشان يعلّمها مباعة. */
+  imeiUnitId?: string;
   costPrice?: number;
   unitPrice?: number;
   total?: number;
@@ -107,25 +109,44 @@ export interface Transaction {
 export interface InventoryItem {
   id: string;
   name: string;
+  /** اسم القسم كنص للعرض في الموبايل. */
   category?: string;
+  /** معرّف القسم القانوني للديسكتوب (أهم حاجة لعرض صحيح). */
+  categoryId?: string;
   quantity: number;
   minQuantity?: number;
   costPrice?: number;
   sellPrice: number;
+  /** كود الصنف الداخلي. */
+  code?: string;
   barcode?: string;
   hasImei?: boolean;
+  hasIMEI?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
   branchId?: string;
   branchName?: string;
+  /** عدد وحدات IMEI المتاحة فعلياً للمنتج (الكمية العادية بتكون 0 للموبايلات). */
+  availableImeiCount?: number;
 }
 
 export interface ImeiUnit {
   id: string;
   productId: string;
+  inventoryId?: string;
   productName?: string;
   imei: string;
-  status: 'available' | 'sold' | 'maintenance' | 'returned';
+  imei1?: string;
+  imei2?: string;
+  serialNumber?: string;
+  status: 'available' | 'sold' | 'maintenance' | 'returned' | 'wasted';
+  saleId?: string;
+  customerId?: string;
   costPrice?: number;
   sellPrice?: number;
+  color?: string;
+  storage?: string;
+  createdAt?: string;
   branchId?: string;
   branchName?: string;
 }
@@ -199,6 +220,9 @@ export interface BranchMetrics {
   inventoryList: InventoryItem[];
   maintenanceList: MaintenanceOrder[];
   customersList: Customer[];
+  imeiUnitsList: ImeiUnit[];
+  /** عدد الكتابات المعلّقة محلياً في انتظار إعادة الإرسال للسحابة. */
+  pendingOutboxCount?: number;
   lastSyncedAt?: string;
 }
 

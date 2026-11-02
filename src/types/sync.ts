@@ -29,7 +29,8 @@ export interface MobilePairingPayload {
   userEmail?: string;
   userName?: string;
   userAvatarUrl?: string;
-  refreshToken?: string;
+  /** وقت انتهاء صلاحية رمز الاقتران (Unix ms). */
+  expiresAt?: number;
   timestamp: number;
 }
 

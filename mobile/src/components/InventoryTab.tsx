@@ -31,8 +31,9 @@ export const InventoryTab: React.FC<InventoryTabProps> = ({
 
   const filteredItems = useMemo(() => {
     return inventory.filter(item => {
-      const isLow = (item.quantity || 0) <= (item.minQuantity || 2);
       const hasDeviceImei = Boolean(item.hasImei || (item as any).hasIMEI);
+      const stockQty = hasDeviceImei ? Number(item.availableImeiCount || 0) : Number(item.quantity || 0);
+      const isLow = stockQty <= (item.minQuantity || 2);
       if (filterMode === 'lowStock' && !isLow) return false;
       if (filterMode === 'imei' && !hasDeviceImei) return false;
 
@@ -40,7 +41,7 @@ export const InventoryTab: React.FC<InventoryTabProps> = ({
       const q = searchQuery.toLowerCase();
       const matchName = item.name.toLowerCase().includes(q);
       const matchCat = (item.category || '').toLowerCase().includes(q);
-      const matchBarcode = (item.barcode || '').toLowerCase().includes(q);
+      const matchBarcode = (item.barcode || item.code || '').toLowerCase().includes(q);
       const matchBranch = (item.branchName || '').toLowerCase().includes(q);
       return matchName || matchCat || matchBarcode || matchBranch;
     });
@@ -59,10 +60,12 @@ export const InventoryTab: React.FC<InventoryTabProps> = ({
         });
       }
       const entry = map.get(key)!;
-      entry.totalQty += item.quantity || 0;
+      const hasDeviceImei = Boolean(item.hasImei || (item as any).hasIMEI);
+      const stockQty = hasDeviceImei ? Number(item.availableImeiCount || 0) : Number(item.quantity || 0);
+      entry.totalQty += stockQty;
       entry.branches.push({
         name: item.branchName || 'الفرع',
-        qty: item.quantity || 0,
+        qty: stockQty,
         price: item.sellPrice,
       });
     });
@@ -74,7 +77,8 @@ export const InventoryTab: React.FC<InventoryTabProps> = ({
     let sellVal = 0;
     let totalPieces = 0;
     inventory.forEach(i => {
-      const q = Number(i.quantity) || 0;
+      const hasDeviceImei = Boolean(i.hasImei || (i as any).hasIMEI);
+      const q = hasDeviceImei ? Number(i.availableImeiCount || 0) : Number(i.quantity) || 0;
       costVal += q * (Number(i.costPrice) || 0);
       sellVal += q * (Number(i.sellPrice) || 0);
       totalPieces += q;
@@ -180,9 +184,10 @@ export const InventoryTab: React.FC<InventoryTabProps> = ({
       ) : (
         <div className="space-y-2.5">
           {filteredItems.map(item => {
-            const isLow = (item.quantity || 0) <= (item.minQuantity || 2);
-            const isOut = (item.quantity || 0) <= 0;
             const hasDeviceImei = Boolean(item.hasImei || (item as any).hasIMEI);
+            const stockQty = hasDeviceImei ? Number(item.availableImeiCount || 0) : Number(item.quantity || 0);
+            const isLow = stockQty <= (item.minQuantity || 2);
+            const isOut = stockQty <= 0;
             const groupInfo = groupedByName.get(item.name.trim().toLowerCase());
             const profitPerPiece = (Number(item.sellPrice) || 0) - (Number(item.costPrice) || 0);
 
@@ -235,7 +240,11 @@ export const InventoryTab: React.FC<InventoryTabProps> = ({
                           : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20'
                       }`}
                     >
-                      {isOut ? 'نفدت الكمية!' : `الكمية: ${item.quantity}`}
+                      {isOut
+                        ? (hasDeviceImei ? 'لا توجد أجهزة متاحة' : 'نفدت الكمية!')
+                        : hasDeviceImei
+                        ? `متاح: ${stockQty} جهاز`
+                        : `الكمية: ${stockQty}`}
                     </span>
                     <span className="text-[10px] text-slate-500 block font-mono mt-0.5">
                       حد أدنى: {item.minQuantity || 2}
