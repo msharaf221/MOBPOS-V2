@@ -182,6 +182,7 @@ export interface Transaction {
   type: 'sale' | 'purchase' | 'maintenance' | 'maintenance_cost' | 'expense' | 'income' | 'transfer' | 'return' | 'waste' | 'inventory_adjustment' | 'customer_payment' | 'wallet_deposit' | 'wallet_withdrawal' | 'capital' | 'withdrawal' | 'side_account';
   amount: number;
   description: string;
+  category?: string;
   referenceId: string;
   safeId: string;
   userId: string;

@@ -488,7 +488,7 @@ class SyncEngine {
       this.state.status = 'offline';
     } else if (this.state.errorMessage) {
       this.state.status = 'error';
-    } else if (this.isDraining || this.state.pendingCount > 0) {
+    } else if (this.isDraining || this.isUserTriggeredSync || this.isBackgroundRetrying || this.state.pendingCount > 0) {
       this.state.status = 'syncing';
     } else {
       this.state.status = 'synced';

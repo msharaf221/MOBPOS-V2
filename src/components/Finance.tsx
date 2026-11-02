@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
-import { summarizeReturns, returnsInPeriod } from '../utils/returns';
-import { calculateComprehensivePnl, isOperationalIncome, isOperationalExpense } from '../utils/financialCalculations';
+import { summarizeReturns } from '../utils/returns';
+import { calculateComprehensivePnl, isOperationalIncome } from '../utils/financialCalculations';
 import { formatCurrency, formatNumber, formatDate as formatIntlDate } from '../utils/format';
 import { usePagination } from '../hooks/usePagination';
 import PaginationBar from './PaginationBar';
@@ -293,7 +293,7 @@ export default function Finance({
     const maintRev = periodMaint.reduce((sum, m) => sum + (m.collectedAmount || (m as any).finalPrice || 0), 0);
     
     const otherIncome = periodTransactions
-      .filter(t => isOperationalIncome(t as any) && t.type !== 'maintenance' && !(t.category || '').includes('صيانة'))
+      .filter(t => isOperationalIncome(t as any) && t.type !== 'maintenance' && !((t as any).category || '').includes('صيانة'))
       .reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
 
     return [
