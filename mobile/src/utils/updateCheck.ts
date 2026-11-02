@@ -2,7 +2,8 @@
 //  خدمة فحص وتنزيل تحديثات تطبيق الهاتف (Mobile Update Checker)
 // ============================================================
 
-export const CURRENT_MOBILE_VERSION = '1.0.31';
+declare const __APP_VERSION__: string;
+export const CURRENT_MOBILE_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.0.34';
 
 export interface MobileUpdateResult {
   ok: boolean;

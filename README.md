@@ -36,14 +36,14 @@
 
 ## 📥 روابط التحميل المباشرة (Direct Downloads)
 
-يمكنك دائماً تنزيل أحدث الإصدارات الجاهزة للعمل والإنتاج من صفحة [GitHub Releases v1.0.31](https://github.com/msharaf221/MOBPOS-V2/releases/latest):
+يمكنك دائماً تنزيل أحدث الإصدارات الجاهزة للعمل والإنتاج من صفحة [GitHub Releases (أحدث إصدار)](https://github.com/msharaf221/MOBPOS-V2/releases/latest):
 
 | المنصة | نوع الملف | الوصف | رابط التحميل |
 |---|---|---|:---:|
-| 💻 **ويندوز (سطح المكتب)** | `MOBPOS-Setup-1.0.31.exe` | برنامج التثبيت الرسمي لويندوز مع التحديث التلقائي | [تحميل Setup EXE](https://github.com/msharaf221/MOBPOS-V2/releases/download/v1.0.31/MOBPOS-Setup-1.0.31.exe) |
-| 🧳 **ويندوز (نسخة محمولة)** | `MOBPOS-1.0.31-Portable.exe` | تشغيل فوري من فلاشة USB بدون تثبيت | [تحميل Portable EXE](https://github.com/msharaf221/MOBPOS-V2/releases/download/v1.0.31/MOBPOS-1.0.31-Portable.exe) |
-| 🤖 **أندرويد (تطبيق الكاشير والمدير)** | `mobpos-companion-v1.0.31.apk` | تطبيق أندرويد نيتف سريع وخفيف للأجهزة اللوحية والموبايل مع فحص التحديثات | [تحميل Android APK](https://github.com/msharaf221/MOBPOS-V2/releases/download/v1.0.31/mobpos-companion-v1.0.31.apk) |
-| 🍏 **آيفون / آيباد (iOS)** | `mobpos-companion-ios-v1.0.31.zip` | حزمة Xcode و IPA لتثبيت التطبيق على أجهزة أبل | [تحميل حزمة iOS](https://github.com/msharaf221/MOBPOS-V2/releases/download/v1.0.31/mobpos-companion-ios-v1.0.31.zip) |
+| 💻 **ويندوز (سطح المكتب)** | `MOBPOS-Setup-*.exe` | برنامج التثبيت الرسمي لويندوز مع التحديث التلقائي | [تحميل Setup EXE](https://github.com/msharaf221/MOBPOS-V2/releases/latest) |
+| 🧳 **ويندوز (نسخة محمولة)** | `MOBPOS-Portable-*.exe` | تشغيل فوري من فلاشة USB بدون تثبيت | [تحميل Portable EXE](https://github.com/msharaf221/MOBPOS-V2/releases/latest) |
+| 🤖 **أندرويد (تطبيق الكاشير والمدير)** | `MOBPOS-Companion.apk` | تطبيق أندرويد نيتف سريع وخفيف للأجهزة اللوحية والموبايل مع فحص التحديثات | [تحميل Android APK](https://github.com/msharaf221/MOBPOS-V2/releases/latest/download/MOBPOS-Companion.apk) |
+| 🍏 **آيفون / آيباد (iOS)** | `MOBPOS-Companion.ipa` | حزمة التثبيت المباشرة لأجهزة أبل | [تحميل حزمة iOS](https://github.com/msharaf221/MOBPOS-V2/releases/latest/download/MOBPOS-Companion.ipa) |
 | 🌐 **تطبيق الويب و PWA** | Web Browser / LAN | تشغيل عبر المتصفح المحلي أو شبكة الواي فاي بدون إنترنت | [افتح المتصفح](http://127.0.0.1:8420) |
 
 ---
