@@ -55,7 +55,9 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     ? Math.min(100, Math.round((metrics.todayCashCollected / metrics.todaySalesTotal) * 100))
     : 100;
 
-  const profitMarginPct = metrics.todayTotalRevenue > 0
+  const isLoss = metrics.todayProfitTotal < 0;
+  const hasRevenue = metrics.todayTotalRevenue > 0;
+  const profitMarginPct = hasRevenue
     ? Math.round((metrics.todayProfitTotal / metrics.todayTotalRevenue) * 100)
     : 0;
 
@@ -66,7 +68,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     metrics.recentSales.length === 0;
 
   return (
-    <div className="space-y-4 pb-28 animate-in fade-in duration-300">
+    <div className="space-y-4 pb-32 animate-in fade-in duration-300">
       {/* Top Telemetry Header */}
       <div className="flex items-center justify-between px-1">
         <div className="flex items-center gap-2">
@@ -232,25 +234,46 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
           </p>
         </div>
 
-        {/* Net Profit (Sales Profit + Maintenance Profit) */}
+        {/* Net Profit / Loss Card */}
         <div
-          className="p-4 rounded-3xl glass-panel relative overflow-hidden space-y-1.5 border border-emerald-500/25"
+          className={`p-4 rounded-3xl glass-panel relative overflow-hidden space-y-1.5 border transition-colors ${
+            isLoss ? 'border-rose-500/30' : 'border-emerald-500/25'
+          }`}
           style={{
-            background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(15, 23, 42, 0.9) 100%)',
+            background: isLoss
+              ? 'linear-gradient(135deg, rgba(244, 63, 94, 0.12) 0%, rgba(15, 23, 42, 0.95) 100%)'
+              : 'linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(15, 23, 42, 0.9) 100%)',
           }}
         >
-          <div className="flex items-center justify-between text-xs font-bold text-emerald-300">
-            <span className="flex items-center gap-1.5">
-              <Coins size={15} className="text-emerald-400" />
+          <div className="flex items-center justify-between text-xs font-bold">
+            <span className={`flex items-center gap-1.5 ${isLoss ? 'text-rose-300' : 'text-emerald-300'}`}>
+              <Coins size={15} className={isLoss ? 'text-rose-400' : 'text-emerald-400'} />
               صافي أرباح التشغيل
             </span>
-            <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 font-black font-mono">
-              ~{profitMarginPct}%
-            </span>
+            {isLoss && !hasRevenue ? (
+              <span className="text-[10px] px-2 py-0.5 rounded-md bg-rose-500/20 text-rose-300 border border-rose-500/30 font-black">
+                خسارة تشغيلية
+              </span>
+            ) : (
+              <span
+                className={`text-[10px] px-1.5 py-0.5 rounded-md font-black font-mono ${
+                  isLoss
+                    ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                    : 'bg-emerald-500/20 text-emerald-400'
+                }`}
+              >
+                {profitMarginPct > 0 ? `+${profitMarginPct}%` : `${profitMarginPct}%`}
+              </span>
+            )}
           </div>
 
-          <div className={`text-2xl font-black font-mono tracking-tight ${metrics.todayProfitTotal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-            {metrics.todayProfitTotal >= 0 ? '+' : ''}{formatCurrency(metrics.todayProfitTotal, hideAmounts)}
+          <div
+            className={`text-2xl font-black font-mono tracking-tight ${
+              isLoss ? 'text-rose-400' : 'text-emerald-400'
+            }`}
+          >
+            {metrics.todayProfitTotal > 0 ? '+' : ''}
+            {formatCurrency(metrics.todayProfitTotal, hideAmounts)}
           </div>
 
           <p className="text-[10px] text-slate-400 leading-tight">

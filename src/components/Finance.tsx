@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { summarizeReturns, returnsInPeriod } from '../utils/returns';
-import { formatCurrency, formatDate as formatIntlDate } from '../utils/format';
+import { calculateComprehensivePnl, isOperationalIncome, isOperationalExpense } from '../utils/financialCalculations';
+import { formatCurrency, formatNumber, formatDate as formatIntlDate } from '../utils/format';
 import { usePagination } from '../hooks/usePagination';
 import PaginationBar from './PaginationBar';
 
@@ -27,7 +28,7 @@ interface FinanceProps {
   stockWastes: StockWaste[];
   shopName: string;
   onAddTransaction: (
-    type: 'income' | 'expense',
+    type: 'income' | 'expense' | 'capital' | 'withdrawal',
     amount: number,
     description: string,
     safeId: string
@@ -96,7 +97,7 @@ export default function Finance({
   const [period, setPeriod] = useState<PeriodType>('month');
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [formData, setFormData] = useState({
-    type: 'expense' as 'income' | 'expense',
+    type: 'expense' as 'income' | 'expense' | 'capital' | 'withdrawal',
     amount: 0,
     description: '',
     safeId: safes.find(s => s.isDefault)?.id || ''
@@ -110,21 +111,24 @@ export default function Finance({
   });
 
   // Filter by period
+  const parseDateSafe = (dStr?: string): Date | null => {
+    if (!dStr) return null;
+    const d = new Date(dStr);
+    return isNaN(d.getTime()) ? null : d;
+  };
+
+  // Filter by period (توقيت محلي موحد من بداية اليوم/الأسبوع/الشهر/السنة بدقة 00:00:00)
   const getPeriodStart = (p: PeriodType): Date => {
     const now = new Date();
     switch (p) {
       case 'today':
-        now.setHours(0, 0, 0, 0);
-        return now;
-      case 'week': {
-        const weekAgo = new Date(now);
-        weekAgo.setDate(weekAgo.getDate() - 7);
-        return weekAgo;
-      }
+        return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+      case 'week':
+        return new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7, 0, 0, 0, 0);
       case 'month':
-        return new Date(now.getFullYear(), now.getMonth(), 1);
+        return new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
       case 'year':
-        return new Date(now.getFullYear(), 0, 1);
+        return new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
       default:
         return new Date(0);
     }
@@ -133,7 +137,10 @@ export default function Finance({
   // Filtered transactions by period
   const periodTransactions = useMemo(() => {
     const startDate = getPeriodStart(period);
-    return transactions.filter(t => new Date(t.createdAt) >= startDate);
+    return transactions.filter(t => {
+      const d = parseDateSafe(t.createdAt || (t as any).date);
+      return d ? d >= startDate : false;
+    });
   }, [transactions, period]);
 
   // Filtered by type
@@ -148,7 +155,11 @@ export default function Finance({
         result = result.filter(t => t.type === typeFilter);
       }
     }
-    return result.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return result.sort((a, b) => {
+      const ta = parseDateSafe(a.createdAt || (a as any).date)?.getTime() || 0;
+      const tb = parseDateSafe(b.createdAt || (b as any).date)?.getTime() || 0;
+      return tb - ta;
+    });
   }, [periodTransactions, typeFilter]);
 
   // حركة الخزينة كانت مقيّدة بـ slice(0, 50): أي أكتر من 50 معاملة في الشهر
@@ -160,70 +171,63 @@ export default function Finance({
     financePage.resetPage();
   }, [period, typeFilter]);
 
-  // Calculate totals for period
-  const stats = useMemo(() => {
-    // These transaction types move cash without representing real business
-    // revenue/expense, so they're excluded from the income statement:
-    //  - transfer: money moving between the shop's own safes
-    //  - wallet_deposit/wallet_withdrawal: gross pass-through principal for
-    //    e-wallet services — the real revenue (fee - cost) is recorded
-    //    separately as its own 'income' transaction
-    //  - capital: owner equity injections/withdrawals, not profit or loss
-    //  - side_account: settlement of personal/side debts tracked for
-    //    convenience, not shop revenue/expense
-    const nonPnlTypes: Transaction['type'][] = ['transfer', 'wallet_deposit', 'wallet_withdrawal', 'capital', 'side_account'];
-    const income = periodTransactions
-      .filter(t => (t.amount > 0 || t.type === 'income') && t.type !== 'expense' && !nonPnlTypes.includes(t.type))
-      .reduce((sum, t) => sum + Math.abs(t.amount), 0);
-    const expenses = periodTransactions
-      .filter(t => (t.type === 'expense' || t.amount < 0) && t.type !== 'income' && !nonPnlTypes.includes(t.type))
-      .reduce((sum, t) => sum + Math.abs(t.amount), 0);
-    
-    // Sales revenue & profit
-    const startDate = getPeriodStart(period);
-    const periodSales = sales.filter(s => new Date(s.createdAt) >= startDate);
-    const grossSalesRevenue = periodSales.reduce((sum, s) => sum + s.total, 0);
-    const grossSalesProfit = periodSales.reduce((sum, s) => sum + s.profit, 0);
-    // الفاتورة مستند ثابت: المرتجع بيتخصم هنا بتاريخه هو، مش برجعة على الفاتورة.
-    const periodReturns = summarizeReturns(returnsInPeriod(saleReturns, startDate));
-    const salesRevenue = grossSalesRevenue - periodReturns.revenueReversed;
-    const salesProfit = grossSalesProfit - periodReturns.profitReversed;
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-    // Maintenance revenue & profit
-    const periodMaint = maintenance.filter(m => 
-      m.deliveredAt && new Date(m.deliveredAt) >= startDate
-    );
-    const maintRevenue = periodMaint.reduce((sum, m) => sum + m.collectedAmount, 0);
-    const maintProfit = periodMaint.reduce((sum, m) => sum + m.profit, 0);
-    // Match every other stat card: respect the selected period instead of summing all-time.
-    const returnsTotal = periodReturns.cashRefunded;
-    const returnsValue = periodReturns.revenueReversed;
-    const wasteTotal = stockWastes
-      .filter(waste => new Date(waste.createdAt) >= startDate)
-      .reduce((sum, waste) => sum + waste.totalCost, 0);
+  // Calculate totals for period using unified financial engine
+  const stats = useMemo(() => {
+    const startDate = getPeriodStart(period);
+    const periodSales = sales.filter(s => {
+      const d = parseDateSafe(s.createdAt || (s as any).date);
+      return d ? d >= startDate : false;
+    });
+    const periodReturnsList = saleReturns.filter(r => {
+      const d = parseDateSafe(r.createdAt || (r as any).date);
+      return d ? d >= startDate : false;
+    });
+    const periodReturns = summarizeReturns(periodReturnsList);
+    const periodMaint = maintenance.filter(m => {
+      if (m.status !== 'delivered') return false;
+      const d = parseDateSafe(m.deliveredAt || (m as any).deliveryDate || m.completedAt || (m as any).createdAt);
+      return d ? d >= startDate : false;
+    });
+    const periodWastes = stockWastes.filter(waste => {
+      const d = parseDateSafe(waste.createdAt || (waste as any).date);
+      return d ? d >= startDate : false;
+    });
+
+    const pnl = calculateComprehensivePnl({
+      sales: periodSales,
+      returns: periodReturnsList,
+      maintenance: periodMaint,
+      transactions: periodTransactions,
+      stockWastes: periodWastes,
+    });
 
     const totalBalance = safes.reduce((sum, s) => sum + s.balance, 0);
-    const netProfit = income - expenses;
 
     return {
-      income,
-      expenses,
-      netProfit,
-      grossSalesRevenue,
-      grossSalesProfit,
-      salesRevenue,
-      salesProfit,
-      returnsValue,
-      maintRevenue,
-      maintProfit,
-      returnsTotal,
-      wasteTotal,
+      income: pnl.totalOperatingRevenue,
+      expenses: pnl.operatingExpenses,
+      netProfit: pnl.netOperatingProfit,
+      grossSalesRevenue: pnl.netSalesRevenue + (periodReturns.revenueReversed || 0),
+      grossSalesProfit: pnl.netSalesProfit + (periodReturns.profitReversed || 0),
+      salesRevenue: pnl.netSalesRevenue,
+      salesProfit: pnl.netSalesProfit,
+      returnsValue: periodReturns.revenueReversed,
+      maintRevenue: pnl.maintRevenue,
+      maintProfit: pnl.maintProfit,
+      returnsTotal: periodReturns.cashRefunded,
+      wasteTotal: pnl.wasteTotal,
       totalBalance,
-      totalRevenue: salesRevenue + maintRevenue
+      totalRevenue: pnl.totalOperatingRevenue,
+      otherOperatingIncome: pnl.otherOperatingIncome,
+      grossOperatingProfit: pnl.grossOperatingProfit,
+      profitMarginPct: pnl.profitMarginPct,
+      isLoss: pnl.isLoss,
     };
   }, [periodTransactions, sales, maintenance, safes, period, saleReturns, stockWastes]);
 
-  // Chart data - last 6 months income vs expense
+  // Chart data - last 6 months true income vs expense (Strict P&L separation)
   const chartData = useMemo(() => {
     const months = [];
     const monthNames = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
@@ -234,46 +238,70 @@ export default function Finance({
       const month = date.getMonth();
       const year = date.getFullYear();
       
-      const monthTrans = transactions.filter(t => {
-        const tDate = new Date(t.createdAt);
-        return tDate.getMonth() === month && tDate.getFullYear() === year;
+      const monthStart = new Date(year, month, 1, 0, 0, 0, 0);
+      const nextMonthStart = new Date(year, month + 1, 1, 0, 0, 0, 0);
+
+      const inMonth = (dStr?: string) => {
+        const d = parseDateSafe(dStr);
+        return d ? d >= monthStart && d < nextMonthStart : false;
+      };
+
+      const mSales = sales.filter(s => inMonth(s.createdAt || (s as any).date));
+      const mReturns = saleReturns.filter(r => inMonth(r.createdAt || (r as any).date));
+      const mMaint = maintenance.filter(m => inMonth(m.deliveredAt || (m as any).deliveryDate || m.completedAt));
+      const mTrans = transactions.filter(t => inMonth(t.createdAt || (t as any).date));
+      const mWastes = stockWastes.filter(w => inMonth(w.createdAt || (w as any).date));
+
+      const mPnl = calculateComprehensivePnl({
+        sales: mSales,
+        returns: mReturns,
+        maintenance: mMaint,
+        transactions: mTrans,
+        stockWastes: mWastes,
       });
-      
-      const nonPnlTypes: Transaction['type'][] = ['transfer', 'wallet_deposit', 'wallet_withdrawal', 'capital', 'side_account'];
-      const inc = monthTrans.filter(t => t.amount > 0 && !nonPnlTypes.includes(t.type)).reduce((sum, t) => sum + t.amount, 0);
-      const exp = monthTrans.filter(t => t.amount < 0 && !nonPnlTypes.includes(t.type)).reduce((sum, t) => sum + Math.abs(t.amount), 0);
-      
+
       months.push({
         name: monthNames[month],
-        إيرادات: inc,
-        مصروفات: exp,
-        صافي: inc - exp
+        إيرادات: mPnl.totalOperatingRevenue,
+        مصروفات: mPnl.operatingExpenses + mPnl.wasteTotal,
+        صافي: mPnl.netOperatingProfit,
       });
     }
     return months;
-  }, [transactions]);
+  }, [transactions, sales, maintenance, saleReturns, stockWastes]);
 
   // Income sources pie data
   const incomeSources = useMemo(() => {
     const startDate = getPeriodStart(period);
-    const periodSales = sales.filter(s => new Date(s.createdAt) >= startDate);
-    const salesRev = periodSales.reduce((sum, s) => sum + s.total, 0);
+    const periodSales = sales.filter(s => {
+      const d = parseDateSafe(s.createdAt || (s as any).date);
+      return d ? d >= startDate : false;
+    });
+    const periodReturnsList = saleReturns.filter(r => {
+      const d = parseDateSafe(r.createdAt || (r as any).date);
+      return d ? d >= startDate : false;
+    });
+    const periodReturns = summarizeReturns(periodReturnsList);
+    const salesGross = periodSales.reduce((sum, s) => sum + s.total, 0);
+    const salesRev = Math.max(0, salesGross - (periodReturns.revenueReversed || 0));
     
-    const periodMaint = maintenance.filter(m => 
-      m.deliveredAt && new Date(m.deliveredAt) >= startDate
-    );
-    const maintRev = periodMaint.reduce((sum, m) => sum + m.collectedAmount, 0);
+    const periodMaint = maintenance.filter(m => {
+      if (m.status !== 'delivered') return false;
+      const d = parseDateSafe(m.deliveredAt || (m as any).deliveryDate || m.completedAt || (m as any).createdAt);
+      return d ? d >= startDate : false;
+    });
+    const maintRev = periodMaint.reduce((sum, m) => sum + (m.collectedAmount || (m as any).finalPrice || 0), 0);
     
     const otherIncome = periodTransactions
-      .filter(t => t.type === 'income')
-      .reduce((sum, t) => sum + t.amount, 0);
+      .filter(t => isOperationalIncome(t as any) && t.type !== 'maintenance' && !(t.category || '').includes('صيانة'))
+      .reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
 
     return [
       { name: 'مبيعات', value: salesRev },
       { name: 'صيانة', value: maintRev },
       { name: 'دخل آخر', value: otherIncome },
     ].filter(s => s.value > 0);
-  }, [sales, maintenance, periodTransactions, period]);
+  }, [sales, maintenance, periodTransactions, period, saleReturns]);
 
   const PIE_COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444'];
 
@@ -282,18 +310,25 @@ export default function Finance({
       alert('المبلغ يجب أن يكون أكبر من صفر');
       return;
     }
-    if (!formData.description) {
-      alert('الوصف مطلوب');
+    const trimmedDesc = (formData.description || '').trim();
+    if (!trimmedDesc || trimmedDesc.length < 3) {
+      alert('يرجى إدخال بيان واضح للحركة (3 أحرف على الأقل)');
       return;
     }
-    onAddTransaction(formData.type, formData.amount, formData.description, formData.safeId);
-    setShowModal(false);
-    setFormData({
-      type: 'expense',
-      amount: 0,
-      description: '',
-      safeId: safes.find(s => s.isDefault)?.id || ''
-    });
+
+    setIsSubmitting(true);
+    try {
+      onAddTransaction(formData.type, formData.amount, trimmedDesc, formData.safeId);
+      setShowModal(false);
+      setFormData({
+        type: 'expense',
+        amount: 0,
+        description: '',
+        safeId: safes.find(s => s.isDefault)?.id || ''
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const getTransactionIcon = (type: string, amount: number) => {
@@ -315,6 +350,7 @@ export default function Finance({
       maintenance_cost: 'تكلفة صيانة',
       inventory_adjustment: 'تسوية جرد',
       capital: 'رأس مال',
+      withdrawal: 'مسحوبات مالك',
       side_account: 'حساب جانبي',
       customer_payment: 'دفعة عميل',
       wallet_deposit: 'إيداع محفظة',
@@ -488,7 +524,10 @@ export default function Finance({
               <BarChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.15} />
                 <XAxis dataKey="name" stroke="#9CA3AF" />
-                <YAxis stroke="#9CA3AF" />
+                <YAxis
+                  stroke="#9CA3AF"
+                  tickFormatter={(v) => formatNumber(Number(v) || 0)}
+                />
                 <Tooltip
                   contentStyle={{ backgroundColor: '#1F2937', border: 'none', borderRadius: '8px', color: '#fff' }}
                   formatter={(value) => formatCurrency(Number(value) || 0)}
@@ -515,18 +554,22 @@ export default function Finance({
                   <Pie
                     data={incomeSources}
                     cx="50%"
-                    cy="50%"
-                    innerRadius={50}
-                    outerRadius={90}
-                    paddingAngle={3}
+                    cy="45%"
+                    innerRadius={45}
+                    outerRadius={75}
+                    paddingAngle={4}
                     dataKey="value"
-                    label={({ name, percent }) => `${name} (${((percent || 0) * 100).toFixed(0)}%)`}
+                    label={({ name, percent }) =>
+                      percent && percent > 0.05 ? `${name} (${(percent * 100).toFixed(0)}%)` : ''
+                    }
+                    labelLine={true}
                   >
                     {incomeSources.map((_, index) => (
                       <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                     ))}
                   </Pie>
                   <Tooltip formatter={(value) => formatCurrency(Number(value) || 0)} />
+                  <Legend verticalAlign="bottom" height={36} />
                 </PieChart>
               </ResponsiveContainer>
             </div>
@@ -676,30 +719,69 @@ export default function Finance({
             </div>
 
             <div className="p-6 space-y-4">
-              {/* Type Toggle */}
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={() => setFormData(prev => ({ ...prev, type: 'income' }))}
-                  className={`flex items-center justify-center gap-2 p-3 rounded-xl border-2 transition ${
-                    formData.type === 'income'
-                      ? 'border-green-500 bg-green-50 dark:bg-green-900/20 text-green-600'
-                      : 'border-gray-200 dark:border-gray-600 text-gray-500'
-                  }`}
-                >
-                  <TrendingUp size={20} />
-                  <span className="font-medium">دخل (إيراد)</span>
-                </button>
-                <button
-                  onClick={() => setFormData(prev => ({ ...prev, type: 'expense' }))}
-                  className={`flex items-center justify-center gap-2 p-3 rounded-xl border-2 transition ${
-                    formData.type === 'expense'
-                      ? 'border-red-500 bg-red-50 dark:bg-red-900/20 text-red-600'
-                      : 'border-gray-200 dark:border-gray-600 text-gray-500'
-                  }`}
-                >
-                  <TrendingDown size={20} />
-                  <span className="font-medium">مصروف</span>
-                </button>
+              {/* Type Selection with Strict Accounting Distinction */}
+              <div>
+                <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-2">
+                  نوع الحركة المحاسبية *
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setFormData(prev => ({ ...prev, type: 'expense' }))}
+                    className={`flex items-center justify-center gap-2 p-2.5 rounded-xl border-2 transition text-xs font-bold ${
+                      formData.type === 'expense'
+                        ? 'border-red-500 bg-red-50 dark:bg-red-900/20 text-red-600'
+                        : 'border-gray-200 dark:border-gray-600 text-gray-500 hover:border-red-200'
+                    }`}
+                  >
+                    <TrendingDown size={16} />
+                    <span>مصروف تشغيلي</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormData(prev => ({ ...prev, type: 'income' }))}
+                    className={`flex items-center justify-center gap-2 p-2.5 rounded-xl border-2 transition text-xs font-bold ${
+                      formData.type === 'income'
+                        ? 'border-green-500 bg-green-50 dark:bg-green-900/20 text-green-600'
+                        : 'border-gray-200 dark:border-gray-600 text-gray-500 hover:border-green-200'
+                    }`}
+                  >
+                    <TrendingUp size={16} />
+                    <span>إيراد تشغيلي</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormData(prev => ({ ...prev, type: 'capital' }))}
+                    className={`flex items-center justify-center gap-2 p-2.5 rounded-xl border-2 transition text-xs font-bold ${
+                      formData.type === 'capital'
+                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-600'
+                        : 'border-gray-200 dark:border-gray-600 text-gray-500 hover:border-blue-200'
+                    }`}
+                  >
+                    <ArrowUpCircle size={16} />
+                    <span>إيداع نقدي (رأس مال)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormData(prev => ({ ...prev, type: 'withdrawal' }))}
+                    className={`flex items-center justify-center gap-2 p-2.5 rounded-xl border-2 transition text-xs font-bold ${
+                      formData.type === 'withdrawal'
+                        ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/20 text-amber-600'
+                        : 'border-gray-200 dark:border-gray-600 text-gray-500 hover:border-amber-200'
+                    }`}
+                  >
+                    <ArrowDownCircle size={16} />
+                    <span>سحب نقدي (جاري مالك)</span>
+                  </button>
+                </div>
+
+                {/* Accounting Impact Hint */}
+                <div className="mt-2 text-[11px] px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700/60 text-gray-600 dark:text-gray-300">
+                  {formData.type === 'expense' && '⚠️ يؤثر على رصيد الخزينة ويُخصم من صافي أرباح التشغيل.'}
+                  {formData.type === 'income' && '✨ يؤثر على رصيد الخزينة ويُضاف إلى إيرادات وأرباح التشغيل.'}
+                  {formData.type === 'capital' && '💼 حركة تمويل: تزيد رصيد الخزينة فقط ولا تُحسب كإيراد تشغيلي إطلاقاً.'}
+                  {formData.type === 'withdrawal' && '🤝 مسحوبات شخصية: تخصم من رصيد الخزينة فقط ولا تُحسب كمصروف تشغيلي.'}
+                </div>
               </div>
 
               <div>
@@ -715,12 +797,20 @@ export default function Finance({
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">الوصف *</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">بيان الحركة / الوصف * (3 أحرف على الأقل)</label>
                 <input
                   type="text"
                   value={formData.description}
                   onChange={e => setFormData(prev => ({ ...prev, description: e.target.value }))}
-                  placeholder={formData.type === 'income' ? 'مثال: دخل إيجار' : 'مثال: إيجار المحل'}
+                  placeholder={
+                    formData.type === 'capital'
+                      ? 'مثال: إيداع رأس مال بالخزينة من المالك'
+                      : formData.type === 'withdrawal'
+                      ? 'مثال: سحب نقدي شخصي لصاحب المحل'
+                      : formData.type === 'income'
+                      ? 'مثال: دخل خدمات شحن أو عمولات'
+                      : 'مثال: فاتورة كهرباء أو إيجار المحل'
+                  }
                   className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white"
                 />
               </div>
@@ -750,9 +840,10 @@ export default function Finance({
               </button>
               <button
                 onClick={handleSave}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                disabled={isSubmitting}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
               >
-                تسجيل
+                {isSubmitting ? 'جارٍ التسجيل...' : 'تسجيل'}
               </button>
             </div>
           </div>

@@ -9,7 +9,7 @@ import {
 } from 'recharts';
 import { Sale, Maintenance, IMEIUnit, InventoryItem, Category } from '../types';
 import AnimatedNumber from './AnimatedNumber';
-import { formatCurrency, formatDate } from '../utils/format';
+import { formatCurrency, formatNumber, formatDate } from '../utils/format';
 import {
   aggregateSalesByCategory,
   buildCategoryBreakdown,
@@ -243,7 +243,7 @@ export default function Dashboard({
               <LineChart data={last7DaysSales}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.2} />
                 <XAxis dataKey="name" stroke="#9CA3AF" />
-                <YAxis stroke="#9CA3AF" />
+                <YAxis stroke="#9CA3AF" tickFormatter={(v) => formatNumber(Number(v) || 0)} />
                 <Tooltip
                   contentStyle={{
                     backgroundColor: '#1F2937',
@@ -404,7 +404,7 @@ formatter={(value) => formatCurrency(Number(value) || 0)}
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={maintenanceByStatus} layout="vertical">
                 <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.2} />
-                <XAxis type="number" stroke="#9CA3AF" />
+                <XAxis type="number" stroke="#9CA3AF" tickFormatter={(v) => formatNumber(Number(v) || 0)} />
                 <YAxis dataKey="name" type="category" stroke="#9CA3AF" width={80} />
                 <Tooltip />
                 <Bar dataKey="value" fill="#3B82F6" radius={[0, 4, 4, 0]} />

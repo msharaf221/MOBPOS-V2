@@ -179,7 +179,7 @@ export interface Transaction {
    * (`safeId: ''`) — مافيش كاش بيتحرك، لكن من غيرها التقارير بتبان أرباحها أعلى
    * من الحقيقة لأن تكلفة البضاعة الخارجة مش متسجلة في أي مكان.
    */
-  type: 'sale' | 'purchase' | 'maintenance' | 'maintenance_cost' | 'expense' | 'income' | 'transfer' | 'return' | 'waste' | 'inventory_adjustment' | 'customer_payment' | 'wallet_deposit' | 'wallet_withdrawal' | 'capital' | 'side_account';
+  type: 'sale' | 'purchase' | 'maintenance' | 'maintenance_cost' | 'expense' | 'income' | 'transfer' | 'return' | 'waste' | 'inventory_adjustment' | 'customer_payment' | 'wallet_deposit' | 'wallet_withdrawal' | 'capital' | 'withdrawal' | 'side_account';
   amount: number;
   description: string;
   referenceId: string;

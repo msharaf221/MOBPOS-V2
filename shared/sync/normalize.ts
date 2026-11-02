@@ -91,8 +91,8 @@ const TRANSACTION_TYPE_ALIASES: Record<string, string> = {
   cash_in: 'capital',
   cashin: 'capital',
   capital_in: 'capital',
-  withdrawal: 'expense',
-  withdraw: 'expense',
+  withdrawal: 'withdrawal',
+  withdraw: 'withdrawal',
   cash_out: 'expense',
   cashout: 'expense',
   'wallet-deposit': 'wallet_deposit',
@@ -108,9 +108,16 @@ const TRANSACTION_TYPE_ALIASES: Record<string, string> = {
   'maintenance-cost': 'maintenance_cost',
   inventoryadjustment: 'inventory_adjustment',
   'inventory-adjustment': 'inventory_adjustment',
-  سحب: 'expense',
+  سحب: 'withdrawal',
+  'سحب نقدي': 'withdrawal',
+  'سحب_نقدي': 'withdrawal',
+  مسحوبات: 'withdrawal',
   ايداع: 'capital',
   إيداع: 'capital',
+  'إيداع نقدي': 'capital',
+  'إيداع_نقدي': 'capital',
+  'رأس مال': 'capital',
+  'رأس_مال': 'capital',
   مصروف: 'expense',
   دخل: 'income',
   مبيعات: 'sale',
@@ -122,7 +129,7 @@ const TRANSACTION_TYPE_ALIASES: Record<string, string> = {
 const VALID_TRANSACTION_TYPES = new Set([
   'sale', 'purchase', 'maintenance', 'maintenance_cost', 'expense', 'income',
   'transfer', 'return', 'waste', 'inventory_adjustment', 'customer_payment',
-  'wallet_deposit', 'wallet_withdrawal', 'capital', 'side_account',
+  'wallet_deposit', 'wallet_withdrawal', 'capital', 'withdrawal', 'side_account',
 ]);
 
 export function normalizeTransactionType(raw: unknown): string {
@@ -206,7 +213,41 @@ export function normalizeInventoryItem(input: unknown, ctx: NormalizeContext = {
   const hasIMEI = asBoolean(src.hasIMEI ?? src.hasImei ?? src.has_imei);
   const barcode = firstString(src.barcode, src.code, src.sku);
   const code = firstString(src.code, src.barcode, src.sku, id);
-  const quantity = asNumber(firstNumber(src.quantity, src.qty, src.stock), 0);
+  
+  const rawQty = firstNumber(
+    src.quantity,
+    src.stock_quantity,
+    src.quantity_in_stock,
+    src.stockQuantity,
+    src.qty,
+    src.stock_qty,
+    src.stock,
+    src.count
+  );
+  const quantity = Math.max(0, asNumber(rawQty, 0));
+
+  const rawCost = firstNumber(
+    src.costPrice,
+    src.cost_price,
+    src.purchasePrice,
+    src.purchase_price,
+    src.cost,
+    src.buyPrice,
+    src.buy_price
+  );
+  const costPrice = asNumber(rawCost, 0);
+
+  const rawSell = firstNumber(
+    src.sellPrice,
+    src.sell_price,
+    src.sellingPrice,
+    src.selling_price,
+    src.price,
+    src.unitPrice,
+    src.unit_price,
+    src.sale_price
+  );
+  const sellPrice = asNumber(rawSell, 0);
 
   return {
     ...src,
@@ -215,10 +256,17 @@ export function normalizeInventoryItem(input: unknown, ctx: NormalizeContext = {
     code,
     barcode,
     categoryId: firstString(src.categoryId, src.category_id),
-    costPrice: asNumber(firstNumber(src.costPrice, src.cost, src.purchasePrice), 0),
-    sellPrice: asNumber(firstNumber(src.sellPrice, src.price, src.unitPrice), 0),
-    quantity: Math.max(0, quantity),
-    minQuantity: Math.max(0, asNumber(firstNumber(src.minQuantity, src.min, src.lowStockLimit), 2)),
+    costPrice,
+    cost_price: costPrice,
+    purchasePrice: costPrice,
+    purchase_price: costPrice,
+    sellPrice,
+    sell_price: sellPrice,
+    selling_price: sellPrice,
+    price: sellPrice,
+    quantity,
+    stock_quantity: quantity,
+    minQuantity: Math.max(0, asNumber(firstNumber(src.minQuantity, src.min_quantity, src.min, src.lowStockLimit), 2)),
     hasIMEI,
     createdAt: firstString(src.createdAt, src.date, ctx.updatedAt) || nowIso(ctx),
     // الحقول المساعدة اللي الموبايل بيقرأها
@@ -305,14 +353,15 @@ export function normalizePaymentMethod(raw: unknown): 'cash' | 'card' | 'install
 export function normalizeSaleItem(input: unknown, index = 0, ctx: NormalizeContext = {}): AnyRecord {
   const src = isRecord(input) ? input : {};
   const quantity = Math.max(0, asNumber(firstNumber(src.quantity, src.qty), 1));
-  const unitPrice = asNumber(firstNumber(src.unitPrice, src.price, src.sellPrice), 0);
-  const costPrice = asNumber(firstNumber(src.costPrice, src.cost, src.purchasePrice), 0);
+  const unitPrice = asNumber(firstNumber(src.unitPrice, src.unit_price, src.price, src.sellPrice, src.sell_price), 0);
+  const costPrice = asNumber(firstNumber(src.costPrice, src.cost_price, src.cost, src.purchasePrice, src.purchase_price), 0);
   const total = asNumber(firstNumber(src.total, src.lineTotal), unitPrice * quantity);
 
   return {
     ...src,
     id: firstString(src.id) || `${ctx.id || 'sale'}_item_${index}`,
-    inventoryId: firstString(src.inventoryId, src.inventory_id, src.productId, src.itemId),
+    inventoryId: firstString(src.inventoryId, src.inventory_id, src.productId, src.product_id, src.itemId),
+    productId: firstString(src.productId, src.product_id, src.inventoryId, src.inventory_id, src.itemId),
     imeiUnitId: firstString(src.imeiUnitId, src.imei_unit_id),
     quantity,
     unitPrice,
@@ -346,7 +395,7 @@ export function normalizeSale(input: unknown, ctx: NormalizeContext = {}): AnyRe
   return {
     ...src,
     id,
-    invoiceNumber: firstString(src.invoiceNumber, src.invoiceNo, src.number) || id.slice(0, 8),
+    invoiceNumber: firstString(src.invoiceNumber, src.invoice_number, src.invoiceNo, src.number) || id.slice(0, 8),
     customerId: firstString(src.customerId, src.customer_id),
     customerName: firstString(src.customerName, src.customer_name),
     customerPhone: firstString(src.customerPhone, src.customer_phone),
@@ -354,8 +403,11 @@ export function normalizeSale(input: unknown, ctx: NormalizeContext = {}): AnyRe
     subtotal,
     discount,
     total,
+    finalTotal: total,
     paid,
+    paidAmount: paid,
     remaining,
+    remainingAmount: remaining,
     profit,
     paymentMethod: normalizePaymentMethod(src.paymentMethod),
     cashierId: firstString(src.cashierId, src.userId, src.user_id, 'mobile_pos'),
@@ -491,7 +543,7 @@ export function normalizeSafe(input: unknown, ctx: NormalizeContext = {}): AnyRe
     id: resolveId(src, ctx, 'safe'),
     name: firstString(src.name, src.title) || 'خزينة',
     balance: asNumber(firstNumber(src.balance, src.amount), 0),
-    isDefault: asBoolean(src.isDefault),
+    isDefault: asBoolean(src.isDefault ?? src.is_default),
     type,
   };
 }

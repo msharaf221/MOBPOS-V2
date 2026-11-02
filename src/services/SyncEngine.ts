@@ -486,11 +486,9 @@ class SyncEngine {
       this.state.status = 'disabled';
     } else if (!this.state.isOnline) {
       this.state.status = 'offline';
-    } else if (this.isDraining && (this.isUserTriggeredSync || !this.isBackgroundRetrying)) {
-      this.state.status = 'syncing';
     } else if (this.state.errorMessage) {
       this.state.status = 'error';
-    } else if (this.isDraining) {
+    } else if (this.isDraining || this.state.pendingCount > 0) {
       this.state.status = 'syncing';
     } else {
       this.state.status = 'synced';

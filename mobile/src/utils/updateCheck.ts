@@ -3,7 +3,7 @@
 // ============================================================
 
 declare const __APP_VERSION__: string;
-export const CURRENT_MOBILE_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.0.34';
+export const CURRENT_MOBILE_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.0.35';
 
 export interface MobileUpdateResult {
   ok: boolean;

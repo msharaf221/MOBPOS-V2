@@ -87,7 +87,7 @@ export const SalesTab: React.FC<SalesTabProps> = ({
   };
 
   return (
-    <div className="space-y-3.5 pb-28 animate-in fade-in duration-200">
+    <div className="space-y-3.5 pb-32 animate-in fade-in duration-200">
       {/* Top Search Input with clear button */}
       <div className="relative">
         <input
@@ -110,7 +110,7 @@ export const SalesTab: React.FC<SalesTabProps> = ({
       </div>
 
       {/* Filter Chips with Count Badges */}
-      <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 text-xs">
+      <div className="flex items-center gap-2 overflow-x-auto scrollbar-none py-1 text-xs w-full touch-pan-x">
         {[
           { id: 'all' as const, label: 'الكل', count: sales.length },
           { id: 'today' as const, label: 'اليوم فقط ⚡', count: sales.filter(s => (s.date || s.createdAt || '').slice(0, 10) === todayStr).length },
@@ -122,7 +122,7 @@ export const SalesTab: React.FC<SalesTabProps> = ({
             key={filter.id}
             type="button"
             onClick={() => setSelectedFilter(filter.id)}
-            className={`px-3 py-1.5 rounded-xl whitespace-nowrap font-bold transition-all text-xs flex items-center gap-1.5 active:scale-95 ${
+            className={`px-3 py-1.5 rounded-xl whitespace-nowrap font-bold transition-all text-xs flex items-center gap-1.5 active:scale-95 shrink-0 ${
               selectedFilter === filter.id
                 ? 'bg-gradient-to-r from-cyan-500 to-sky-500 text-slate-950 shadow-md shadow-cyan-500/25'
                 : 'bg-slate-900/80 border border-white/[0.06] text-slate-400 hover:text-white'

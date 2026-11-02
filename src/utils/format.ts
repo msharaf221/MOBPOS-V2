@@ -70,8 +70,8 @@ import { roundMoney } from '../hooks/store/helpers.ts';
 const safeValue = (value: number | undefined | null): number =>
   typeof value === 'number' && Number.isFinite(value) ? roundMoney(value) : 0;
 
-/** تنسيق المبالغ بالعملة المختارة، مع احترام إعداد عرض القروش. */
 export function formatCurrency(value: number | undefined | null): string {
+  const num = safeValue(value);
   const locale = getAppLocale();
   const currency = getAppCurrency();
   const mode = getCurrencyDecimalsMode();
@@ -82,11 +82,13 @@ export function formatCurrency(value: number | undefined | null): string {
     key,
     new Intl.NumberFormat(locale, { style: 'currency', currency, ...fractionDigitsFor(mode) })
   );
-  return formatter.format(safeValue(value));
+  const res = formatter.format(num);
+  return num < 0 ? `\u200E${res}` : res;
 }
 
 /** رقم عادي (بلا عملة) بنفس الـ locale المختار. */
 export function formatNumber(value: number | undefined | null, maxFractionDigits = 0): string {
+  const num = safeValue(value);
   const locale = getAppLocale();
   const key = `${locale}|${maxFractionDigits}`;
   const cached = numberCache.get(key);
@@ -95,7 +97,8 @@ export function formatNumber(value: number | undefined | null, maxFractionDigits
     key,
     new Intl.NumberFormat(locale, { maximumFractionDigits: maxFractionDigits })
   );
-  return formatter.format(safeValue(value));
+  const res = formatter.format(num);
+  return num < 0 ? `\u200E${res}` : res;
 }
 
 /**

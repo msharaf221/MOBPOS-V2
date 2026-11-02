@@ -1,14 +1,23 @@
 export function formatCurrency(amount?: number | null, hideAmounts: boolean = false): string {
   if (hideAmounts) return '••••••';
   const num = Number(amount) || 0;
-  return new Intl.NumberFormat('ar-EG', {
-    maximumFractionDigits: 0,
-  }).format(num) + ' ج.م';
+  const isNegative = num < 0;
+  const absFormatted = Math.abs(num).toLocaleString('en-US', {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 0,
+  });
+  // استخدام علامة LRM لمنع قلب إشارة السالب في اتجاه RTL لظهور -1,000,000 ج.م
+  return `\u200E${isNegative ? '-' : ''}${absFormatted} ج.م`;
 }
 
 export function formatNumber(num?: number | null, hideAmounts: boolean = false): string {
   if (hideAmounts) return '•••';
-  return new Intl.NumberFormat('ar-EG').format(Number(num) || 0);
+  const val = Number(num) || 0;
+  const isNegative = val < 0;
+  const absFormatted = Math.abs(val).toLocaleString('en-US', {
+    maximumFractionDigits: 2,
+  });
+  return `\u200E${isNegative ? '-' : ''}${absFormatted}`;
 }
 
 export function formatTimeAgo(dateStr?: string | null): string {

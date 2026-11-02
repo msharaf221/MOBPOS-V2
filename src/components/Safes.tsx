@@ -17,20 +17,27 @@ export default function Safes({ safes, transactions, currentUser, onAddSafe, onD
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [newSafe, setNewSafe] = useState({ name: '', balance: 0, isDefault: false });
   const [transfer, setTransfer] = useState({ fromId: '', toId: '', amount: 0 });
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleAddSafe = () => {
-    if (!newSafe.name) {
-      alert('اسم الخزنة مطلوب');
+    const trimmed = (newSafe.name || '').trim();
+    if (!trimmed || trimmed.length < 2) {
+      alert('اسم الخزنة مطلوب (حرفين على الأقل)');
       return;
     }
-    onAddSafe(newSafe);
-    setShowAddModal(false);
-    setNewSafe({ name: '', balance: 0, isDefault: false });
+    setIsSubmitting(true);
+    try {
+      onAddSafe({ ...newSafe, name: trimmed });
+      setShowAddModal(false);
+      setNewSafe({ name: '', balance: 0, isDefault: false });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleTransfer = () => {
     if (!transfer.fromId || !transfer.toId || transfer.amount <= 0) {
-      alert('يرجى ملء جميع الحقول');
+      alert('يرجى ملء جميع الحقول بمبلغ أكبر من صفر');
       return;
     }
     if (transfer.fromId === transfer.toId) {
@@ -42,9 +49,14 @@ export default function Safes({ safes, transactions, currentUser, onAddSafe, onD
       alert('الرصيد غير كافي');
       return;
     }
-    onTransfer(transfer.fromId, transfer.toId, transfer.amount);
-    setShowTransferModal(false);
-    setTransfer({ fromId: '', toId: '', amount: 0 });
+    setIsSubmitting(true);
+    try {
+      onTransfer(transfer.fromId, transfer.toId, transfer.amount);
+      setShowTransferModal(false);
+      setTransfer({ fromId: '', toId: '', amount: 0 });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleDeleteSafe = (safe: Safe) => {
@@ -228,8 +240,12 @@ export default function Safes({ safes, transactions, currentUser, onAddSafe, onD
               <button onClick={() => setShowAddModal(false)} className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300">
                 إلغاء
               </button>
-              <button onClick={handleAddSafe} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-                إضافة
+              <button
+                onClick={handleAddSafe}
+                disabled={isSubmitting}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              >
+                {isSubmitting ? 'جارٍ الإضافة...' : 'إضافة'}
               </button>
             </div>
           </div>
@@ -292,8 +308,12 @@ export default function Safes({ safes, transactions, currentUser, onAddSafe, onD
               <button onClick={() => setShowTransferModal(false)} className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300">
                 إلغاء
               </button>
-              <button onClick={handleTransfer} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-                تحويل
+              <button
+                onClick={handleTransfer}
+                disabled={isSubmitting}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              >
+                {isSubmitting ? 'جارٍ التحويل...' : 'تحويل'}
               </button>
             </div>
           </div>

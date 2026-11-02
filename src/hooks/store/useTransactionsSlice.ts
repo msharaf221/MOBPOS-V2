@@ -12,13 +12,14 @@ export function useTransactionsSlice(state: StoreState) {
 
     
     const addTransaction = useCallback((
-      type: 'income' | 'expense',
+      type: 'income' | 'expense' | 'capital' | 'withdrawal',
       amount: number,
       description: string,
       safeId: string
     ) => {
       if (!safes.some(s => s.id === safeId) || !isFiniteNumber(amount) || amount <= 0 || !validText(description, MAX_TEXT_LENGTH)) return null;
-      const finalAmount = roundMoney(type === 'expense' ? -amount : amount);
+      const isOutflow = type === 'expense' || type === 'withdrawal';
+      const finalAmount = roundMoney(isOutflow ? -amount : amount);
       
       const transaction: Transaction = {
         id: uuidv4(),
@@ -49,7 +50,8 @@ export function useTransactionsSlice(state: StoreState) {
 
       const trans = transactions.find(t => t.id === id);
       if (!trans) return { ok: false, error: 'الحركة غير موجودة' };
-      if (trans.type !== 'income' && trans.type !== 'expense') {
+      const deletableTypes = new Set(['income', 'expense', 'capital', 'withdrawal']);
+      if (!deletableTypes.has(trans.type)) {
         return { ok: false, error: 'لا يمكن حذف حركة ناتجة عن عملية (بيع/شراء/صيانة/مرتجع) — سجّل عملية عكسية بدلاً من الحذف' };
       }
       

@@ -139,7 +139,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
   };
 
   return (
-    <div className="space-y-4 pb-24 text-xs">
+    <div className="space-y-4 pb-32 text-xs">
       {/* 🚀 Quick QR Pairing Card */}
       <div className="relative overflow-hidden rounded-3xl p-4 bg-gradient-to-br from-cyan-950/40 via-slate-900 to-indigo-950/40 border border-cyan-500/30 shadow-xl shadow-cyan-950/30">
         <div className="flex items-start justify-between gap-3 relative z-10">
@@ -461,6 +461,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
       {/* QR Scanner Modal for Instant Pairing */}
       <CameraScannerModal
         isOpen={isScanningPair}
+        mode="qr"
         onClose={() => setIsScanningPair(false)}
         title="امسح كود الاقتران من شاشة الكمبيوتر"
         onScan={scannedCode => {

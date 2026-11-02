@@ -7,24 +7,17 @@ interface CameraScannerModalProps {
   onClose: () => void;
   onScan: (barcode: string) => void;
   title?: string;
+  mode?: 'barcode' | 'qr';
 }
 
-/**
- * قارئ باركود وQR فائق القوة والسرعة للموبايل (Industrial-Grade Multi-Scale Scanner)
- *
- * المميزات الاحترافية:
- * 1. دعم Hardware Zoom (1x / 2x / 3x) لقراءة الباركودات الصغيرة (IMEI / أجهزة) من مسافة مريحة دون تشويش.
- * 2. معالجة صور فورية (Image Enhancement): رفع التباين (Contrast Boost) والحدة (Sharpen) للباركودات الباهتة أو على أسطح لامعة.
- * 3. فحص هجين فائق السرعة: مسح أصلي مباشر (BarcodeDetector على الفيديو مباشرة) + فحص دقيق للهدف (Multi-Scale ROI).
- * 4. دعم فك تشفير الباركود المعكوس (Inverted / White-on-Black) والصيغ الصناعية (Code 128, EAN-13, ITF, QR, etc).
- * 5. تنظيف دقيق للذاكرة والكاميرا لمنع أي تسريب أو ثقل بالتطبيق.
- */
 export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
   isOpen,
   onClose,
   onScan,
-  title = 'مسح باركود الصنف / السيريال',
+  title,
+  mode = 'barcode',
 }) => {
+  const resolvedTitle = title || (mode === 'qr' ? 'مسح كود اقتران الأجهزة (QR Code)' : 'مسح باركود الصنف / السيريال');
   const [manualCode, setManualCode] = useState('');
   const [showManualInput, setShowManualInput] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -507,7 +500,7 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
             <div className="w-8 h-8 rounded-xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center border border-cyan-400/30">
               <Camera size={16} />
             </div>
-            <span className="text-xs font-bold">{title}</span>
+            <span className="text-xs font-bold">{resolvedTitle}</span>
           </div>
 
           <div className="flex items-center gap-1.5">
@@ -574,10 +567,12 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
             className="w-full h-full object-cover"
           />
 
-          {/* Targeting Box with Dynamic Laser */}
+          {/* Targeting Box with Dynamic Laser (Square for QR, Rectangle for Barcode) */}
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-4">
             <div
-              className={`relative w-64 h-36 rounded-2xl transition-all duration-300 overflow-hidden ${
+              className={`relative ${
+                mode === 'qr' ? 'w-56 h-56 rounded-3xl' : 'w-64 h-36 rounded-2xl'
+              } transition-all duration-300 overflow-hidden ${
                 scannedSuccess
                   ? 'border-4 border-emerald-400 shadow-[0_0_30px_rgba(52,211,153,0.8)] bg-emerald-500/10'
                   : 'border-2 border-cyan-400/80 shadow-[0_0_24px_rgba(6,182,212,0.4)]'
@@ -639,7 +634,11 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
               autoCorrect="off"
               value={manualCode}
               onChange={e => setManualCode(e.target.value)}
-              placeholder="اكتب الباركود أو السيريال يدوياً..."
+              placeholder={
+                mode === 'qr'
+                  ? 'الصق أو اكتب كود الاقتران يدوياً...'
+                  : 'اكتب الباركود أو السيريال يدوياً...'
+              }
               className="flex-1 px-3 py-2.5 rounded-xl bg-slate-900 border border-white/[0.1] text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 font-mono text-center tracking-wider"
             />
             <button
@@ -652,8 +651,14 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
           </form>
 
           <div className="flex items-center justify-between text-[10px] text-slate-400 px-1">
-            <span>💡 للباركودات الدقيقة أو IMEI اضغط زر <strong>2x / 3x</strong></span>
-            <span className="text-cyan-400 font-mono">HD Scanner</span>
+            <span>
+              {mode === 'qr'
+                ? '💡 وجّه الكاميرا نحو رمز QR على شاشة الكاشير للربط الفوري'
+                : '💡 للباركودات الدقيقة أو IMEI اضغط زر 2x / 3x'}
+            </span>
+            <span className="text-cyan-400 font-mono">
+              {mode === 'qr' ? 'QR Code' : 'Barcode / IMEI'}
+            </span>
           </div>
         </div>
       </div>

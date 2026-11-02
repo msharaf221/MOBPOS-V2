@@ -1810,24 +1810,24 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                 <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border-2 border-red-200 dark:border-red-800 p-6">
                   <h3 className="text-lg font-bold text-red-600 dark:text-red-400 mb-1 flex items-center gap-2">
                     <AlertTriangle size={20} />
-                    منطقة الخطر
+                    منطقة الخطر والتهيئة
                   </h3>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">إجراءات لا يمكن التراجع عنها</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">إجراءات إدارية لتجهيز وتسليم النظام للعملاء</p>
 
                   <div className="p-4 bg-red-50 dark:bg-red-900/15 rounded-xl border border-red-200 dark:border-red-800">
                     <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                       <div>
-                        <p className="font-bold text-red-800 dark:text-red-200">🗑️ إعادة تعيين جميع البيانات</p>
+                        <p className="font-bold text-red-800 dark:text-red-200">✨ تصفير وتجهيز النظام للتسليم (Clean Production Reset)</p>
                         <p className="text-sm text-red-600 dark:text-red-400 mt-1">
-                          سيتم مسح جميع البيانات الحالية واستعادة البيانات الافتراضية. هذا الإجراء نهائي!
+                          مسح كافة البيانات والحركات التجريبية، وتصفير أرصدة الخزائن والمخزون، وتفريغ طابور المزامنة العالق، مع الإبقاء على شجرة التصنيفات الأساسية ومستخدم المدير لتسليم النظام نظيفاً وجاهزاً للعميل.
                         </p>
                       </div>
                       <button
                         onClick={() => setShowResetConfirm(true)}
-                        className="flex items-center gap-2 px-5 py-2.5 bg-red-600 text-white rounded-xl hover:bg-red-700 transition whitespace-nowrap shadow-lg shadow-red-600/20"
+                        className="flex items-center gap-2 px-5 py-2.5 bg-red-600 text-white rounded-xl hover:bg-red-700 transition whitespace-nowrap shadow-lg shadow-red-600/20 font-bold"
                       >
                         <RefreshCw size={18} />
-                        إعادة تعيين
+                        تصفير وتجهيز للتسليم
                       </button>
                     </div>
                   </div>
@@ -1952,11 +1952,11 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
             <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-full mx-auto flex items-center justify-center mb-4">
               <AlertTriangle size={32} className="text-red-500" />
             </div>
-            <h3 className="text-xl font-bold text-gray-800 dark:text-white mb-2">تأكيد إعادة التعيين</h3>
-            <p className="text-gray-600 dark:text-gray-400 mb-6">
-              هل أنت متأكد؟ سيتم <span className="font-bold text-red-500">مسح جميع البيانات</span> واستعادة البيانات الافتراضية.
+            <h3 className="text-xl font-bold text-gray-800 dark:text-white mb-2">تأكيد تصفير النظام للتسليم</h3>
+            <p className="text-gray-600 dark:text-gray-400 mb-6 text-sm leading-relaxed">
+              سيتم مسح جميع الفواتير والحركات التجريبية والمخزون وتصفير أرصدة الخزائن إلى 0 ج.م، وتفريغ طابور المزامنة لتهيئة البرنامج للتسليم للعميل.
               <br />
-              <span className="text-sm">لا يمكن التراجع عن هذا الإجراء!</span>
+              <span className="text-xs text-red-500 font-bold block mt-2">⚠️ هذا الإجراء لا يمكن التراجع عنه نهائياً! يُنصح بأخذ نسخة احتياطية أولاً.</span>
             </p>
             <div className="flex gap-3">
               <button
@@ -1973,7 +1973,7 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                 {resetting ? (
                   <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                 ) : (
-                  '🗑️ مسح وإعادة تعيين'
+                  '✨ تصفير وتجهيز للتسليم'
                 )}
               </button>
             </div>

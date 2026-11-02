@@ -40,6 +40,19 @@ export function useUtilsSlice(state: StoreState) {
 
     // Atomically clear + repopulate each store (guaranteed clean slate)
     await indexedDBUtils.resetAllStores(defaultData);
+    try {
+      await indexedDBUtils.clearStore(indexedDBUtils.STORES.syncOutbox);
+    } catch (e) {
+      console.warn('[useUtilsSlice] Could not clear syncOutbox store:', e);
+    }
+
+    try {
+      localStorage.removeItem('mobpos_sync_queue');
+      localStorage.removeItem('mobpos_pending_count');
+      localStorage.removeItem('mobpos_failed_sync_attempts');
+    } catch {
+      // ignore
+    }
   }, [currentUser]);
   
 

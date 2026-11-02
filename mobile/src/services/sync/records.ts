@@ -165,25 +165,29 @@ export function adaptInventoryItem(
   availableImeiCount = 0
 ): InventoryItem {
   const source = (raw && typeof raw === 'object' ? raw : {}) as AnyRecord;
-  const categoryId = asString(source.categoryId);
+  const categoryId = asString(source.categoryId || source.category_id);
   const category = categoryId ? categories.get(categoryId) : undefined;
-  const hasImei = Boolean(source.hasIMEI ?? source.hasImei);
+  const hasImei = Boolean(source.hasIMEI ?? source.hasImei ?? source.has_imei);
+
+  const rawQty = source.quantity ?? source.stock_quantity ?? source.quantity_in_stock ?? source.stockQuantity ?? source.qty ?? source.stock ?? source.count;
+  const rawCost = source.costPrice ?? source.cost_price ?? source.purchasePrice ?? source.purchase_price ?? source.cost ?? source.buyPrice ?? source.buy_price;
+  const rawSell = source.sellPrice ?? source.sell_price ?? source.sellingPrice ?? source.selling_price ?? source.price ?? source.unitPrice ?? source.unit_price ?? source.sale_price;
 
   return {
     id: asString(source.id),
-    name: asString(source.name) || 'منتج غير مسمى',
-    category: asString(category?.name || source.category) || (hasImei ? 'موبايلات' : 'عام'),
+    name: asString(source.name || source.productName || source.title) || 'منتج غير مسمى',
+    category: asString(category?.name || source.category || source.categoryName) || (hasImei ? 'موبايلات' : 'عام'),
     categoryId: categoryId || undefined,
-    quantity: Math.max(0, asNumber(source.quantity, 0)),
-    minQuantity: Math.max(0, asNumber(source.minQuantity, 2)),
-    costPrice: asNumber(source.costPrice, 0),
-    sellPrice: asNumber(source.sellPrice, 0),
+    quantity: Math.max(0, asNumber(rawQty, 0)),
+    minQuantity: Math.max(0, asNumber(source.minQuantity ?? source.min, 2)),
+    costPrice: asNumber(rawCost, 0),
+    sellPrice: asNumber(rawSell, 0),
     code: asString(source.code) || undefined,
-    barcode: asString(source.barcode || source.code) || undefined,
+    barcode: asString(source.barcode || source.code || source.sku) || undefined,
     hasImei,
     hasIMEI: hasImei,
-    createdAt: asString(source.createdAt) || undefined,
-    updatedAt: asString(source.updated_at) || undefined,
+    createdAt: asString(source.createdAt || source.date) || undefined,
+    updatedAt: asString(source.updated_at || source.updatedAt) || undefined,
     branchId: branch.id,
     branchName: branch.name,
     availableImeiCount: hasImei ? availableImeiCount : undefined,
@@ -192,25 +196,27 @@ export function adaptInventoryItem(
 
 export function adaptImeiUnit(raw: unknown, branch: BranchLike): ImeiUnit {
   const source = (raw && typeof raw === 'object' ? raw : {}) as AnyRecord;
-  const imei1 = asString(source.imei1 || source.imei || source.serialNumber);
+  const imei1 = asString(source.imei1 || source.imei || source.serialNumber || source.serial);
+  const rawCost = source.purchasePrice ?? source.purchase_price ?? source.costPrice ?? source.cost_price ?? source.cost;
+  const rawSell = source.sellPrice ?? source.sell_price ?? source.sellingPrice ?? source.selling_price ?? source.price;
 
   return {
     id: asString(source.id),
-    productId: asString(source.inventoryId || source.productId),
-    inventoryId: asString(source.inventoryId || source.productId) || undefined,
-    productName: asString(source.productName) || undefined,
+    productId: asString(source.inventoryId || source.inventory_id || source.productId || source.product_id),
+    inventoryId: asString(source.inventoryId || source.inventory_id || source.productId || source.product_id) || undefined,
+    productName: asString(source.productName || source.name) || undefined,
     imei: imei1,
     imei1,
-    imei2: asString(source.imei2) || undefined,
-    serialNumber: asString(source.serialNumber) || undefined,
+    imei2: asString(source.imei2 || source.secondImei) || undefined,
+    serialNumber: asString(source.serialNumber || source.serial) || undefined,
     status: normalizeImeiStatus(source.status),
-    saleId: asString(source.saleId) || undefined,
-    customerId: asString(source.customerId) || undefined,
-    costPrice: asNumber(source.purchasePrice ?? source.costPrice, 0),
-    sellPrice: asNumber(source.sellPrice, 0),
+    saleId: asString(source.saleId || source.sale_id) || undefined,
+    customerId: asString(source.customerId || source.customer_id) || undefined,
+    costPrice: asNumber(rawCost, 0),
+    sellPrice: asNumber(rawSell, 0),
     color: asString(source.color) || undefined,
-    storage: asString(source.storage) || undefined,
-    createdAt: asString(source.createdAt) || undefined,
+    storage: asString(source.storage || source.capacity) || undefined,
+    createdAt: asString(source.createdAt || source.date) || undefined,
     branchId: branch.id,
     branchName: branch.name,
   };

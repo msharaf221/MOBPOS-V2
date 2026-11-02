@@ -69,7 +69,7 @@ export const SafesTab: React.FC<SafesTabProps> = ({
   }, [transactions, filterType, searchQuery]);
 
   return (
-    <div className="space-y-4 pb-28 animate-in fade-in duration-200">
+    <div className="space-y-4 pb-32 animate-in fade-in duration-200">
       {/* Total Liquid Cash Header Card */}
       <div
         className="p-5 rounded-3xl relative overflow-hidden border border-amber-500/25 space-y-3"

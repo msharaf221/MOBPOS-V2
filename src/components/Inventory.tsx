@@ -385,7 +385,7 @@ export default function Inventory({
               <Package className="text-green-600 dark:text-green-400" size={20} />
             </div>
             <div>
-              <p className="text-gray-500 dark:text-gray-400 text-sm">أجهزة متاحة</p>
+              <p className="text-gray-500 dark:text-gray-400 text-sm">أجهزة سيريال متاحة (IMEI)</p>
               <p className="text-xl font-bold text-green-600">
                 {imeiUnits.filter(u => isSellableUnit(u)).length}
               </p>
@@ -440,6 +440,8 @@ export default function Inventory({
                 const category = categoryById.get(item.categoryId);
                 const actualQty = getActualQuantity(item);
                 const lowStock = isLowStock(item);
+                const costPrice = Number(item.costPrice ?? (item as any).cost_price ?? (item as any).purchasePrice ?? (item as any).cost ?? 0);
+                const sellPrice = Number(item.sellPrice ?? (item as any).sell_price ?? (item as any).sellingPrice ?? (item as any).price ?? 0);
 
                 return (
                   <tr key={item.id} className={`hover:bg-gray-50 dark:hover:bg-gray-700/50 ${lowStock ? 'bg-yellow-50 dark:bg-yellow-900/10' : ''}`}>
@@ -457,9 +459,21 @@ export default function Inventory({
                         <div className="flex items-center gap-1.5">
                           <span className="bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded font-bold">{item.barcode}</span>
                           <button
-                            onClick={() => { setPrintBarcodeItem(item); setBarcodeCopies(1); }}
-                            className="p-1 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded"
-                            title="طباعة ملصق باركود"
+                            onClick={() => {
+                              if (sellPrice <= 0) {
+                                alert('تنبيه: لا يمكن طباعة ملصق باركود لصنف بدون سعر بيع مسجل. يرجى تعديل الصنف وإدخال سعر البيع أولاً.');
+                                return;
+                              }
+                              setPrintBarcodeItem(item);
+                              setBarcodeCopies(1);
+                            }}
+                            disabled={sellPrice <= 0}
+                            className={`p-1 rounded transition ${
+                              sellPrice <= 0
+                                ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed opacity-50'
+                                : 'text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30'
+                            }`}
+                            title={sellPrice <= 0 ? 'غير متاح للطباعة بدون سعر بيع' : 'طباعة ملصق باركود'}
                           >
                             <BarcodeIcon size={16} />
                           </button>
@@ -477,18 +491,18 @@ export default function Inventory({
                         {category?.name}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-gray-600 dark:text-gray-400">
-                      {formatCurrency(item.costPrice)}
+                    <td className="px-4 py-3 text-gray-600 dark:text-gray-400 font-mono">
+                      {formatCurrency(costPrice)}
                     </td>
-                    <td className="px-4 py-3 text-gray-800 dark:text-white font-medium">
-                      {item.sellPrice > 0 ? formatCurrency(item.sellPrice) : '-'}
+                    <td className="px-4 py-3 text-gray-800 dark:text-white font-medium font-mono">
+                      {sellPrice > 0 ? formatCurrency(sellPrice) : '-'}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 font-mono">
                       <span className={`font-bold ${lowStock ? 'text-red-600' : 'text-gray-800 dark:text-white'}`}>
                         {actualQty}
                       </span>
                       {item.hasIMEI && (
-                        <span className="text-xs text-gray-500 mr-1">(IMEI)</span>
+                        <span className="text-xs text-gray-500 mr-1 font-sans">(IMEI)</span>
                       )}
                     </td>
                     <td className="px-4 py-3">
@@ -503,9 +517,21 @@ export default function Inventory({
                       <div className="flex items-center justify-center gap-1">
                         {item.barcode && (
                           <button
-                            onClick={() => { setPrintBarcodeItem(item); setBarcodeCopies(1); }}
-                            className="p-2 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg"
-                            title="طباعة ملصق باركود"
+                            onClick={() => {
+                              if (sellPrice <= 0) {
+                                alert('تنبيه: لا يمكن طباعة ملصق باركود لصنف بدون سعر بيع مسجل. يرجى تعديل الصنف وإدخال سعر البيع أولاً.');
+                                return;
+                              }
+                              setPrintBarcodeItem(item);
+                              setBarcodeCopies(1);
+                            }}
+                            disabled={sellPrice <= 0}
+                            className={`p-2 rounded-lg transition ${
+                              sellPrice <= 0
+                                ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed opacity-50'
+                                : 'text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20'
+                            }`}
+                            title={sellPrice <= 0 ? 'غير متاح للطباعة بدون سعر بيع' : 'طباعة ملصق باركود'}
                           >
                             <Printer size={18} />
                           </button>

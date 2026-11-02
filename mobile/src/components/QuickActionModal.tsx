@@ -44,7 +44,8 @@ export const QuickActionModal: React.FC<QuickActionModalProps> = ({
   const [amount, setAmount] = useState<string>('');
   const [selectedSafeId, setSelectedSafeId] = useState<string>('');
   const [description, setDescription] = useState<string>('');
-  const [category, setCategory] = useState<string>('مصروفات نثرية');
+  const [expenseCategory, setExpenseCategory] = useState<string>('مصروفات نثرية');
+  const [depositCategory, setDepositCategory] = useState<string>('إيداع رأس مال');
 
   // Product form
   const [prodName, setProdName] = useState('');
@@ -61,12 +62,20 @@ export const QuickActionModal: React.FC<QuickActionModalProps> = ({
 
   const handleExpenseOrDepositSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
+
     if (!amount || Number(amount) <= 0) {
-      setErrorMessage('يرجى إدخال مبلغ صحيح');
+      setErrorMessage('يرجى إدخال مبلغ صحيح أكبر من صفر');
       return;
     }
     if (!activeBranch) {
       setErrorMessage('يرجى تحديد فرع أولاً');
+      return;
+    }
+
+    const trimmedDesc = description.trim();
+    if (!trimmedDesc || trimmedDesc.length < 3) {
+      setErrorMessage('يرجى كتابة بيان واضح للحركة (3 أحرف على الأقل)');
       return;
     }
 
@@ -82,13 +91,15 @@ export const QuickActionModal: React.FC<QuickActionModalProps> = ({
     setIsSubmitting(true);
     setErrorMessage(null);
 
+    const selectedCategory = mode === 'expense' ? expenseCategory.trim() : depositCategory.trim();
+
     try {
       const res = await multiBranchManager.submitTransaction(activeBranch, {
         type: mode === 'expense' ? 'expense' : 'deposit',
         amount: Number(amount),
         safe,
-        description: description.trim() || (mode === 'expense' ? 'مصروف عام' : 'إيداع نقدي'),
-        category: category.trim(),
+        description: trimmedDesc,
+        category: selectedCategory,
         userName: 'تطبيق الموبايل',
       });
 
@@ -276,8 +287,8 @@ export const QuickActionModal: React.FC<QuickActionModalProps> = ({
               <div>
                 <label className="text-[11px] font-bold text-slate-300 block mb-1">بند المصروف:</label>
                 <select
-                  value={category}
-                  onChange={e => setCategory(e.target.value)}
+                  value={expenseCategory}
+                  onChange={e => setExpenseCategory(e.target.value)}
                   className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-white/[0.1] text-xs text-white focus:outline-none focus:border-cyan-400"
                 >
                   <option value="مصروفات نثرية">نثريات وشاي ومأكولات ☕</option>
@@ -285,6 +296,23 @@ export const QuickActionModal: React.FC<QuickActionModalProps> = ({
                   <option value="إيجار">إيجار المحل 🏢</option>
                   <option value="رواتب وسلف">سلف ومستحقات موظفين 👥</option>
                   <option value="صيانة ومعدات">صيانة وعدد 🛠️</option>
+                  <option value="أخرى">أخرى 📝</option>
+                </select>
+              </div>
+            )}
+
+            {mode === 'deposit' && (
+              <div>
+                <label className="text-[11px] font-bold text-slate-300 block mb-1">بند الإيداع:</label>
+                <select
+                  value={depositCategory}
+                  onChange={e => setDepositCategory(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-white/[0.1] text-xs text-white focus:outline-none focus:border-cyan-400"
+                >
+                  <option value="إيداع رأس مال">إيداع رأس مال / زيادة سيولة 💼</option>
+                  <option value="تمويل صاحب العمل">جاري المالك / تمويل صاحب المحل 🤝</option>
+                  <option value="توريد نقدية">توريد نقدية من مبيعات سابقة 💵</option>
+                  <option value="دخل تشغيلي آخر">دخل تشغيلي إضافي / خدمات 📈</option>
                   <option value="أخرى">أخرى 📝</option>
                 </select>
               </div>

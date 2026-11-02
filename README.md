@@ -2,7 +2,7 @@
   <img src="build/icon.png" alt="MOBPOS Logo" width="120" />
 </p>
 
-<h1 align="center">📱 MOBPOS — نظام إدارة محلات الموبايلات المتكامل (v1.0.31)</h1>
+<h1 align="center">📱 MOBPOS — نظام إدارة محلات الموبايلات المتكامل (v1.0.35)</h1>
 
 <p align="center">
   <b>المنظومة السحابية والهجينة الأولى في الوطن العربي المتخصصة 100% في إدارة محلات الموبايلات والإكسسوارات والصيانة</b><br/>
@@ -13,13 +13,13 @@
   <a href="https://github.com/msharaf221/MOBPOS-V2/releases/latest">
     <img src="https://img.shields.io/github/v/release/msharaf221/MOBPOS-V2?style=for-the-badge&color=2563eb&label=%D8%A3%D8%AD%D8%AF%D8%AB%20%D8%A5%D8%B5%D8%AF%D8%A7%D8%B1" alt="Latest Release" />
   </a>
-  <img src="https://img.shields.io/badge/Version-1.0.31-blue?style=for-the-badge" alt="Version 1.0.31" />
+  <img src="https://img.shields.io/badge/Version-1.0.35-blue?style=for-the-badge" alt="Version 1.0.35" />
   <img src="https://img.shields.io/badge/React-19.2-61DAFB?style=for-the-badge&logo=react&logoColor=white" alt="React 19" />
   <img src="https://img.shields.io/badge/TypeScript-5.9-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript 5.9" />
   <img src="https://img.shields.io/badge/Electron-44-47848F?style=for-the-badge&logo=electron&logoColor=white" alt="Electron 44" />
   <img src="https://img.shields.io/badge/Capacitor-8.5-119EFF?style=for-the-badge&logo=capacitor&logoColor=white" alt="Capacitor 8" />
   <img src="https://img.shields.io/badge/Supabase-Realtime_v2.1-3ECF8E?style=for-the-badge&logo=supabase&logoColor=white" alt="Supabase Realtime" />
-  <img src="https://img.shields.io/badge/Tests-139%20Passing%20%2B%20E2E-success?style=for-the-badge" alt="Tests 139 Passing" />
+  <img src="https://img.shields.io/badge/Tests-152%20Passing%20%2B%20E2E-success?style=for-the-badge" alt="Tests 152 Passing" />
 </p>
 
 <p align="center">

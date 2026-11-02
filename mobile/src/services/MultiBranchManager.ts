@@ -25,6 +25,12 @@ import {
   toMap,
 } from './sync/records';
 import { normalizeRecord } from '../../../shared/sync/normalize.ts';
+import {
+  isOperationalExpense,
+  isOperationalIncome,
+  calculateInventoryValuation,
+  roundMoney,
+} from '../../../shared/accounting/financialCalculations.ts';
 import { enqueueOutbox, flushOutbox, getOutboxCount } from './sync/outbox';
 
 const STORAGE_KEY_BRANCHES = 'mobpos_companion_branches_v1';
@@ -193,7 +199,8 @@ class MultiBranchManager {
       }
 
       const branches = this.getBranches();
-      const branchName = data.userName ? `متجر ${data.userName}` : 'الفرع المتزامن';
+      const rawShop = (data as any).shopName || (data as any).branchName || data.userName;
+      const branchName = rawShop ? `متجر ${rawShop}` : 'الفرع الرئيسي';
 
       // Check if existing branch matches 'b_main' or the same tenantId
       const existingIdx = branches.findIndex(b => b.id === 'b_main' || (data.tenantId && b.tenantId === data.tenantId));
@@ -202,7 +209,7 @@ class MultiBranchManager {
       if (existingIdx >= 0) {
         targetBranch = {
           ...branches[existingIdx],
-          name: branches[existingIdx].name === 'الفرع الرئيسي' ? branchName : branches[existingIdx].name,
+          name: branches[existingIdx].name === 'الفرع الرئيسي' || branches[existingIdx].name === 'الفرع المتزامن' ? branchName : branches[existingIdx].name,
           supabaseUrl: data.url,
           supabaseAnonKey: data.key,
           tenantId: data.tenantId || 'default-tenant',
@@ -218,8 +225,8 @@ class MultiBranchManager {
       } else {
         targetBranch = this.addBranch({
           name: branchName,
-          city: 'الفرع المتزامن',
-          code: 'SYNC-01',
+          city: branchName,
+          code: 'MAIN-01',
           color: '#38bdf8',
           supabaseUrl: data.url,
           supabaseAnonKey: data.key,
@@ -727,45 +734,48 @@ class MultiBranchManager {
         m => m.status !== 'delivered' && m.status !== 'cancelled'
       ).length;
 
-      // C. Expenses & Outflows (حُسبت أولاً لتطبيق القاعدة المحاسبية لصافي الربح)
+      // C. Expenses & Outflows (الفصل الصارم: مصروفات التشغيل والهوالك فقط — استبعاد السحب ورأس المال وشراء المخزون)
       const todayExpenses = normalizedTransactions.filter(t => {
         const d = (t.date || (t as any).createdAt || '').slice(0, 10);
-        const isOutflow =
-          t.type === 'expense' ||
-          t.type === 'withdrawal' ||
-          (t.type as string) === 'wallet_withdrawal' ||
-          (t.type as string) === 'purchase' ||
-          (t.type as string) === 'maintenance_cost' ||
-          (t.type as string) === 'waste';
-        return d === todayDateStr && isOutflow;
+        return d === todayDateStr && isOperationalExpense(t as any);
       });
-      const todayExpensesTotal = todayExpenses.reduce((acc, t) => acc + Math.abs(Number(t.amount) || 0), 0);
+      const todayExpensesTotal = roundMoney(
+        todayExpenses.reduce((acc, t) => acc + Math.abs(Number(t.amount) || 0), 0)
+      );
 
-      // D. Total Revenue, Gross Profit & Net Operating Profit
-      // 1. إجمالي الإيرادات = مبيعات البضاعة + إيرادات الصيانة المحصلة
-      const todayTotalRevenue = todaySalesTotal + todayMaintenanceIncome;
-      // 2. مجمل الربح (قبل المصروفات) = ربح مبيعات البضاعة + ربح الصيانة
-      const todayGrossProfit = todaySalesProfit + todayMaintenanceProfit;
-      // 3. صافي الربح الحقيقي = مجمل الربح - المصروفات اليومية
-      const todayNetProfit = todayGrossProfit - todayExpensesTotal;
+      // أي إيرادات تشغيلية أخرى بخلاف المبيعات والصيانة
+      const todayOtherOperatingIncomeTx = normalizedTransactions.filter(t => {
+        const d = (t.date || (t as any).createdAt || '').slice(0, 10);
+        return (
+          d === todayDateStr &&
+          isOperationalIncome(t as any) &&
+          t.type !== 'maintenance' &&
+          !(t.category || '').includes('صيانة')
+        );
+      });
+      const todayOtherOperatingIncome = roundMoney(
+        todayOtherOperatingIncomeTx.reduce((acc, t) => acc + Math.abs(Number(t.amount) || 0), 0)
+      );
+
+      // D. Total Revenue, Gross Profit & Net Operating Profit (معادلة موحدة دقيقة)
+      // 1. إجمالي الإيرادات = مبيعات البضاعة + إيرادات الصيانة المحصلة + أي إيرادات تشغيلية أخرى
+      const todayTotalRevenue = roundMoney(todaySalesTotal + todayMaintenanceIncome + todayOtherOperatingIncome);
+      // 2. مجمل الربح (قبل المصروفات) = ربح مبيعات البضاعة + ربح الصيانة + الإيرادات التشغيلية الأخرى
+      const todayGrossProfit = roundMoney(todaySalesProfit + todayMaintenanceProfit + todayOtherOperatingIncome);
+      // 3. صافي الربح الحقيقي = مجمل الربح - المصروفات التشغيلية اليومية
+      const todayNetProfit = roundMoney(todayGrossProfit - todayExpensesTotal);
       const todayProfitTotal = todayNetProfit;
 
       // E. Safes Cash Liquidity
-      const totalSafesBalance = normalizedSafes.reduce((acc, s) => acc + (Number(s.balance) || 0), 0);
+      const totalSafesBalance = roundMoney(
+        normalizedSafes.reduce((acc, s) => acc + (Number(s.balance) || 0), 0)
+      );
 
       // F. Inventory Valuation (Capital locked in stock vs retail expected value)
-      const inventoryCostValue = normalizedInventory.reduce(
-        (acc, item) => acc + (Number(item.quantity) || 0) * (Number(item.costPrice) || 0),
-        0
-      );
-      const inventorySellValue = normalizedInventory.reduce(
-        (acc, item) => acc + (Number(item.quantity) || 0) * (Number(item.sellPrice) || 0),
-        0
-      );
-      const inventoryTotalItemsCount = normalizedInventory.reduce(
-        (acc, item) => acc + (Number(item.quantity) || 0),
-        0
-      );
+      const inventoryVal = calculateInventoryValuation(normalizedInventory);
+      const inventoryCostValue = inventoryVal.totalCapitalAtCost;
+      const inventorySellValue = inventoryVal.totalRetailValue;
+      const inventoryTotalItemsCount = inventoryVal.totalPiecesCount;
       const lowStockCount = normalizedInventory.filter(i => (i.quantity || 0) <= (i.minQuantity || 2)).length;
 
       // G. Debts
