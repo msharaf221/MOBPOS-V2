@@ -249,7 +249,7 @@ export function adaptTransaction(
     id: asString(source.id),
     date: rawDate,
     type: asString(source.type, 'expense') as Transaction['type'],
-    amount: asNumber(source.amount, 0),
+    amount: Math.abs(asNumber(source.amount, 0)),
     safeId: asString(source.safeId),
     safeName: asString(safe?.name || source.safeName),
     description: asString(source.description) || 'حركة نقدية',

@@ -69,6 +69,8 @@ export const DEFAULT_SUPABASE_URL = (metaEnv.VITE_DEFAULT_SUPABASE_URL || metaEn
 export const DEFAULT_SUPABASE_ANON_KEY = (metaEnv.VITE_DEFAULT_SUPABASE_ANON_KEY || metaEnv.VITE_SUPABASE_ANON_KEY || '').trim();
 
 const BATCH_SIZE = 50;
+const PULL_RETRY_COUNT = 3;
+const PULL_RETRY_DELAY_MS = 2000;
 const INITIAL_BACKOFF_MS = 5000;
 const MAX_BACKOFF_MS = 60000;
 const SYNCABLE_STORES = new Set(
@@ -112,8 +114,8 @@ class SyncEngine {
   private dirtySnapshotStores = new Set<string>();
   private isPushingSnapshot = false;
   private snapshotDebounceStartTime = 0;
-  private readonly SNAPSHOT_DEBOUNCE_MS = 1200;
-  private readonly SNAPSHOT_MAX_WAIT_MS = 3000;
+  private readonly SNAPSHOT_DEBOUNCE_MS = 800;
+  private readonly SNAPSHOT_MAX_WAIT_MS = 2000;
 
   constructor() {
     this.config = this.loadConfig();
@@ -361,8 +363,9 @@ class SyncEngine {
     void this.selfHealFromIndexedDB();
 
     // Zero-Touch Background Worker:
-    // كل 30 ثانية: رفع المعلّق، سحب أي كتابات جديدة من الموبايل/الأجهزة
+    // كل 15 ثانية: رفع المعلّق، سحب أي كتابات جديدة من الموبايل/الأجهزة
     // التانية، ثم تحديث اللقطات السحابية عشان أي جهاز جديد يلاقي بيانات حديثة.
+    // 🔴 FIX: تقليل الفترة من 30 → 15 ثانية عشان المزامنة تكون أسرع.
     this.heartbeatTimer = setInterval(() => {
       if (!this.state.isOnline || this.state.status === 'disabled') return;
 
@@ -374,22 +377,14 @@ class SyncEngine {
         void this.triggerDrain(false);
       }
 
-      // 🔴 FIX الجوهري: السحب الدوري (catch-up) — كان الديسكتوب يعتمد على
-      // Realtime فقط، فأي مصروف/فاتورة/منتج اتسجل من الموبايل وقت انقطاع
-      // الـ WebSocket كان يضيع تماماً حتى الضغط اليدوي على "مزامنة".
-      void (async () => {
-        try {
-          await this.pullCatchUp();
-        } catch (err) {
-          console.warn('[SyncEngine] Periodic catch-up notice:', err);
-        }
+      // 🔴 FIX الجوهري: السحب الدوري (catch-up) مع retry داخلي بدل فشل صامت.
+      void this.pullCatchUpWithRetry();
 
-        // Auto-refresh snapshot every 3 minutes silently so mobpos_stores is never stale
-        if (Date.now() - this.lastAutoSnapshotTime > 180000 && !this.isPushingSnapshot) {
-          void this.autoPushSnapshotInBackground();
-        }
-      })();
-    }, 30000);
+      // Auto-refresh snapshot every 2 minutes silently so mobpos_stores is never stale
+      if (Date.now() - this.lastAutoSnapshotTime > 120000 && !this.isPushingSnapshot) {
+        void this.autoPushSnapshotInBackground();
+      }
+    }, 15000);
   }
 
   public destroy(): void {
@@ -1283,6 +1278,27 @@ class SyncEngine {
    * الموبايل اللي اتكتبت بنفس اللحظة أو بساعة جهاز مختلفة.
    * بنرجع 60 ثانية للخلف كهامش أمان (إعادة التطبيق idempotent).
    */
+  /**
+   * pullCatchUp مع retry داخلي — بيحاول 3 مرات بـ backoff قبل ما يستسلم.
+   * كان الفشل الصامت يخلي المصروف/الفاتورة المسجّلة من الموبايل تضيع تماماً.
+   */
+  private async pullCatchUpWithRetry(): Promise<void> {
+    for (let attempt = 0; attempt < PULL_RETRY_COUNT; attempt++) {
+      try {
+        const count = await this.pullCatchUp();
+        if (count > 0) {
+          console.info(`[SyncEngine] Catch-up pulled ${count} record(s) successfully ✅`);
+        }
+        return; // نجاح — خروج
+      } catch (err) {
+        console.warn(`[SyncEngine] Catch-up attempt ${attempt + 1}/${PULL_RETRY_COUNT} failed:`, err);
+        if (attempt < PULL_RETRY_COUNT - 1) {
+          await new Promise(resolve => setTimeout(resolve, PULL_RETRY_DELAY_MS * (attempt + 1)));
+        }
+      }
+    }
+  }
+
   public async pullCatchUp(): Promise<number> {
     if (!this.supabase || !this.state.isOnline || !this.config.autoSyncEnabled) return 0;
     if (this.isPulling) return 0;
@@ -1290,17 +1306,15 @@ class SyncEngine {
     this.isPulling = true;
     const tenantId = this.state.tenantId;
 
-    // 🔴 FIX: ترقيم الصفحات — سابقاً limit(500) بلا تنقل بين الصفحات يعني
-    // أن الجهاز المتأخر جداً (أكثر من 500 تغيير) لا يستلم باقي التحديثات أبداً.
-    const PAGE_SIZE = 500;
+    // 🔴 FIX: رفع حجم الصفحة من 500 → 1000 ودعم pagination كامل.
+    const PAGE_SIZE = 1000;
     let appliedCount = 0;
 
     try {
       const storedCursor = await this.loadRemoteCursor();
-      const since = storedCursor
-        ? new Date(Math.max(0, new Date(storedCursor).getTime() - 60_000)).toISOString()
-        : null;
-      let cursor = since;
+      // 🔴 FIX: إزالة الـ rollback -60s — كان يسبب إعادة تطبيق سجلات قديمة
+      // بلا فائدة. الاعتماد على gte بدل gt يكفي لتغطية الحالات الحدودية.
+      let cursor = storedCursor || null;
 
       while (true) {
         let query = this.supabase
@@ -1311,11 +1325,14 @@ class SyncEngine {
           .limit(PAGE_SIZE);
 
         if (cursor) {
-          query = query.gt('updated_at', cursor);
+          // 🔴 FIX: استخدام gte بدل gt — عشان لو سجلين بنفس التوقيت بالظبط
+          // (e.g. batch upsert) ما نفوّتش الثاني. إعادة التطبيق idempotent.
+          query = query.gte('updated_at', cursor);
         }
 
         const { data, error } = await query;
-        if (error || !data) break;
+        if (error) throw new Error(`Catch-up query failed: ${error.message}`);
+        if (!data) break;
 
         const rows = data as SyncRecordRow[];
         for (const row of rows) {
@@ -1329,9 +1346,13 @@ class SyncEngine {
           if (latest) {
             // لو الصفحة كلها بنفس التوقيت بالظبط، منقدرش نتقدم — نخرج عشان
             // ما ندخلش في حلقة لا نهائية.
-            if (cursor && latest <= cursor) break;
-            cursor = latest;
-            await this.saveRemoteCursor(latest);
+            if (cursor && latest <= cursor && rows.length >= PAGE_SIZE) {
+              // حالة حدودية: كل الـ 1000 سجل بنفس التوقيت — نتقدم بميلي ثانية
+              cursor = new Date(new Date(latest).getTime() + 1).toISOString();
+            } else {
+              cursor = latest;
+            }
+            await this.saveRemoteCursor(cursor);
           }
         }
 
@@ -1341,6 +1362,9 @@ class SyncEngine {
 
       if (appliedCount > 0) {
         this.emitState();
+        // 🔴 FIX: بعد سحب تغييرات مهمة، ندفع snapshot فوراً عشان الأجهزة
+        // التانية تشوف الحالة المحدثة بدون انتظار الدورة التالية.
+        this.scheduleDebouncedSnapshot(undefined, 500);
       }
       return appliedCount;
     } finally {

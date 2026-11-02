@@ -141,7 +141,18 @@ export function normalizeTransaction(input: unknown, ctx: NormalizeContext = {})
   const id = resolveId(src, ctx, 'tx');
   const createdAt = firstString(src.createdAt, src.date, src.updated_at, ctx.updatedAt) || nowIso(ctx);
   const type = normalizeTransactionType(src.type);
-  const amount = Math.abs(asNumber(firstNumber(src.amount, src.value, src.total), 0));
+  
+  // 🔴 FIX: في دفتر أستاذ الديسكتوب، حركات الصرف (expense / waste / إلخ) تُسجَّل
+  // بقيمة سالبة (-amount)، بينما التوريدات والمبيعات بقيمة موجبة (+amount).
+  // كان Math.abs يقلب المصروف لقيمة موجبة، فيعتبره الديسكتوب إيراداً ويختفي من تبويب المصروفات!
+  const isOutflow =
+    type === 'expense' ||
+    type === 'maintenance_cost' ||
+    type === 'waste' ||
+    type === 'withdrawal' ||
+    type === 'wallet_withdrawal';
+  const rawAmount = asNumber(firstNumber(src.amount, src.value, src.total), 0);
+  const amount = isOutflow ? -Math.abs(rawAmount) : Math.abs(rawAmount);
 
   return {
     ...src,

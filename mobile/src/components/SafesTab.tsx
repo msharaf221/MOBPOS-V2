@@ -272,7 +272,7 @@ export const SafesTab: React.FC<SafesTabProps> = ({
                       isOut ? 'text-rose-400' : 'text-emerald-400'
                     }`}
                   >
-                    {isOut ? '-' : '+'} {formatCurrency(tx.amount, hideAmounts)}
+                    {isOut ? '-' : '+'} {formatCurrency(Math.abs(tx.amount), hideAmounts)}
                   </span>
                   <span className="text-[10px] text-slate-500 block">
                     {formatTimeAgo(txDate)}

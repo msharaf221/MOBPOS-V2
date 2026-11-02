@@ -29,7 +29,9 @@ import { enqueueOutbox, flushOutbox, getOutboxCount } from './sync/outbox';
 
 const STORAGE_KEY_BRANCHES = 'mobpos_companion_branches_v1';
 const BRANCH_FETCH_TIMEOUT_MS = 18_000;
-const METRICS_CACHE_TTL_MS = 30_000;
+const METRICS_CACHE_TTL_MS = 20_000;
+const REALTIME_RECONNECT_INTERVAL_MS = 20_000;
+const MAX_DELTA_RECORDS = 2000;
 
 /** معرّف الجهاز الثابت للإيكوا suppression في المزامنة (بدل توليد واحد لكل عملية) */
 const DEVICE_CLIENT_ID_KEY = 'mobpos_companion_device_client_id';
@@ -92,6 +94,8 @@ class MultiBranchManager {
   private channels: Map<string, ReturnType<SupabaseClient['channel']>> = new Map();
   private listeners: Set<() => void> = new Set();
   private metricsCache: Map<string, { metrics: BranchMetrics; timestamp: number }> = new Map();
+  private realtimeHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private realtimeReconnectAttempts: Map<string, number> = new Map();
 
   public getBranches(): BranchConfig[] {
     if (typeof localStorage === 'undefined') return DEFAULT_BRANCHES;
@@ -327,6 +331,20 @@ class MultiBranchManager {
           if (status === 'SUBSCRIBED') {
             console.log(`[MultiBranch Live] Subscribed to realtime updates for ${branch.name}`);
             this.updateBranch(branch.id, { status: 'connected' });
+            this.realtimeReconnectAttempts.set(branch.id, 0);
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            // 🔴 FIX: Auto-reconnect عند فقد الاتصال بدل سكوت
+            console.warn(`[MultiBranch Live] Channel ${status} for ${branch.name}, scheduling reconnect...`);
+            this.updateBranch(branch.id, { status: 'error' });
+            const attempts = this.realtimeReconnectAttempts.get(branch.id) || 0;
+            if (attempts < 10) {
+              const delay = Math.min(REALTIME_RECONNECT_INTERVAL_MS * Math.pow(1.5, attempts), 120_000);
+              this.realtimeReconnectAttempts.set(branch.id, attempts + 1);
+              setTimeout(() => {
+                console.info(`[MultiBranch Live] Reconnect attempt ${attempts + 1} for ${branch.name}...`);
+                this.setupRealtimeForBranch(branch, onLiveChange);
+              }, delay);
+            }
           }
         });
 
@@ -344,11 +362,29 @@ class MultiBranchManager {
       this.setupRealtimeForBranch(b, onLiveChange);
     }
 
+    // 🔴 FIX: Heartbeat دوري كل 20 ثانية — يفحص حالة القنوات ويعيد الاتصال
+    // لو القناة ماتت صامتاً (مشكلة شائعة مع Supabase Realtime على الموبايل)
+    if (this.realtimeHeartbeatTimer) clearInterval(this.realtimeHeartbeatTimer);
+    this.realtimeHeartbeatTimer = setInterval(() => {
+      const activeBranches = this.getBranches().filter(b => b.enabled && b.supabaseUrl && b.supabaseAnonKey);
+      for (const b of activeBranches) {
+        if (!this.channels.has(b.id)) {
+          console.info(`[MultiBranch Live] Heartbeat: reconnecting dead channel for ${b.name}`);
+          this.setupRealtimeForBranch(b, onLiveChange);
+        }
+      }
+    }, REALTIME_RECONNECT_INTERVAL_MS);
+
     return () => {
+      if (this.realtimeHeartbeatTimer) {
+        clearInterval(this.realtimeHeartbeatTimer);
+        this.realtimeHeartbeatTimer = null;
+      }
       for (const [, ch] of this.channels.entries()) {
         void ch.unsubscribe();
       }
       this.channels.clear();
+      this.realtimeReconnectAttempts.clear();
     };
   }
 
@@ -529,18 +565,32 @@ class MultiBranchManager {
       }
 
       // 3. Fetch Real-time Deltas from mobpos_records and overlay on top of baseline
+      // 🔴 FIX: رفع الحد من 600 → 2000 مع pagination كامل عشان ما نفوّتش أي تغيير.
       try {
-        // 🔴 FIX: استثناء .is('deleted_at', null) — كانت الـ tombstones (سجلات الحذف)
-        // تُفلتر خارج الاستعلام، فلا أُحذف أي سجل من عرض الموبايل أبداً بعد حذفه بالديسكتوب.
-        let deltaQuery = client.from('mobpos_records').select('*').order('updated_at', { ascending: false }).limit(600);
-        if (activeTenantId) {
-          deltaQuery = deltaQuery.eq('tenant_id', activeTenantId);
-        }
-        const { data: deltaRows, error: deltaErr } = await deltaQuery;
+        let allDeltaRows: any[] = [];
+        let deltaOffset = 0;
+        const DELTA_PAGE_SIZE = 500;
 
-        if (deltaRows && deltaRows.length > 0 && !deltaErr) {
+        while (allDeltaRows.length < MAX_DELTA_RECORDS) {
+          let deltaQuery = client
+            .from('mobpos_records')
+            .select('*')
+            .order('updated_at', { ascending: false })
+            .range(deltaOffset, deltaOffset + DELTA_PAGE_SIZE - 1);
+          if (activeTenantId) {
+            deltaQuery = deltaQuery.eq('tenant_id', activeTenantId);
+          }
+          const { data: pageRows, error: deltaErr } = await deltaQuery;
+          if (deltaErr || !pageRows || pageRows.length === 0) break;
+          allDeltaRows = allDeltaRows.concat(pageRows);
+          deltaOffset += DELTA_PAGE_SIZE;
+          // صفحة غير مكتملة → وصلنا لآخر البيانات
+          if (pageRows.length < DELTA_PAGE_SIZE) break;
+        }
+
+        if (allDeltaRows.length > 0) {
           // Overlay deltas onto corresponding store arrays (الأحدث الأول)
-          for (const row of deltaRows) {
+          for (const row of allDeltaRows) {
             const store = canonicalStoreName(row.store);
             if (!store) continue;
             const recordData = row.data;
@@ -689,7 +739,7 @@ class MultiBranchManager {
           (t.type as string) === 'waste';
         return d === todayDateStr && isOutflow;
       });
-      const todayExpensesTotal = todayExpenses.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+      const todayExpensesTotal = todayExpenses.reduce((acc, t) => acc + Math.abs(Number(t.amount) || 0), 0);
 
       // D. Total Revenue, Gross Profit & Net Operating Profit
       // 1. إجمالي الإيرادات = مبيعات البضاعة + إيرادات الصيانة المحصلة
@@ -1620,7 +1670,8 @@ class MultiBranchManager {
     const branchCtx = { branchId: branch.id, branchName: branch.name, now: nowIso };
 
     // 🔴 FIX: `deposit` مش نوع موجود في الديسكتوب — normalizeRecord بيحوله
-    // لـ`capital`، وكمان بيضيف createdAt اللي التقارير بتفلتر بيه.
+    // لـ`capital`، وحركات المصروف بتتسجل بقيمة سالبة (-amountVal) لمطابقة الديسكتوب
+    const txAmountForLedger = isOutflow ? -amountVal : amountVal;
     const records = [
       {
         store: 'transactions',
@@ -1630,7 +1681,7 @@ class MultiBranchManager {
           {
             id: txId,
             type: tx.type,
-            amount: amountVal,
+            amount: txAmountForLedger,
             safeId: tx.safe.id,
             safeName: tx.safe.name,
             description: tx.description,

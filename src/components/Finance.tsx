@@ -141,9 +141,9 @@ export default function Finance({
     let result = periodTransactions;
     if (typeFilter !== 'all') {
       if (typeFilter === 'income') {
-        result = result.filter(t => t.amount > 0 && t.type !== 'transfer');
+        result = result.filter(t => (t.amount > 0 || t.type === 'income') && t.type !== 'expense' && t.type !== 'transfer');
       } else if (typeFilter === 'expense') {
-        result = result.filter(t => t.amount < 0);
+        result = result.filter(t => t.type === 'expense' || t.amount < 0);
       } else {
         result = result.filter(t => t.type === typeFilter);
       }
@@ -173,10 +173,10 @@ export default function Finance({
     //    convenience, not shop revenue/expense
     const nonPnlTypes: Transaction['type'][] = ['transfer', 'wallet_deposit', 'wallet_withdrawal', 'capital', 'side_account'];
     const income = periodTransactions
-      .filter(t => t.amount > 0 && !nonPnlTypes.includes(t.type))
-      .reduce((sum, t) => sum + t.amount, 0);
+      .filter(t => (t.amount > 0 || t.type === 'income') && t.type !== 'expense' && !nonPnlTypes.includes(t.type))
+      .reduce((sum, t) => sum + Math.abs(t.amount), 0);
     const expenses = periodTransactions
-      .filter(t => t.amount < 0 && !nonPnlTypes.includes(t.type))
+      .filter(t => (t.type === 'expense' || t.amount < 0) && t.type !== 'income' && !nonPnlTypes.includes(t.type))
       .reduce((sum, t) => sum + Math.abs(t.amount), 0);
     
     // Sales revenue & profit
@@ -602,7 +602,8 @@ export default function Finance({
             <div className="divide-y divide-gray-200 dark:divide-gray-700">
               {financePage.pageRows.map(trans => {
                 const safe = safes.find(s => s.id === trans.safeId);
-                const isIncome = trans.amount > 0;
+                const isExpense = trans.type === 'expense' || trans.amount < 0;
+                const isIncome = !isExpense && (trans.amount > 0 || trans.type === 'income' || trans.type === 'sale' || trans.type === 'maintenance');
                 return (
                   <div key={trans.id} className="p-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50">
                     <div className="flex items-center gap-3">
@@ -620,8 +621,8 @@ export default function Finance({
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className={`font-bold ${isIncome ? 'text-green-600' : 'text-red-600'}`}>
-                        {isIncome ? '+' : ''}{formatCurrency(trans.amount)}
+                      <span className={`font-bold ${isIncome ? 'text-green-600' : isExpense ? 'text-red-600' : 'text-gray-600'}`}>
+                        {isIncome ? '+' : isExpense ? '-' : ''}{formatCurrency(Math.abs(trans.amount))}
                       </span>
                       {(trans.type === 'income' || trans.type === 'expense') && (
                         <button
