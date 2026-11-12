@@ -269,20 +269,27 @@ npm run dev
 npm run electron:dev
 ```
 
-### أوامر بناء حزم الإنتاج
+### أوامر بناء حزم الإنتاج (Building Desktop & Mobile)
+
 ```bash
-# بناء حزمة الويب المضغوطة
+# 1. بناء حزمة الويب المضغوطة (Vite Production)
 npm run build
 
-# بناء تطبيق ويندوز المثبت (Installer EXE)
-npm run dist:win
+# 2. بناء حزم ويندوز 10 / 11 الحديثة (توضع في مجلد release/)
+npm run dist:win              # برنامج التثبيت الرسمي (Setup Installer EXE 64-bit)
+npm run dist:win:portable     # نسخة محمولة تعمل فورياً بدون تثبيت (Portable EXE)
 
-# بناء تطبيق ويندوز المحمول (Portable EXE)
-npm run dist:win:portable
+# 3. بناء حزم ويندوز 7 و 8 وأجهزة الكاشير القديمة (توضع في مجلد release-win7/)
+# تعتمد تلقائياً على محرك Electron 22.3.27 مع تعطيل تسريع العتاد لتفادي الشاشة البيضاء
+npm run dist:win7             # بناء نسختي (32-بت و 64-بت) مع النسخ المحمولة دفعة واحدة
+npm run dist:win7:ia32        # بناء نسخة 32-بت فقط (المثالية لأكثر من 90% من أجهزة كاشير POS القديمة)
+npm run dist:win7:x64         # بناء نسخة 64-بت فقط لويندوز 7
 
-# بناء تطبيق الموبايل (Android & iOS Web Assets)
+# 4. بناء أصول تطبيق الموبايل (Capacitor Android & iOS Web Assets)
 npm run mobile:build
 ```
+
+> 📖 **دليل البناء المفصل:** للاطلاع على شرح تفصيلي حول إعدادات البناء ومتطلبات أجهزة ويندوز 7 ومسارات تخزين البيانات، راجع ملف التوثيق الشامل [BUILD_EXE.md](file:///home/muhamed/MOBPOS-V2/BUILD_EXE.md).
 
 ---
 
