@@ -2,21 +2,21 @@
   <img src="build/icon.png" alt="MOBPOS Logo" width="120" />
 </p>
 
-<h1 align="center">📱 MOBPOS — نظام إدارة محلات الموبايلات المتكامل (v1.0.35)</h1>
+<h1 align="center">📱 MOBPOS — نظام إدارة محلات الموبايلات المتكامل (v1.0.36)</h1>
 
 <p align="center">
   <b>المنظومة السحابية والهجينة الأولى في الوطن العربي المتخصصة 100% في إدارة محلات الموبايلات والإكسسوارات والصيانة</b><br/>
-  <sub>سطح المكتب (Desktop Windows) + تطبيق الموبايل المصاحب (Android & iOS) + مزامنة سحابية لحظية أوفلاين أولاً (Offline-First)</sub>
+  <sub>سطح المكتب (Desktop Windows 10/11 & Windows 7) + تطبيق الموبايل المصاحب (Android & iOS) + مزامنة سحابية لحظية أوفلاين أولاً (Offline-First)</sub>
 </p>
 
 <p align="center">
   <a href="https://github.com/msharaf221/MOBPOS-V2/releases/latest">
     <img src="https://img.shields.io/github/v/release/msharaf221/MOBPOS-V2?style=for-the-badge&color=2563eb&label=%D8%A3%D8%AD%D8%AF%D8%AB%20%D8%A5%D8%B5%D8%AF%D8%A7%D8%B1" alt="Latest Release" />
   </a>
-  <img src="https://img.shields.io/badge/Version-1.0.35-blue?style=for-the-badge" alt="Version 1.0.35" />
+  <img src="https://img.shields.io/badge/Version-1.0.36-blue?style=for-the-badge" alt="Version 1.0.36" />
   <img src="https://img.shields.io/badge/React-19.2-61DAFB?style=for-the-badge&logo=react&logoColor=white" alt="React 19" />
   <img src="https://img.shields.io/badge/TypeScript-5.9-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript 5.9" />
-  <img src="https://img.shields.io/badge/Electron-44-47848F?style=for-the-badge&logo=electron&logoColor=white" alt="Electron 44" />
+  <img src="https://img.shields.io/badge/Windows_7-Supported_32/64--bit-emerald?style=for-the-badge&logo=windows" alt="Windows 7 Supported" />
   <img src="https://img.shields.io/badge/Capacitor-8.5-119EFF?style=for-the-badge&logo=capacitor&logoColor=white" alt="Capacitor 8" />
   <img src="https://img.shields.io/badge/Supabase-Realtime_v2.1-3ECF8E?style=for-the-badge&logo=supabase&logoColor=white" alt="Supabase Realtime" />
   <img src="https://img.shields.io/badge/Tests-152%20Passing%20%2B%20E2E-success?style=for-the-badge" alt="Tests 152 Passing" />
@@ -24,10 +24,10 @@
 
 <p align="center">
   <a href="#-روابط-التحميل-المباشرة">التحميل المباشر</a> •
+  <a href="#-دليل-اختيار-نسخة-الويندوز-المناسبة">دليل اختيار النسخة</a> •
   <a href="#-منظومة-mobpos-المتكاملة">عناصر المنظومة</a> •
   <a href="#-منظومة-supabase-السحابية-والاقتران-السريع-qr">سحابة Supabase واقتران QR</a> •
   <a href="#-تطبيق-الموبايل-المصاحب-companion-app">تطبيق الموبايل</a> •
-  <a href="#-محرك-المزامنة-السحابية-cloud-auto-sync-v21">المزامنة السحابية</a> •
   <a href="#-المميزات-الرئيسية-للنظام">المميزات</a> •
   <a href="#-التثبيت-والتشغيل">التشغيل والتطوير</a>
 </p>
@@ -36,15 +36,33 @@
 
 ## 📥 روابط التحميل المباشرة (Direct Downloads)
 
-يمكنك دائماً تنزيل أحدث الإصدارات الجاهزة للعمل والإنتاج من صفحة [GitHub Releases (أحدث إصدار)](https://github.com/msharaf221/MOBPOS-V2/releases/latest):
+يمكنك تنزيل أحدث الإصدارات دائماً عبر الروابط المباشرة أو من صفحة [GitHub Releases (أحدث إصدار)](https://github.com/msharaf221/MOBPOS-V2/releases/latest):
 
-| المنصة | نوع الملف | الوصف | رابط التحميل |
+### 🖥️ أنظمة ويندوز (Desktop Windows)
+
+| نظام التشغيل | المعمارية | برنامج التثبيت (Setup) | النسخة المحمولة (Portable) | ملاحظات الاستخدام |
+|---|---|:---:|:---:|---|
+| **Windows 10 / 11** | 64-بت (x64) | [💾 تحميل Setup](https://github.com/msharaf221/MOBPOS-V2/releases/latest/download/MOBPOS-Setup-Win10-x64.exe) | [🧳 تحميل Portable](https://github.com/msharaf221/MOBPOS-V2/releases/latest/download/MOBPOS-Portable-Win10-x64.exe) | النسخة الأساسية الحديثة، تحديث تلقائي كامل وسرعة فائقة |
+| **Windows 7 / 8 / 8.1** | 32-بت (ia32) | [💾 تحميل Setup (32-بت)](https://github.com/msharaf221/MOBPOS-V2/releases/latest/download/MOBPOS-Setup-Win7-32bit.exe) | [🧳 تحميل Portable (32-بت)](https://github.com/msharaf221/MOBPOS-V2/releases/latest/download/MOBPOS-Portable-Win7-32bit.exe) | **للأجهزة القديمة وأجهزة الكاشير POS** بدون مشاكل أو بطء |
+| **Windows 7 / 8 / 8.1** | 64-بت (x64) | [💾 تحميل Setup (64-بت)](https://github.com/msharaf221/MOBPOS-V2/releases/latest/download/MOBPOS-Setup-Win7-64bit.exe) | [🧳 تحميل Portable (64-بت)](https://github.com/msharaf221/MOBPOS-V2/releases/latest/download/MOBPOS-Portable-Win7-64bit.exe) | متوافقة مع أجهزة ويندوز 7 بنواة 64-bit |
+
+> 💡 **ملاحظة لأجهزة ويندوز 7:** تم بناء نسخ ويندوز 7 بمحرك متوافق رسمياً ومحصن ضد مشكلة الشاشة البيضاء في كروت الشاشة القديمة. تأكد فقط من وجود حزمة Service Pack 1 وتحديثات C++ Redistributable 2015-2022.
+
+### 📱 الهواتف الذكية والأجهزة اللوحية (Mobile Companion)
+
+| المنصة | نوع الملف | الوصف | رابط التحميل المباشر |
 |---|---|---|:---:|
-| 💻 **ويندوز (سطح المكتب)** | `MOBPOS-Setup-*.exe` | برنامج التثبيت الرسمي لويندوز مع التحديث التلقائي | [تحميل Setup EXE](https://github.com/msharaf221/MOBPOS-V2/releases/latest) |
-| 🧳 **ويندوز (نسخة محمولة)** | `MOBPOS-Portable-*.exe` | تشغيل فوري من فلاشة USB بدون تثبيت | [تحميل Portable EXE](https://github.com/msharaf221/MOBPOS-V2/releases/latest) |
-| 🤖 **أندرويد (تطبيق الكاشير والمدير)** | `MOBPOS-Companion.apk` | تطبيق أندرويد نيتف سريع وخفيف للأجهزة اللوحية والموبايل مع فحص التحديثات | [تحميل Android APK](https://github.com/msharaf221/MOBPOS-V2/releases/latest/download/MOBPOS-Companion.apk) |
-| 🍏 **آيفون / آيباد (iOS)** | `MOBPOS-Companion.ipa` | حزمة التثبيت المباشرة لأجهزة أبل | [تحميل حزمة iOS](https://github.com/msharaf221/MOBPOS-V2/releases/latest/download/MOBPOS-Companion.ipa) |
-| 🌐 **تطبيق الويب و PWA** | Web Browser / LAN | تشغيل عبر المتصفح المحلي أو شبكة الواي فاي بدون إنترنت | [افتح المتصفح](http://127.0.0.1:8420) |
+| 🤖 **أندرويد (كاشير ومدير)** | `MOBPOS-Companion.apk` | تطبيق أندرويد نيتف سريع وخفيف للأجهزة اللوحية والموبايل | [تحميل APK مباشرة](https://github.com/msharaf221/MOBPOS-V2/releases/latest/download/MOBPOS-Companion.apk) |
+| 🍏 **آيفون / آيباد (iOS)** | `MOBPOS-Companion.ipa` | حزمة التثبيت لأجهزة أبل iOS | [تحميل حزمة iOS](https://github.com/msharaf221/MOBPOS-V2/releases/latest/download/MOBPOS-Companion.ipa) |
+| 🌐 **تطبيق الويب و PWA** | Web Browser / LAN | تشغيل عبر المتصفح المحلي أو شبكة الواي فاي بدون إنترنت | [افتح التطبيق المحلي](http://127.0.0.1:8420) |
+
+---
+
+### 🔍 دليل اختيار نسخة الويندوز المناسبة:
+1. **أجهزة حديثة (لابتوب أو كمبيوتر بويندوز 10 أو 11):** اختر مباشرة **Windows 10 / 11 (64-بت)**.
+2. **أجهزة كاشير POS قديمة (All-in-One POS أو أجهزة ويندوز 7):** في 90% من الحالات تكون بنواة 32-bit، اختر **Windows 7 (32-بت)** وستعمل بسلاسة تامة.
+3. **أجهزة كمبيوتر بويندوز 7 بنواة 64-بت:** اختر **Windows 7 (64-بت)**.
+4. **للتجربة السريعة أو التشغيل من فلاشة:** اختر **Portable** المقابل لنظامك (لا يحتاج أي تثبيت).
 
 ---
 

@@ -61,6 +61,9 @@ export default defineConfig({
       "@": path.resolve(__dirname, "src"),
     },
   },
+  build: {
+    target: 'chrome108', // ensures compatibility with Electron 22 (Windows 7)
+  },
   // Single source of truth for the app version (package.json) — shown in
   // Settings → About so it can never drift from the released build again.
   define: {

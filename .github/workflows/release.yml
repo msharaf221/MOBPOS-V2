@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   build-and-publish:
-    name: Build Windows installer & publish release
+    name: Build Windows installers & publish release
     runs-on: windows-latest
 
     steps:
@@ -55,18 +55,66 @@ jobs:
       - name: Build renderer (Vite)
         run: npm run build
 
-      - name: Build Windows installers (electron-builder)
+      - name: Build Windows 10/11 installers (electron-builder)
         run: npx electron-builder --win --x64 --publish never
+
+      - name: Build Windows 7 installers (electron-builder with Electron 22)
+        run: npx electron-builder --win --config electron-builder.win7.yml --publish never
+
+      - name: Prepare direct download aliases
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          mkdir -p dist-release
+
+          # Windows 10/11 artifacts
+          cp -f release/*.exe dist-release/
+          cp -f release/latest.yml dist-release/
+          cp -f release/*.blockmap dist-release/ 2>/dev/null || true
+
+          # Create friendly aliases for direct downloads (latest link)
+          SETUP_WIN10=(release/*Setup*.exe)
+          PORTABLE_WIN10=(release/*Portable*.exe)
+          if [ ${#SETUP_WIN10[@]} -gt 0 ]; then
+            cp -f "${SETUP_WIN10[0]}" dist-release/MOBPOS-Setup-Win10-x64.exe
+          fi
+          if [ ${#PORTABLE_WIN10[@]} -gt 0 ]; then
+            cp -f "${PORTABLE_WIN10[0]}" dist-release/MOBPOS-Portable-Win10-x64.exe
+          fi
+
+          # Windows 7 artifacts (ia32 + x64)
+          cp -f release-win7/*.exe dist-release/
+
+          SETUP_WIN7_IA32=(release-win7/*Setup*ia32.exe)
+          SETUP_WIN7_X64=(release-win7/*Setup*x64.exe)
+          PORTABLE_WIN7_IA32=(release-win7/*Portable*ia32.exe)
+          PORTABLE_WIN7_X64=(release-win7/*Portable*x64.exe)
+
+          if [ ${#SETUP_WIN7_IA32[@]} -gt 0 ]; then
+            cp -f "${SETUP_WIN7_IA32[0]}" dist-release/MOBPOS-Setup-Win7-32bit.exe
+          fi
+          if [ ${#SETUP_WIN7_X64[@]} -gt 0 ]; then
+            cp -f "${SETUP_WIN7_X64[0]}" dist-release/MOBPOS-Setup-Win7-64bit.exe
+          fi
+          if [ ${#PORTABLE_WIN7_IA32[@]} -gt 0 ]; then
+            cp -f "${PORTABLE_WIN7_IA32[0]}" dist-release/MOBPOS-Portable-Win7-32bit.exe
+          fi
+          if [ ${#PORTABLE_WIN7_X64[@]} -gt 0 ]; then
+            cp -f "${PORTABLE_WIN7_X64[0]}" dist-release/MOBPOS-Portable-Win7-64bit.exe
+          fi
+
+          echo "=== Ready artifacts to upload ==="
+          ls -la dist-release
 
       - name: Verify release artifacts
         shell: bash
         run: |
           set -euo pipefail
-          if [ ! -f release/latest.yml ]; then
-            echo "::error::release/latest.yml is missing — auto-update would break"
+          if [ ! -f dist-release/latest.yml ]; then
+            echo "::error::dist-release/latest.yml is missing — auto-update would break"
             exit 1
           fi
-          ls -la release
 
       - name: Extract changelog entry
         shell: bash
@@ -88,7 +136,7 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          ASSETS=(release/*.exe release/latest.yml release/*.blockmap)
+          ASSETS=(dist-release/*)
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" "${ASSETS[@]}" --clobber --repo "$GITHUB_REPOSITORY"
           else

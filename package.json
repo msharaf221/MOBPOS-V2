@@ -2,7 +2,7 @@
   "name": "mobpos",
   "productName": "MOBPOS",
   "private": true,
-  "version": "1.0.35",
+  "version": "1.0.36",
   "description": "نظام إدارة محلات الموبايلات — MOBPOS Management System",
   "author": "MOBPOS",
   "type": "module",
@@ -21,6 +21,9 @@
     "dist:win": "npm run build && electron-builder --win --x64",
     "dist:win:publish": "npm run build && electron-builder --win --x64 --publish always",
     "dist:win:portable": "npm run build && electron-builder --win portable --x64",
+    "dist:win7": "npm run build && electron-builder --win --config electron-builder.win7.yml",
+    "dist:win7:x64": "npm run build && electron-builder --win --x64 --config electron-builder.win7.yml",
+    "dist:win7:ia32": "npm run build && electron-builder --win --ia32 --config electron-builder.win7.yml",
     "mobile:dev": "npm --prefix mobile run dev",
     "mobile:build": "npm --prefix mobile run build",
     "mobile:preview": "npm --prefix mobile run preview"

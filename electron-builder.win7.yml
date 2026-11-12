@@ -1,0 +1,50 @@
+# ============================================================
+#  إعدادات بناء ملف EXE لنظام ويندوز 7 (32 بت و 64 بت)
+#  يعتمد على Electron 22.3.27 (آخر إصدار رسمي يدعم Windows 7)
+#  الأمر: npm run dist:win7
+# ============================================================
+
+appId: com.mobpos.system
+productName: MOBPOS
+copyright: Copyright © 2026 MOBPOS
+
+# تحديد إصدار إلكترون المتوافق رسمياً مع ويندوز 7 / 8 / 8.1
+electronVersion: 22.3.27
+
+directories:
+  output: release-win7     # مجلد مستقل لنسخ ويندوز 7
+  buildResources: build    # مجلد الأيقونات
+
+files:
+  - dist/**/*
+  - electron/**/*
+  - package.json
+
+asar: true
+compression: maximum
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+        - ia32             # مهم جداً: دعم الأجهزة القديمة 32-bit في نقاط البيع
+    - target: portable
+      arch:
+        - x64
+        - ia32
+  icon: build/icon.ico
+
+nsis:
+  oneClick: false                       # يظهر معالج التثبيت
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true           # أيقونة على سطح المكتب
+  createStartMenuShortcut: true
+  shortcutName: MOBPOS
+  deleteAppDataOnUninstall: false       # بيانات المحل تبقى بعد إلغاء التثبيت
+  artifactName: ${productName}-Setup-${version}-win7-${arch}.${ext}
+
+portable:
+  artifactName: ${productName}-Portable-${version}-win7-${arch}.${ext}
+

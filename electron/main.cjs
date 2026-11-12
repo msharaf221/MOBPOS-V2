@@ -26,6 +26,19 @@ const isKiosk = process.argv.includes('--kiosk');
 const isDev = !app.isPackaged && process.env.MOBPOS_ELECTRON_DEV === '1';
 const devServerUrl = process.env.MOBPOS_ELECTRON_DEV_SERVER_URL || `http://127.0.0.1:${PREFERRED_PORT}`;
 
+// ===== توافق ويندوز 7 و 8 (Windows 7 / 8 / 8.1 compatibility) =====
+// على ويندوز 7 (kernel 6.1) والأجهزة القديمة، كروت الشاشة المدمجة تسبب شاشة بيضاء/سوداء مع تسريع العتاد
+if (process.platform === 'win32') {
+  const release = os.release() || '';
+  const isLegacyWindows = release.startsWith('6.1') || release.startsWith('6.2') || release.startsWith('6.3');
+  if (isLegacyWindows || process.argv.includes('--disable-gpu')) {
+    app.disableHardwareAcceleration();
+    app.commandLine.appendSwitch('disable-gpu');
+    app.commandLine.appendSwitch('disable-gpu-compositing');
+    app.commandLine.appendSwitch('disable-software-rasterizer');
+  }
+}
+
 let mainWindow = null;
 let serverInfo = null;
 let appUrl = '';
