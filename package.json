@@ -24,6 +24,12 @@
     "dist:win7": "npm run build && electron-builder --win --config electron-builder.win7.yml",
     "dist:win7:x64": "npm run build && electron-builder --win --x64 --config electron-builder.win7.yml",
     "dist:win7:ia32": "npm run build && electron-builder --win --ia32 --config electron-builder.win7.yml",
+    "tutorials:record": "node scripts/record-all-tutorials.mjs",
+    "tutorials:pos": "node scripts/record-pos-tutorial.mjs",
+    "tutorials:inventory": "node scripts/record-inventory-tutorial.mjs",
+    "tutorials:imei": "node scripts/record-imei-tutorial.mjs",
+    "tutorials:maintenance": "node scripts/record-maintenance-tutorial.mjs",
+    "tutorials:safes": "node scripts/record-safes-close-tutorial.mjs",
     "mobile:dev": "npm --prefix mobile run dev",
     "mobile:build": "npm --prefix mobile run build",
     "mobile:preview": "npm --prefix mobile run preview"
