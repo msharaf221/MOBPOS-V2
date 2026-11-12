@@ -71,6 +71,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           VERSION="$(node -p "require('./package.json').version")"
           TAG="v$VERSION"
           echo "Target Release Tag: $TAG"
@@ -83,11 +84,19 @@ jobs:
             sleep 10
           done
 
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Uploading APK to $TAG..."
-            gh release upload "$TAG" build-artifacts/MOBPOS-Companion.apk --clobber
-          else
-            echo "Creating release $TAG and uploading APK..."
-            gh release create "$TAG" build-artifacts/MOBPOS-Companion.apk --title "MOBPOS $TAG" --notes "MOBPOS $TAG" || gh release upload "$TAG" build-artifacts/MOBPOS-Companion.apk --clobber
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG still not found, creating it..."
+            gh release create "$TAG" --title "MOBPOS $TAG" --notes "MOBPOS $TAG" || true
           fi
-          echo "APK successfully published to Release $TAG!"
+
+          echo "Uploading APK to $TAG with retries..."
+          for attempt in {1..5}; do
+            if gh release upload "$TAG" build-artifacts/MOBPOS-Companion.apk --clobber; then
+              echo "APK successfully published to Release $TAG!"
+              exit 0
+            fi
+            echo "Upload attempt $attempt failed, retrying in 5s..."
+            sleep 5
+          done
+          echo "::error::Failed to upload APK to Release $TAG after 5 attempts"
+          exit 1

@@ -140,8 +140,19 @@ jobs:
           shopt -s nullglob
           ASSETS=(dist-release/*)
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" "${ASSETS[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+            echo "Release $RELEASE_TAG exists, uploading assets with clobber..."
+            for attempt in {1..5}; do
+              if gh release upload "$RELEASE_TAG" "${ASSETS[@]}" --clobber --repo "$GITHUB_REPOSITORY"; then
+                echo "Release assets successfully uploaded!"
+                exit 0
+              fi
+              echo "Upload attempt $attempt failed, retrying in 5s..."
+              sleep 5
+            done
+            echo "::error::Failed to upload assets to $RELEASE_TAG"
+            exit 1
           else
+            echo "Creating release $RELEASE_TAG..."
             gh release create "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --title "MOBPOS v$APP_VERSION" \

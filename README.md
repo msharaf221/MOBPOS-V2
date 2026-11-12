@@ -2,7 +2,7 @@
   <img src="build/icon.png" alt="MOBPOS Logo" width="120" />
 </p>
 
-<h1 align="center">📱 MOBPOS — نظام إدارة محلات الموبايلات المتكامل (v1.0.36)</h1>
+<h1 align="center">📱 MOBPOS — نظام إدارة محلات الموبايلات المتكامل (v1.0.37)</h1>
 
 <p align="center">
   <b>المنظومة السحابية والهجينة الأولى في الوطن العربي المتخصصة 100% في إدارة محلات الموبايلات والإكسسوارات والصيانة</b><br/>
@@ -13,7 +13,7 @@
   <a href="https://github.com/msharaf221/MOBPOS-V2/releases/latest">
     <img src="https://img.shields.io/github/v/release/msharaf221/MOBPOS-V2?style=for-the-badge&color=2563eb&label=%D8%A3%D8%AD%D8%AF%D8%AB%20%D8%A5%D8%B5%D8%AF%D8%A7%D8%B1" alt="Latest Release" />
   </a>
-  <img src="https://img.shields.io/badge/Version-1.0.36-blue?style=for-the-badge" alt="Version 1.0.36" />
+  <img src="https://img.shields.io/badge/Version-1.0.37-blue?style=for-the-badge" alt="Version 1.0.37" />
   <img src="https://img.shields.io/badge/React-19.2-61DAFB?style=for-the-badge&logo=react&logoColor=white" alt="React 19" />
   <img src="https://img.shields.io/badge/TypeScript-5.9-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript 5.9" />
   <img src="https://img.shields.io/badge/Windows_7-Supported_32/64--bit-emerald?style=for-the-badge&logo=windows" alt="Windows 7 Supported" />
