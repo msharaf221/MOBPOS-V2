@@ -282,8 +282,21 @@ export default function App() {
 
   if (screen === 'device') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
-        <div className="bg-slate-800/80 backdrop-blur border border-slate-700 rounded-2xl p-8 max-w-md w-full text-center shadow-2xl">
+      <div
+        className="min-h-screen bg-slate-950 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4"
+        style={{
+          backgroundColor: '#0a0f1d',
+          backgroundImage: 'linear-gradient(135deg, #0a0f1d 0%, #0f172a 50%, #172554 100%)',
+          color: '#ffffff',
+        }}
+      >
+        <div
+          className="bg-slate-900/95 backdrop-blur border border-slate-700/80 rounded-2xl p-8 max-w-md w-full text-center shadow-2xl"
+          style={{
+            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+            borderColor: 'rgba(51, 65, 85, 0.8)',
+          }}
+        >
           <div className="text-5xl mb-4">🔒</div>
           <h1 className="text-xl font-bold text-white mb-3">الجهاز غير مطابق</h1>
           <p className="text-slate-300 text-sm leading-relaxed mb-6">
@@ -299,7 +312,11 @@ export default function App() {
                 setLicense(null);
                 setScreen('license');
               }}
-              className="w-full py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold rounded-xl hover:from-blue-700 hover:to-indigo-700 transition"
+              className="w-full py-3 bg-blue-600 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold rounded-xl hover:from-blue-700 hover:to-indigo-700 transition"
+              style={{
+                backgroundColor: '#2563eb',
+                backgroundImage: 'linear-gradient(to right, #2563eb, #4f46e5)',
+              }}
             >
               إدخال مفتاح تفعيل جديد
             </button>
@@ -337,7 +354,14 @@ export default function App() {
 
   if (store.isLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-900 via-blue-800 to-blue-900 flex items-center justify-center">
+      <div
+        className="min-h-screen bg-blue-950 bg-gradient-to-br from-blue-900 via-blue-800 to-blue-900 flex items-center justify-center"
+        style={{
+          backgroundColor: '#0c1f4d',
+          backgroundImage: 'linear-gradient(135deg, #0c1f4d 0%, #1e3a8a 50%, #0c1f4d 100%)',
+          color: '#ffffff',
+        }}
+      >
         <div className="text-center">
           <div className="w-20 h-20 bg-white/10 backdrop-blur rounded-2xl mx-auto mb-4 flex items-center justify-center animate-pulse">
             <span className="text-4xl">📱</span>

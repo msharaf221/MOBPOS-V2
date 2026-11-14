@@ -70,7 +70,15 @@ export default function LicenseExpired({ expiredLicense, onRenewed, onDeactivate
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-orange-950 to-slate-900 flex items-center justify-center p-4" dir="rtl">
+    <div
+      className="min-h-screen bg-slate-950 bg-gradient-to-br from-slate-900 via-orange-950 to-slate-900 flex items-center justify-center p-4 relative"
+      style={{
+        backgroundColor: '#0a0f1d',
+        backgroundImage: 'linear-gradient(135deg, #0a0f1d 0%, #1c1917 50%, #431407 100%)',
+        color: '#ffffff',
+      }}
+      dir="rtl"
+    >
       {/* Background effects */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-1/4 right-1/4 w-96 h-96 bg-orange-500/10 rounded-full blur-3xl"></div>
@@ -86,7 +94,13 @@ export default function LicenseExpired({ expiredLicense, onRenewed, onDeactivate
         </div>
 
         {/* Card */}
-        <div className="bg-white/5 backdrop-blur-xl border border-orange-500/20 rounded-3xl p-8 shadow-2xl">
+        <div
+          className="bg-slate-900/95 backdrop-blur-xl border border-orange-500/20 rounded-3xl p-8 shadow-2xl"
+          style={{
+            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+            borderColor: 'rgba(249, 115, 22, 0.25)',
+          }}
+        >
           {/* Warning */}
           <div className="text-center mb-6">
             <div className="inline-flex items-center gap-2 bg-orange-500/10 border border-orange-500/30 text-orange-300 px-4 py-2 rounded-full text-sm font-bold mb-4">

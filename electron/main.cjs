@@ -18,6 +18,7 @@ const { app, BrowserWindow, Menu, shell, session, ipcMain, dialog } = require('e
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const https = require('https');
 const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 const { startServer, PREFERRED_PORT } = require('./local-server.cjs');
@@ -35,7 +36,7 @@ if (process.platform === 'win32') {
     app.disableHardwareAcceleration();
     app.commandLine.appendSwitch('disable-gpu');
     app.commandLine.appendSwitch('disable-gpu-compositing');
-    app.commandLine.appendSwitch('disable-software-rasterizer');
+    // لا نعطل software-rasterizer حتى يتاح للـ CPU (SwiftShader) معالجة التدرجات والألوان بدقة
   }
 }
 
@@ -63,6 +64,17 @@ function setupAutoUpdate() {
   try {
     // electron-updater متاح فقط في النسخة المثبتة (وليس أثناء التطوير)
     if (!app.isPackaged) return;
+
+    // حماية خاصة بويندوز 7 و 8:
+    // ملف latest.yml في GitHub Releases مبني بـ Electron 34، ولو تم تنزيله تلقائياً سيعطل تشغيل البرنامج
+    // التحديث لويندوز 7 يتم بتحميل ملف التثبيت المخصص لويندوز 7 يدوياً
+    const release = os.release() || '';
+    const isLegacyWindows = process.platform === 'win32' && (release.startsWith('6.1') || release.startsWith('6.2') || release.startsWith('6.3'));
+    if (isLegacyWindows) {
+      console.log('[updater] Auto-update disabled on legacy Windows to protect Electron 22 installation');
+      return;
+    }
+
     const { autoUpdater } = require('electron-updater');
     autoUpdater.autoDownload = true;
     autoUpdater.autoInstallOnAppQuit = true;
@@ -423,13 +435,48 @@ function setupIpc() {
 
   // فحص التحديثات يدوياً — يستخدم واجهة electron-updater v6:
   //   UpdateCheckResult = { isUpdateAvailable, updateInfo, versionInfo }
-  // الإصدار القديم كان بيشيك `result.updateInfo` وهو موجود دايماً حتى لو مفيش تحديث.
   ipcMain.handle('mobpos:check-updates', async () => {
     try {
-      if (!app.isPackaged) return { ok: true, dev: true, currentVersion: app.getVersion() };
+      const currentVersion = app.getVersion();
+      if (!app.isPackaged) return { ok: true, dev: true, currentVersion };
+
+      const release = os.release() || '';
+      const isLegacyWindows = process.platform === 'win32' && (release.startsWith('6.1') || release.startsWith('6.2') || release.startsWith('6.3'));
+
+      if (isLegacyWindows) {
+        return new Promise((resolve) => {
+          const req = https.get('https://api.github.com/repos/msharaf221/MOBPOS-V2/releases/latest', {
+            headers: { 'User-Agent': 'MOBPOS-App' },
+            timeout: 8000,
+          }, (res) => {
+            let data = '';
+            res.on('data', chunk => { data += chunk; });
+            res.on('end', () => {
+              try {
+                const json = JSON.parse(data);
+                const latestTag = (json.tag_name || '').replace(/^v/, '');
+                const hasUpdate = Boolean(latestTag && latestTag !== currentVersion);
+                resolve({
+                  ok: true,
+                  isLegacyWindows: true,
+                  updateAvailable: hasUpdate,
+                  currentVersion,
+                  latestVersion: latestTag || currentVersion,
+                  releaseNotes: json.body || null,
+                  downloadUrl: json.html_url || 'https://github.com/msharaf221/MOBPOS-V2/releases/latest',
+                });
+              } catch {
+                resolve({ ok: true, isLegacyWindows: true, updateAvailable: false, currentVersion });
+              }
+            });
+          });
+          req.on('error', () => resolve({ ok: true, isLegacyWindows: true, updateAvailable: false, currentVersion }));
+          req.on('timeout', () => { req.destroy(); resolve({ ok: true, isLegacyWindows: true, updateAvailable: false, currentVersion }); });
+        });
+      }
+
       const { autoUpdater } = require('electron-updater');
       const result = await autoUpdater.checkForUpdates();
-      const currentVersion = app.getVersion();
       if (!result) {
         return { ok: true, updateAvailable: false, currentVersion };
       }

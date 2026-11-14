@@ -53,6 +53,26 @@ test('missing latestVersion with available update is handled defensively', () =>
   assert.match(msg.message, /تم الفحص/);
 });
 
+test('legacy Windows (Win7) prompts manual download link when update is available', () => {
+  const msg = buildUpdateCheckMessage(
+    { ok: true, isLegacyWindows: true, updateAvailable: true, currentVersion: '1.0.37', latestVersion: '1.0.38' },
+    '1.0.37'
+  );
+  assert.equal(msg.kind, 'available');
+  assert.equal(msg.latestVersion, '1.0.38');
+  assert.match(msg.message, /ويندوز 7/);
+  assert.match(msg.message, /تحميل ملف التثبيت المخصص/);
+});
+
+test('legacy Windows (Win7) shows up-to-date message when on latest', () => {
+  const msg = buildUpdateCheckMessage(
+    { ok: true, isLegacyWindows: true, updateAvailable: false, currentVersion: '1.0.37' },
+    '1.0.37'
+  );
+  assert.equal(msg.kind, 'up-to-date');
+  assert.match(msg.message, /أحدث إصدار مخصص لويندوز 7/);
+});
+
 test('formatLastChecked returns empty for invalid date', () => {
   assert.equal(formatLastChecked(new Date(NaN)), '');
   assert.match(formatLastChecked(new Date('2026-08-28T14:30:00Z')), /:/);

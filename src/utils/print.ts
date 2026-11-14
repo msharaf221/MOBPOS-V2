@@ -4,36 +4,11 @@
 //  في المتصفح: بدائل ويب عادية
 // ============================================================
 
-import type { UpdateCheckResponse } from './updateCheck';
-
 export interface SavePdfResult {
   ok: boolean;
   canceled?: boolean;
   path?: string;
   error?: string;
-}
-
-interface MobposBridge {
-  isDesktop?: boolean;
-  printSilent?: () => Promise<boolean>;
-  toggleKiosk?: () => Promise<boolean>;
-  checkUpdates?: () => Promise<UpdateCheckResponse>;
-  getAppVersion?: () => Promise<string>;
-  /** طباعة HTML كامل عبر نافذة مخفية (لا يتأثر بمنع النوافذ المنبثقة) */
-  printHtml?: (html: string, opts?: { silent?: boolean }) => Promise<boolean>;
-  /** حفظ HTML كملف PDF حقيقي مع نافذة اختيار المكان */
-  savePdf?: (html: string, fileName: string) => Promise<SavePdfResult>;
-  /** أزرار شريط العنوان المخصص */
-  windowControl?: (action: 'minimize' | 'maximize-toggle' | 'close') => Promise<void>;
-  getWindowState?: () => Promise<{ maximized: boolean }>;
-  onWindowState?: (cb: (state: { maximized: boolean }) => void) => () => void;
-  getStableMachineId?: () => Promise<string | null>;
-}
-
-declare global {
-  interface Window {
-    mobpos?: MobposBridge;
-  }
 }
 
 /** هل نعمل داخل تطبيق سطح المكتب؟ */

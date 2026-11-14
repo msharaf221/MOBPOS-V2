@@ -48,7 +48,15 @@ export default function LicenseActivation({ onActivated, onMasterAccess, notice 
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4" dir="rtl">
+    <div
+      className="min-h-screen bg-slate-950 bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4 relative"
+      style={{
+        backgroundColor: '#0a0f1d',
+        backgroundImage: 'linear-gradient(135deg, #0a0f1d 0%, #0f172a 50%, #172554 100%)',
+        color: '#ffffff',
+      }}
+      dir="rtl"
+    >
       {/* Background effects */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-1/4 right-1/4 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl"></div>
@@ -58,22 +66,34 @@ export default function LicenseActivation({ onActivated, onMasterAccess, notice 
       <div className="relative z-10 w-full max-w-lg">
         {/* Logo */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl mb-4 shadow-2xl shadow-blue-500/30">
+          <div
+            className="inline-flex items-center justify-center w-20 h-20 bg-blue-600 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl mb-4 shadow-2xl shadow-blue-500/30"
+            style={{
+              backgroundColor: '#2563eb',
+              backgroundImage: 'linear-gradient(135deg, #3b82f6 0%, #9333ea 100%)',
+            }}
+          >
             <span className="text-4xl">📱</span>
           </div>
           <h1 className="text-3xl font-bold text-white">MOBPOS</h1>
-          <p className="text-blue-300/80 mt-2">نظام إدارة محلات الموبايلات المتكامل</p>
+          <p className="text-blue-300 mt-2 font-medium">نظام إدارة محلات الموبايلات المتكامل</p>
         </div>
 
         {/* Activation Card */}
-        <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-8 shadow-2xl">
+        <div
+          className="bg-slate-900/95 backdrop-blur-xl border border-slate-700/80 rounded-3xl p-8 shadow-2xl"
+          style={{
+            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+            borderColor: 'rgba(51, 65, 85, 0.8)',
+          }}
+        >
           <div className="flex items-center gap-3 mb-6">
             <div className="w-10 h-10 bg-blue-500/20 rounded-xl flex items-center justify-center">
               <Key className="text-blue-400" size={22} />
             </div>
             <div>
               <h2 className="text-xl font-bold text-white">تفعيل النظام</h2>
-              <p className="text-sm text-blue-300/60">أدخل مفتاح التفعيل للبدء — المفتاح يعمل على جهاز واحد فقط</p>
+              <p className="text-sm text-blue-300/80">أدخل مفتاح التفعيل للبدء — المفتاح يعمل على جهاز واحد فقط</p>
             </div>
           </div>
 
@@ -93,13 +113,18 @@ export default function LicenseActivation({ onActivated, onMasterAccess, notice 
 
           <div className="space-y-4">
             <div>
-              <label className="block text-sm text-blue-200/80 mb-2 font-medium">مفتاح التفعيل</label>
+              <label className="block text-sm text-blue-200 mb-2 font-medium">مفتاح التفعيل</label>
               <textarea
                 value={key}
                 onChange={(e) => { setKey(e.target.value); setError(''); }}
                 placeholder="الصق مفتاح التفعيل هنا..."
                 rows={3}
-                className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-white placeholder-blue-300/30 focus:outline-none focus:border-blue-500/50 focus:ring-2 focus:ring-blue-500/20 text-sm font-mono resize-none transition"
+                className="w-full bg-slate-950/90 border border-slate-700 rounded-xl p-4 text-white placeholder-blue-300/40 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-sm font-mono resize-none transition"
+                style={{
+                  backgroundColor: '#090d16',
+                  borderColor: '#334155',
+                  color: '#ffffff',
+                }}
                 dir="ltr"
               />
             </div>
@@ -107,7 +132,12 @@ export default function LicenseActivation({ onActivated, onMasterAccess, notice 
             <button
               onClick={handleActivate}
               disabled={loading}
-              className="w-full py-3.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold rounded-xl hover:from-blue-700 hover:to-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-blue-600/25"
+              className="w-full py-3.5 bg-blue-600 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold rounded-xl hover:from-blue-700 hover:to-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-blue-600/25"
+              style={{
+                backgroundColor: '#2563eb',
+                backgroundImage: 'linear-gradient(to right, #2563eb, #4f46e5)',
+                color: '#ffffff',
+              }}
             >
               {loading ? (
                 <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -147,9 +177,13 @@ export default function LicenseActivation({ onActivated, onMasterAccess, notice 
               return (
                 <div
                   key={plan}
-                  className={`bg-white/5 backdrop-blur border border-white/10 rounded-2xl p-4 text-center ${
+                  className={`bg-slate-900/95 backdrop-blur border border-slate-700/80 rounded-2xl p-4 text-center ${
                     plan === 'pro' ? 'ring-2 ring-blue-500/50' : plan === 'lifetime' ? 'ring-2 ring-amber-500/40' : ''
                   }`}
+                  style={{
+                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                    borderColor: 'rgba(51, 65, 85, 0.8)',
+                  }}
                 >
                   <div className={`w-10 h-10 mx-auto mb-3 bg-gradient-to-br ${planColors[plan]} rounded-xl flex items-center justify-center shadow-lg`}>
                     <Icon size={20} className="text-white" />

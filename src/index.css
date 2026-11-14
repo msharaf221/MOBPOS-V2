@@ -1,5 +1,23 @@
 @import "tailwindcss";
 
+/* ============================================================
+   Compatibility for Chromium < 111 (Electron 22 on Windows 7/8/8.1)
+   Tailwind CSS v4 introduces `in oklab` in gradient positions:
+     `--tw-gradient-position: to bottom right in oklab;`
+   Chrome 108 treats `in oklab` inside linear-gradient as invalid syntax
+   and drops the entire background-image.
+   Overriding `--tw-gradient-position` to standard sRGB positions
+   restores full gradient rendering on Windows 7 without breaking modern browsers.
+   ============================================================ */
+.bg-gradient-to-t { --tw-gradient-position: to top !important; }
+.bg-gradient-to-tr { --tw-gradient-position: to top right !important; }
+.bg-gradient-to-r { --tw-gradient-position: to right !important; }
+.bg-gradient-to-br { --tw-gradient-position: to bottom right !important; }
+.bg-gradient-to-b { --tw-gradient-position: to bottom !important; }
+.bg-gradient-to-bl { --tw-gradient-position: to bottom left !important; }
+.bg-gradient-to-l { --tw-gradient-position: to left !important; }
+.bg-gradient-to-tl { --tw-gradient-position: to top left !important; }
+
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {

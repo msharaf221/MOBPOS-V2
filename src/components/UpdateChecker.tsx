@@ -28,6 +28,7 @@ export default function UpdateChecker() {
   const [currentVersion, setCurrentVersion] = useState<string>(__APP_VERSION__);
   const [checking, setChecking] = useState(false);
   const [status, setStatus] = useState<UpdateCheckMessage | null>(null);
+  const [rawResult, setRawResult] = useState<UpdateCheckResponse | null>(null);
   const [lastCheck, setLastCheck] = useState<Date | null>(null);
 
   useEffect(() => {
@@ -42,8 +43,10 @@ export default function UpdateChecker() {
   const handleCheck = async () => {
     setChecking(true);
     setStatus(null);
+    setRawResult(null);
     try {
       const result: UpdateCheckResponse | undefined = await window.mobpos?.checkUpdates?.();
+      setRawResult(result || null);
       if (!result) {
         setStatus(buildUpdateCheckMessage({ ok: false }, currentVersion));
       } else {
@@ -92,6 +95,17 @@ export default function UpdateChecker() {
           <StatusIcon kind={status.kind} />
           <div className="flex-1 min-w-0">
             <p className="text-sm leading-relaxed">{status.message}</p>
+            {rawResult?.isLegacyWindows && rawResult?.updateAvailable && rawResult?.downloadUrl && (
+              <a
+                href={rawResult.downloadUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 transition"
+              >
+                <Download size={14} />
+                تحميل نسخة ويندوز 7 المحدثة
+              </a>
+            )}
             {status.kind === 'up-to-date' && lastCheck && (
               <p className="text-xs opacity-80 mt-1">آخر فحص: {formatLastChecked(lastCheck)}</p>
             )}

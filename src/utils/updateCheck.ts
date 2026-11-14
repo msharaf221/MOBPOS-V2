@@ -11,9 +11,11 @@ export interface UpdateCheckResponse {
   ok: boolean;
   /** true إذا كان التحديث يعمل في وضع التطوير / المتصفح (غير مثبت). */
   dev?: boolean;
+  isLegacyWindows?: boolean;
   updateAvailable?: boolean;
   currentVersion?: string;
   latestVersion?: string;
+  downloadUrl?: string;
   releaseNotes?: string | Array<{ version?: string; note?: string; title?: string }> | null;
 }
 
@@ -46,6 +48,21 @@ export function buildUpdateCheckMessage(
     return {
       kind: 'error',
       message: 'تعذّر الفحص دلوقتي — حاول تاني بعد شوية.',
+    };
+  }
+
+  if (result.isLegacyWindows) {
+    if (result.updateAvailable && result.latestVersion) {
+      return {
+        kind: 'available',
+        message: `متوفر إصدار جديد (v${result.latestVersion}). نظام ويندوز 7 يتطلب تحميل ملف التثبيت المخصص له يدوياً من صفحة التنزيلات لتثبيته بأمان بدون فقدان أي بيانات.`,
+        latestVersion: result.latestVersion,
+      };
+    }
+    const shownVersion = currentVersion || result.currentVersion;
+    return {
+      kind: 'up-to-date',
+      message: shownVersion ? `أنت على أحدث إصدار مخصص لويندوز 7 (v${shownVersion}).` : 'أنت على أحدث إصدار مخصص لويندوز 7.',
     };
   }
 

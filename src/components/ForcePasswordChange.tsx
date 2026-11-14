@@ -67,8 +67,22 @@ export default function ForcePasswordChange({
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4" dir="rtl">
-      <div className="w-full max-w-md bg-white/10 dark:bg-gray-800/90 backdrop-blur-xl border border-white/20 dark:border-gray-700 rounded-3xl p-8 shadow-2xl text-white">
+    <div
+      className="min-h-screen bg-slate-950 bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4 relative"
+      style={{
+        backgroundColor: '#0a0f1d',
+        backgroundImage: 'linear-gradient(135deg, #0a0f1d 0%, #0f172a 50%, #172554 100%)',
+        color: '#ffffff',
+      }}
+      dir="rtl"
+    >
+      <div
+        className="w-full max-w-md bg-slate-900/95 backdrop-blur-xl border border-slate-700/80 rounded-3xl p-8 shadow-2xl text-white"
+        style={{
+          backgroundColor: 'rgba(15, 23, 42, 0.95)',
+          borderColor: 'rgba(51, 65, 85, 0.8)',
+        }}
+      >
         {/* Header Icon */}
         <div className="text-center mb-6">
           <div className="inline-flex items-center justify-center w-16 h-16 bg-amber-500/20 border border-amber-400/30 rounded-2xl mb-3 text-amber-400 shadow-inner">
