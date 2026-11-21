@@ -1,0 +1,16 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const root = path.resolve(__dirname, '..');
+const html = fs.readFileSync(path.join(root, 'dist-win7/index.html'), 'utf8');
+const css = [...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/g)].map(match => match[1]).join('\n');
+assert.ok(css.length > 1000, 'Legacy build must contain compiled CSS');
+assert.doesNotMatch(css, /oklch\(|oklab\(|color-mix\(|in oklab|@property\b/, 'Modern CSS must not reach the Chromium 108 artifact');
+assert.match(css, /\.blur-3xl/, 'Legacy utilities were not generated');
+assert.match(html, /boot-diagnostics\.js/, 'Startup diagnostics must load before the app');
+assert.ok(fs.existsSync(path.join(root, 'dist-win7/boot-diagnostics.js')));
+const config = fs.readFileSync(path.join(root, 'electron-builder.win7.yml'), 'utf8');
+assert.match(config, /electronVersion:\s*22\.3\.27\b/);
+assert.match(config, /from: dist-win7\s+to: dist/);
+assert.doesNotMatch(config, /^\s*- dist\/\*\*/m, 'Win7 must not package the modern renderer');
+console.log('PASS Chromium 108 CSS, startup assets, pinned runtime, and isolated packaging path');
