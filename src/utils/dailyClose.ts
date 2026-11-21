@@ -2,7 +2,7 @@
 //  بناء تقرير الإقفال اليومي وحسابات الحركة المالية
 // ============================================================
 
-import { formatNumber, formatDateTime } from './format.ts';
+import { formatNumber, formatDateTime, localDayStr } from './format.ts';
 
 export const fmtNum = (n: number): string =>
   formatNumber(n, 2);
@@ -40,22 +40,23 @@ export function transactionTypeToArabic(type: string): string {
     case 'inventory_adjustment': return 'تسوية جرد';
     case 'maintenance_cost': return 'تكلفة قطع صيانة';
     case 'refund': return 'مرتجع';
+    case 'return': return 'مرتجع';
     case 'deposit': return 'إيداع';
     case 'withdrawal': return 'سحب';
+    case 'wallet_deposit': return 'إيداع محفظة';
+    case 'wallet_withdrawal': return 'سحب محفظة';
+    case 'capital': return 'رأس مال';
+    case 'side_account': return 'حساب جانبي';
     default: return type;
   }
 }
 
 export function buildDailyCloseReport(input: DailyCloseInput): ReportSection[] {
-  const today = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const day = input.dateStr || `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+  const day = input.dateStr || localDayStr();
 
   const onDay = (iso: string | undefined | null) => {
     if (!iso) return false;
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return false;
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` === day;
+    return localDayStr(iso) === day;
   };
 
   const sales = input.sales.filter(s => onDay(s.createdAt || (s as any).date));
