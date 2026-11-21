@@ -1,0 +1,35 @@
+name: Chromium 108 renderer smoke
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  win7-renderer:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck && npm test
+      - run: npm run build && npm run build:win7 && npm run verify:win7
+      - name: Install the exact legacy engine outside the application
+        run: npm install --prefix "$RUNNER_TEMP/mobpos-electron22" --no-save electron@22.3.27
+      - name: Check production startup and development demo on Chromium 108
+        env:
+          ELECTRON22_EXECUTABLE: ${{ runner.temp }}/mobpos-electron22/node_modules/electron/dist/electron
+          WIN7_SCREENSHOT: ${{ runner.temp }}/win7-evidence/renderer.png
+        run: mkdir -p "$RUNNER_TEMP/win7-evidence" && xvfb-run -a npm run test:win7
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: chromium108-renderer-evidence
+          path: ${{ runner.temp }}/win7-evidence
+          if-no-files-found: ignore
