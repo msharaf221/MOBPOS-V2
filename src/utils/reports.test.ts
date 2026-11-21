@@ -16,6 +16,12 @@ test('transactionTypeToArabic translates types to clear friendly Arabic', () => 
   assert.equal(transactionTypeToArabic('refund'), 'مرتجع');
   assert.equal(transactionTypeToArabic('deposit'), 'إيداع');
   assert.equal(transactionTypeToArabic('withdrawal'), 'سحب');
+  // الأنواع التي تنشئها الخدمات الحية وكانت تظهر خاماً بالإنجليزية في التقفيل اليومي
+  assert.equal(transactionTypeToArabic('return'), 'مرتجع');
+  assert.equal(transactionTypeToArabic('wallet_deposit'), 'إيداع محفظة');
+  assert.equal(transactionTypeToArabic('wallet_withdrawal'), 'سحب محفظة');
+  assert.equal(transactionTypeToArabic('capital'), 'رأس مال');
+  assert.equal(transactionTypeToArabic('side_account'), 'حساب جانبي');
   assert.equal(transactionTypeToArabic('custom_unmapped'), 'custom_unmapped');
 });
 
