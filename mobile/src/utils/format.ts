@@ -1,3 +1,16 @@
+/**
+ * اليوم **المحلي** بصيغة `YYYY-MM-DD` — لمقارنات «اليوم» في الفلاتر والمؤشرات.
+ * `toISOString().slice(0, 10)` يرجّع تاريخ UTC، فينتقل «اليوم» الساعة 2/3
+ * بعد منتصف الليل بتوقيت مصر بدل منتصف الليل المحلي، وكانت مبيعات أول
+ * الليل تتحسب على اليوم السابق. بدون وسيط يرجّع يوم التشغيل الحالي.
+ */
+export function localDayStr(value?: string | number | Date | null): string {
+  const date = value === undefined || value === null ? new Date() : (value instanceof Date ? value : new Date(value));
+  if (Number.isNaN(date.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
 export function formatCurrency(amount?: number | null, hideAmounts: boolean = false): string {
   if (hideAmounts) return '••••••';
   const num = Number(amount) || 0;
