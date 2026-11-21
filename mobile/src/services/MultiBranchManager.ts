@@ -32,6 +32,7 @@ import {
   roundMoney,
 } from '../../../shared/accounting/financialCalculations.ts';
 import { enqueueOutbox, flushOutbox, getOutboxCount } from './sync/outbox';
+import { localDayStr } from '../utils/format';
 
 const STORAGE_KEY_BRANCHES = 'mobpos_companion_branches_v1';
 const BRANCH_FETCH_TIMEOUT_MS = 18_000;
@@ -694,11 +695,11 @@ class MultiBranchManager {
 
       // 11. Calculate Real KPIs (Separating Sales, Maintenance, Revenue, Profit, Liquidity & Stock)
       const now = new Date();
-      const todayDateStr = now.toISOString().slice(0, 10);
+      const todayDateStr = localDayStr(now);
 
       // A. Merchandise Sales
       const todaySales = normalizedSales.filter(s => {
-        const d = (s.date || s.createdAt || '').slice(0, 10);
+        const d = localDayStr(s.date || s.createdAt || '');
         return d === todayDateStr;
       });
       const todaySalesTotal = todaySales.reduce((acc, s) => acc + (Number(s.finalTotal) || 0), 0);
@@ -711,11 +712,11 @@ class MultiBranchManager {
       // B. Maintenance Inflow & Profit (Delivered today)
       const todayDeliveredMaintenance = normalizedMaintenance.filter(m => {
         if (m.status !== 'delivered') return false;
-        const d = (m.deliveryDate || m.deliveredAt || '').slice(0, 10);
+        const d = localDayStr(m.deliveryDate || m.deliveredAt || '');
         return d === todayDateStr;
       });
       const todayMaintTx = normalizedTransactions.filter(t => {
-        const d = (t.date || (t as any).createdAt || '').slice(0, 10);
+        const d = localDayStr(t.date || (t as any).createdAt || '');
         return d === todayDateStr && (t.type === 'maintenance' || (t.category || '').includes('صيانة'));
       });
       const txMaintTotal = todayMaintTx.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
@@ -736,7 +737,7 @@ class MultiBranchManager {
 
       // C. Expenses & Outflows (الفصل الصارم: مصروفات التشغيل والهوالك فقط — استبعاد السحب ورأس المال وشراء المخزون)
       const todayExpenses = normalizedTransactions.filter(t => {
-        const d = (t.date || (t as any).createdAt || '').slice(0, 10);
+        const d = localDayStr(t.date || (t as any).createdAt || '');
         return d === todayDateStr && isOperationalExpense(t as any);
       });
       const todayExpensesTotal = roundMoney(
@@ -745,7 +746,7 @@ class MultiBranchManager {
 
       // أي إيرادات تشغيلية أخرى بخلاف المبيعات والصيانة
       const todayOtherOperatingIncomeTx = normalizedTransactions.filter(t => {
-        const d = (t.date || (t as any).createdAt || '').slice(0, 10);
+        const d = localDayStr(t.date || (t as any).createdAt || '');
         return (
           d === todayDateStr &&
           isOperationalIncome(t as any) &&
