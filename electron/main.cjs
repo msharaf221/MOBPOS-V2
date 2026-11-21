@@ -336,7 +336,20 @@ function createWindow() {
     }
   });
 
-  mainWindow.loadURL(appUrl);
+  // A failed renderer must not leave a silent empty window. No storage reset.
+  mainWindow.webContents.on('did-fail-load', (_event, code, description, _url, isMainFrame) => {
+    if (!isMainFrame || code === -3 || !mainWindow) return;
+    mainWindow.show();
+    dialog.showErrorBox('MOBPOS: تعذر تحميل الواجهة',
+      `تعذر تحميل ملفات البرنامج المحلية. أعد تثبيت النسخة المناسبة لنظامك دون حذف بيانات التطبيق.\nرمز التشخيص: ${code} (${description})`);
+  });
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    if (!mainWindow) return;
+    mainWindow.show();
+    dialog.showErrorBox('MOBPOS: توقفت الواجهة',
+      `أعد تشغيل البرنامج. لو تكررت المشكلة، أرسل هذا الرمز للدعم. بياناتك لم تُحذف.\nرمز التشخيص: ${details.reason} / ${details.exitCode}`);
+  });
+  mainWindow.loadURL(appUrl).catch(err => console.error('[window load failed]', err.message));
 
   mainWindow.on('closed', () => { mainWindow = null; });
 }
@@ -554,4 +567,4 @@ if (!gotLock) {
     if (serverInfo && serverInfo.server) serverInfo.server.close();
     app.quit();
   });
-}
+                            }
