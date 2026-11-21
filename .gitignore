@@ -33,3 +33,6 @@ activation-server/data/
 # Packaging outputs
 release/
 mobile-dist/
+
+# Separate Chromium 108 renderer output
+dist-win7/
