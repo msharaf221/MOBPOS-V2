@@ -16,7 +16,10 @@ directories:
   buildResources: build    # مجلد الأيقونات
 
 files:
-  - dist/**/*
+  - from: dist-win7
+    to: dist
+    filter:
+      - "**/*"
   - electron/**/*
   - package.json
 
@@ -48,4 +51,3 @@ nsis:
 
 portable:
   artifactName: ${productName}-Portable-${version}-win7-${arch}.${ext}
-
