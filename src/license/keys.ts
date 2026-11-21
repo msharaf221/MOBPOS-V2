@@ -41,13 +41,17 @@ export const ACTIVATION_SERVER_URL: string =
  * والربط العتادي بالجهاز (Machine Token + Device Fingerprint).
  * العمليات الإدارية (/revoke و /release) محمية بـ ADMIN_TOKEN على السيرفر فقط.
  *
- * يُفضّل حقنه وقت البناء عبر VITE_ACTIVATION_SERVER_TOKEN ولا تُثبّت سراً في المستودع.
+ * يُحقن وقت البناء فقط عبر VITE_ACTIVATION_SERVER_TOKEN (أو VITE_ACTIVATION_TOKEN)
+ * من ملف `.env.local` غير المُتتبَّع أو متغيرات بيئة الـ CI — ولا يُثبَّت أي قيمة
+ * في المستودع العام. (القيمة القديمة المثبّتة هنا كانت تحتوي كلمة مرور شخصية
+ * ورقم هاتف، وأُزيلت؛ يجب اعتبارها مكشوفة وتدويرها على السيرفر.)
+ * بدون حقن يُرسل الطلب بلا ترويسة مصادقة ويرفضه السيرفر برسالة واضحة.
  */
 export const ACTIVATION_SERVER_TOKEN: string =
   (typeof import.meta !== 'undefined' &&
     ((import.meta as ImportMeta & { env?: Record<string, string> }).env?.VITE_ACTIVATION_SERVER_TOKEN ||
      (import.meta as ImportMeta & { env?: Record<string, string> }).env?.VITE_ACTIVATION_TOKEN)) ||
-  'Muhamed@04035122139M';
+  '';
 
 // مفاتيح التخزين المحلي
 export const STORAGE_KEYS = {

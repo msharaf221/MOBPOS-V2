@@ -3,7 +3,7 @@
 // ============================================================
 
 import ExcelJS from 'exceljs';
-import { formatDateTime } from './format.ts';
+import { formatDateTime, localDayStr } from './format.ts';
 // الخط يُضمَّن داخل ملفات التقارير نفسها (base64) عشان الطباعة والـ PDF
 // يطلعوا بخط Cairo حتى لو الخط مش متثبت على جهاز العميل
 import cairoArabic400 from '@fontsource/cairo/files/cairo-arabic-400-normal.woff2?url';
@@ -251,7 +251,7 @@ function sanitizeFileName(name: string): string {
 
 export function openPrintReport(opts: ReportInput): void {
   const html = buildReportHTML(opts);
-  const dateStr = new Date().toISOString().slice(0, 10);
+  const dateStr = localDayStr();
   const detail: ReportPreviewPayload = {
     title: opts.title,
     fileName: sanitizeFileName(`${opts.title}-${dateStr}`),
@@ -269,4 +269,3 @@ export {
   buildDailyCloseReport,
 } from './dailyClose.ts';
 export type { DailyCloseInput } from './dailyClose.ts';
-

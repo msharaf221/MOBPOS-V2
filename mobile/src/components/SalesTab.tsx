@@ -15,7 +15,7 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import type { SaleRecord } from '../types';
-import { formatCurrency, formatTimeAgo } from '../utils/format';
+import { formatCurrency, formatTimeAgo, localDayStr } from '../utils/format';
 
 interface SalesTabProps {
   sales: SaleRecord[];
@@ -31,11 +31,11 @@ export const SalesTab: React.FC<SalesTabProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'today' | 'cash' | 'instapay' | 'debt'>('all');
 
-  const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const todayStr = useMemo(() => localDayStr(), []);
 
   const filteredSales = useMemo(() => {
     return sales.filter(s => {
-      const saleDate = (s.date || s.createdAt || '').slice(0, 10);
+      const saleDate = localDayStr(s.date || s.createdAt || '');
 
       // Preset filter
       if (selectedFilter === 'today' && saleDate !== todayStr) return false;
@@ -113,7 +113,7 @@ export const SalesTab: React.FC<SalesTabProps> = ({
       <div className="flex items-center gap-2 overflow-x-auto scrollbar-none py-1 text-xs w-full touch-pan-x">
         {[
           { id: 'all' as const, label: 'الكل', count: sales.length },
-          { id: 'today' as const, label: 'اليوم فقط ⚡', count: sales.filter(s => (s.date || s.createdAt || '').slice(0, 10) === todayStr).length },
+          { id: 'today' as const, label: 'اليوم فقط ⚡', count: sales.filter(s => localDayStr(s.date || s.createdAt || '') === todayStr).length },
           { id: 'cash' as const, label: 'كاش 💵' },
           { id: 'instapay' as const, label: 'إنستاباي / تحويل 📱' },
           { id: 'debt' as const, label: 'آجل / متبقي ⏳' },

@@ -25,6 +25,7 @@ import { categoryToArabic } from '../utils/auditLogger';
 import { usePagination } from '../hooks/usePagination';
 import PaginationBar from './PaginationBar';
 import { downloadExcel } from '../utils/reports';
+import { localDayStr } from '../utils/format';
 
 interface AuditLogProps {
   auditLogs: AuditLogEntry[];
@@ -123,13 +124,13 @@ export default function AuditLog({ auditLogs, users, currentUser, onClearLogs }:
 
   // إحصائيات سريعة
   const stats = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localDayStr();
     let todaySales = 0;
     let todayMaintenance = 0;
     let criticalActions = 0;
 
     auditLogs.forEach((log) => {
-      const isToday = log.timestamp.slice(0, 10) === today;
+      const isToday = localDayStr(log.timestamp) === today;
       if (isToday && log.category === 'sales') todaySales++;
       if (isToday && log.category === 'maintenance') todayMaintenance++;
       if (log.severity === 'danger') criticalActions++;
@@ -146,7 +147,7 @@ export default function AuditLog({ auditLogs, users, currentUser, onClearLogs }:
   // الفلترة
   const filteredLogs = useMemo(() => {
     const now = new Date();
-    const todayStr = now.toISOString().slice(0, 10);
+    const todayStr = localDayStr(now);
     const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
     const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
@@ -158,7 +159,7 @@ export default function AuditLog({ auditLogs, users, currentUser, onClearLogs }:
       // فلتر الأهمية
       if (selectedSeverity !== 'all' && log.severity !== selectedSeverity) return false;
       // فلتر التاريخ
-      if (dateFilter === 'today' && log.timestamp.slice(0, 10) !== todayStr) return false;
+      if (dateFilter === 'today' && localDayStr(log.timestamp) !== todayStr) return false;
       if (dateFilter === 'week' && log.timestamp < weekAgo) return false;
       if (dateFilter === 'month' && log.timestamp < monthAgo) return false;
 
