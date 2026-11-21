@@ -127,3 +127,21 @@ export function formatDate(
 export function formatDateTime(value: string | number | Date | undefined | null): string {
   return formatDate(value, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
+
+/**
+ * اليوم **المحلي** بصيغة `YYYY-MM-DD` — لمقارنات «اليوم» في التقارير والفلاتر.
+ *
+ * ⚠️ لا تستخدم `new Date().toISOString().slice(0, 10)` لهذا الغرض:
+ * `toISOString()` يرجّع تاريخ UTC، فينتقل «اليوم» الساعة 2 أو 3 بعد منتصف
+ * الليل بتوقيت مصر بدل منتصف الليل المحلي — وفواتير أول الليل كانت بتتحسب
+ * على اليوم السابق في الفلاتر ولوحات المتابعة.
+ *
+ * بدون وسيط يرجّع يوم التشغيل الحالي؛ ومع قيمة يرجّع اليوم المحلي لتلك
+ * اللحظة (سلسلة فارغة لو القيمة غير صالحة).
+ */
+export function localDayStr(value?: string | number | Date | null): string {
+  const date = value === undefined || value === null ? new Date() : (value instanceof Date ? value : new Date(value));
+  if (Number.isNaN(date.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
