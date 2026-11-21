@@ -13,7 +13,7 @@ The shipped build already converts OKLCH colors to RGB fallbacks. It would be in
 - `npm run verify:win7` rejects unsupported modern color/property features in emitted CSS and checks startup assets, utility output and packaging configuration.
 - A dependency-free classic startup script displays an Arabic diagnostic if module startup fails, rejects, or remains on the splash for 30 seconds. It does not clear user data or print license/customer details.
 - Electron shows native load/crash diagnostics rather than leaving an unexplained window. Existing software-rendering flags remain enabled on the legacy runtime.
-- The lockfile is synchronized with the existing package manifest as well as the new legacy build dependencies. That also removes packages already absent from the manifest.
+- The lockfile is synchronized with the existing package manifest as well as the new legacy build dependencies. That also removes packages already absent from the manifest. The lockfile is compact JSON to keep the browser review edit manageable, with no change to its JSON structure.
 
 ## Reproducible checks
 
@@ -30,7 +30,7 @@ ELECTRON22_EXECUTABLE=/path/to/electron22 xvfb-run -a npm run test:win7
 
 On Windows omit `xvfb-run -a` and set the environment variable using the shell's syntax. The test insists on Electron 22.3.27 / Chromium 108. It launches the actual sandboxed preload and production activation screen from a temporary app with the isolated renderer, checks colors/opacity/gradient/blur/shadow output and forced startup diagnostics. A second test uses the existing **development-only** demo to open dashboard, inventory, POS and settings on that same engine. No production license bypass is introduced.
 
-At review time: 155 unit tests, typecheck, both renderer builds, static verifier, and both Electron 22 tests passed on Linux. This is not a Windows installer execution test, hardware/GPU test, printer test, full sales/returns regression, or a claim that every screen is error-free.
+At review time: a clean dependency install, 155 unit tests, typecheck, both renderer builds, static verifier, and both Electron 22 tests passed on Linux. Windows x64 and ia32 unpacked builds also completed; the packaged x64 ASAR renderer, guard and preload matched the intended source bytes. The separate Chromium 108 smoke workflow repeats the engine tests on pull requests and saves screenshots. This is not a Windows installer execution test, hardware/GPU test, printer test, full sales/returns regression, or a claim that every screen is error-free.
 
 ## Required Windows retest before release
 
