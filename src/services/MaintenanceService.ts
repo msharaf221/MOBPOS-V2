@@ -2,7 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { StoreState } from '../hooks/store/types';
 import { StoreUpdates } from './types';
 import { validText, isFiniteNumber, isPositiveInteger, roundMoney } from '../hooks/store/helpers';
-import { MaintenancePart, Transaction, Maintenance, User } from '../types';
+import { MaintenancePart } from '../types';
 
 export class MaintenanceService {
   static addMaintenancePart(
@@ -71,84 +71,10 @@ export class MaintenanceService {
     return { ok: true, updates };
   }
 
-  static deliverMaintenance(
-    state: StoreState,
-    id: string,
-    collectedAmount: number,
-    safeId: string,
-    currentUser: User | null
-  ): { ok: true; updates: StoreUpdates } | { ok: false; error: string } {
-    const { maintenance, safes } = state;
-    const maint = maintenance.find(m => m.id === id);
-    if (!maint) return { ok: false, error: 'تذكرة الصيانة غير موجودة' };
-    if (maint.status === 'delivered') return { ok: false, error: 'التذكرة مسلّمة بالفعل' };
-    if (maint.status === 'cancelled') return { ok: false, error: 'لا يمكن تسليم تذكرة ملغاة' };
-    if (maint.status !== 'completed') {
-      return { ok: false, error: 'لازم تحوّل التذكرة لحالة «مكتمل» قبل التسليم' };
-    }
-    const safe = safes.find(s => s.id === safeId);
-    if (!safe) return { ok: false, error: 'اختر الخزنة اللي هيتحصّل فيها المبلغ' };
-    if (!isFiniteNumber(collectedAmount) || collectedAmount < 0) {
-      return { ok: false, error: 'المبلغ المحصّل غير صحيح' };
-    }
-
-    const partsCost = maint.parts.reduce((sum, p) => sum + (isFiniteNumber(p.total) && p.total >= 0 ? p.total : 0), 0);
-    const additionalExpenses = roundMoney(
-      isFiniteNumber(maint.additionalExpenses) && maint.additionalExpenses >= 0 ? maint.additionalExpenses : 0
-    );
-    const finalAmount = roundMoney(collectedAmount);
-    const profit = roundMoney(finalAmount - partsCost - additionalExpenses);
-
-    if (additionalExpenses > 0 && roundMoney(safe.balance + finalAmount) < additionalExpenses) {
-      return { ok: false, error: `رصيد ${safe.name} لا يكفي لصرف المصاريف الإضافية (${additionalExpenses})` };
-    }
-
-    const now = new Date().toISOString();
-    
-    const updates: StoreUpdates = { deltas: [] };
-    
-    const updatedMaint: Maintenance = {
-      ...maint,
-      status: 'delivered', collectedAmount: finalAmount, finalCost: finalAmount,
-      profit, deliveredAt: now, safeId
-    };
-    updates.deltas.push({ type: 'upsert', storeName: 'maintenance', items: [updatedMaint] });
-
-    const safeDelta = roundMoney(finalAmount - additionalExpenses);
-    if (safeDelta !== 0) {
-      updates.deltas.push({ type: 'increment', storeName: 'safes', items: [{ id: safeId, balance: safeDelta }] });
-    }
-
-    const newTransactions: Transaction[] = [];
-    if (finalAmount > 0) {
-      newTransactions.push({
-        id: uuidv4(),
-        type: 'maintenance',
-        amount: finalAmount,
-        description: `إيراد صيانة - تذكرة ${maint.ticketNumber}`,
-        referenceId: maint.id,
-        safeId,
-        userId: currentUser?.id || '',
-        createdAt: now
-      });
-    }
-    if (additionalExpenses > 0) {
-      newTransactions.push({
-        id: uuidv4(),
-        type: 'maintenance',
-        amount: -additionalExpenses,
-        description: `مصروفات صيانة - تذكرة ${maint.ticketNumber}`,
-        referenceId: maint.id,
-        safeId,
-        userId: currentUser?.id || '',
-        createdAt: now
-      });
-    }
-    
-    if (newTransactions.length > 0) {
-      updates.deltas.push({ type: 'upsert', storeName: 'transactions', items: newTransactions });
-    }
-
-    return { ok: true, updates };
-  }
+  // ملاحظة: لم يعد هناك deliverMaintenance هنا. التنفيذ الوحيد الحيّ
+  // موجود في useMaintenanceSlice (المسار الذي تستخدمه الواجهة فعلاً).
+  // كانت نسخة هذه الخدمة ميتة — لا يستدعيها أحد — وتسجّل مصاريف الصيانة
+  // الإضافية كنوع 'maintenance' بدل 'expense' وتتجاهل قيد تكلفة القطع
+  // 'maintenance_cost'، فأي استدعاء مستقبلي لها كان سيغيّر تصنيف التقارير
+  // بصمت عن السلوك الحالي. حُذفت ليبقى مصدر حساب واحد فقط.
 }
