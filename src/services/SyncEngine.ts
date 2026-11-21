@@ -6,6 +6,7 @@
 import { createClient, SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
 import { indexedDBUtils, onStoreDelta, setRemoteApplying } from '../hooks/useIndexedDB.ts';
 import type { ActiveLicense } from '../license/types.ts';
+import { STORAGE_KEYS } from '../license/keys.ts';
 import type { AppSettings } from '../types/index.ts';
 import type {
   SyncConfig,
@@ -34,7 +35,11 @@ export function isValidJwt(token?: string | null): boolean {
 function getStoredActiveLicense(): ActiveLicense | null {
   if (typeof localStorage === 'undefined') return null;
   try {
-    const raw = localStorage.getItem('mobpos_active_license');
+    // نفس مفتاح التخزين الذي يكتبه محرك الترخيص (msp_active_license_v2).
+    // كان يُقرأ المفتاح القديم 'mobpos_active_license' الذي لا تكتبه أي
+    // نسخة حديثة، فتفشل القراءة دائمًا ويسقط معرّف المستأجر إلى
+    // 'default-tenant' في أي سياق لا يضبط setLicense في الذاكرة.
+    const raw = localStorage.getItem(STORAGE_KEYS.activeLicense);
     if (!raw) return null;
     return JSON.parse(raw);
   } catch {
