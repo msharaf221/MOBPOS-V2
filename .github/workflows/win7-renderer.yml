@@ -33,3 +33,41 @@ jobs:
           name: chromium108-renderer-evidence
           path: ${{ runner.temp }}/win7-evidence
           if-no-files-found: ignore
+
+  win7-x64-installer:
+    name: Windows 7 x64 setup artifact (no release)
+    if: github.event_name != 'pull_request' || github.event.pull_request.number == 22
+    runs-on: windows-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build:win7
+      - run: npm run verify:win7
+      - name: Build the x64 NSIS setup without publishing
+        run: npx electron-builder --win nsis --x64 --config electron-builder.win7.yml --publish never
+      - name: Record source and setup checksums
+        shell: pwsh
+        run: |
+          git rev-parse HEAD | Set-Content release-win7/SOURCE-COMMIT.txt
+          Get-FileHash release-win7/*Setup*win7*x64.exe -Algorithm SHA256 | Format-List | Out-File release-win7/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MOBPOS-Win7-x64-PR22
+          path: |
+            release-win7/*Setup*win7*x64.exe
+            release-win7/SOURCE-COMMIT.txt
+            release-win7/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 7
