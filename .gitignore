@@ -32,4 +32,8 @@ activation-server/data/
 
 # Packaging outputs
 release/
+release-win7/
 mobile-dist/
+
+# Separate Chromium 108 renderer output
+dist-win7/

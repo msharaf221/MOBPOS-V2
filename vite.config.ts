@@ -39,8 +39,10 @@ const lanPlugin = {
 };
 
 // https://vite.dev/config/
-export default defineConfig({
-  plugins: [react(), tailwindcss(), viteSingleFile(), lanPlugin],
+export default defineConfig(({ mode }) => ({
+  plugins: [react(), mode === 'win7'
+    ? require("./build/legacy-css.cjs").legacyCssPlugin(__dirname)
+    : tailwindcss(), viteSingleFile(), lanPlugin],
   server: {
     host: '0.0.0.0', // bind 0.0.0.0 so the preview proxy can reach it
     port: 8420, // Electron dev must keep the stable OAuth/IndexedDB origin
@@ -69,4 +71,4 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
-});
+}));

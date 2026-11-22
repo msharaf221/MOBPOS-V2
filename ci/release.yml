@@ -60,6 +60,9 @@ jobs:
       - name: Build Windows 10/11 installers (electron-builder)
         run: npx electron-builder --win --x64 --publish never
 
+      - name: Build Chromium 108 renderer for Windows 7
+        run: npm run build:win7 && npm run verify:win7
+
       - name: Build Windows 7 installers (electron-builder with Electron 22)
         run: npx electron-builder --win --config electron-builder.win7.yml --publish never
 
