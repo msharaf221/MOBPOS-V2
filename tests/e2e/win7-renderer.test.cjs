@@ -94,3 +94,19 @@ test('development-only demo screens on Chromium 108', async () => {
     await server.close();
   }
 });
+
+
+test('legacy CSS transform accepts normalized and Windows module IDs', async () => {
+  const { readFile } = require('node:fs/promises');
+  const { legacyCssPlugin } = require('../../build/legacy-css.cjs');
+  const root = path.resolve(__dirname, '../..');
+  const source = await readFile(path.join(root, 'src/index.css'), 'utf8');
+  const plugin = legacyCssPlugin(root);
+  const id = path.join(root, 'src/index.css');
+  for (const candidate of [id.replaceAll('\\', '/'), id.replaceAll('/', '\\')]) {
+    const output = await plugin.transform(source, candidate + '?direct');
+    assert.ok(output, 'Legacy compiler must not silently skip Windows paths');
+    assert.match(output.code, /\.blur-3xl/);
+    assert.doesNotMatch(output.code, /color-mix\(|@property\b/);
+  }
+});
