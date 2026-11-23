@@ -64,7 +64,19 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
   const [shopAddress, setShopAddress] = useState(settings.shopAddress);
   const [receiptFooter, setReceiptFooter] = useState(settings.receiptFooter);
   const [notifSound, setNotifSound] = useState(settings.notifSound);
-  const [showPartPrices, setShowPartPrices] = useState(settings.maintenanceReceiptShowPartPrices === true);
+  // تبديل أسعار قطع الغيار: القيمة المعروضة = override متفائل (من ضغطة
+  // المستخدم) لحد ما الإعدادات المحفوظة فعلاً توصل لنفس القيمة. من غير
+  // الـ override، أي snapshot قديم للإعدادات بيرجع من المزامنة (LAN/سيرفر)
+  // بعد الضغطة كان بيستبدل الحالة المحلية عبر useEffect بالأسفل، فالمقبض
+  // «بيرعش» رايح جاي قبل ما يستقر — خصوصاً على الأجهزة الضعيفة (ويندوز 7).
+  const [partPricesOverride, setPartPricesOverride] = useState<boolean | null>(null);
+  const persistedPartPrices = settings.maintenanceReceiptShowPartPrices === true;
+  const showPartPrices = partPricesOverride ?? persistedPartPrices;
+  useEffect(() => {
+    if (partPricesOverride !== null && persistedPartPrices === partPricesOverride) {
+      setPartPricesOverride(null);
+    }
+  }, [persistedPartPrices, partPricesOverride]);
   const [autoRefresh, setAutoRefresh] = useState(settings.autoRefresh);
   const [shopLogo, setShopLogo] = useState<string | undefined>(settings.shopLogo);
   const [accentColor, setAccentColor] = useState<string>(settings.accentColor || '#3b82f6');
@@ -245,7 +257,6 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
     setShopAddress(settings.shopAddress);
     setReceiptFooter(settings.receiptFooter);
     setNotifSound(settings.notifSound);
-    setShowPartPrices(settings.maintenanceReceiptShowPartPrices === true);
     setAutoRefresh(settings.autoRefresh);
     setShopLogo(settings.shopLogo);
     setAccentColor(settings.accentColor || '#3b82f6');
@@ -504,7 +515,7 @@ export default function Settings({ currentUser, isDarkMode, onToggleDarkMode, on
                   </div>
                   <button
                     type="button"
-                    onClick={() => { const next = !showPartPrices; setShowPartPrices(next); persistBranding({ maintenanceReceiptShowPartPrices: next }); showSaved(); }}
+                    onClick={() => { const next = !showPartPrices; setPartPricesOverride(next); persistBranding({ maintenanceReceiptShowPartPrices: next }); showSaved(); }}
                     className={`shrink-0 w-14 h-8 rounded-full transition relative ${showPartPrices ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'}`}
                     aria-pressed={showPartPrices}
                   >
