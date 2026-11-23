@@ -5,6 +5,7 @@ import "@fontsource/cairo/400.css";
 import "@fontsource/cairo/700.css";
 import "./index.css";
 import App from "./App";
+import { installArabicInputFix } from "./utils/arabicInputFix";
 import ErrorBoundary from "./components/ErrorBoundary";
 
 // Prevent scrolling on number inputs from changing their value
@@ -31,6 +32,9 @@ window.addEventListener('keydown', (e) => {
 // 3) ممنوع إسقاط ملف على النافذة فيتنقل بعيداً عن التطبيق
 window.addEventListener('dragover', (e) => e.preventDefault());
 window.addEventListener('drop', (e) => e.preventDefault());
+
+// تفعيل إصلاح الأرقام العربية قبل أول رسم
+installArabicInputFix();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

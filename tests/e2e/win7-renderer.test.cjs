@@ -96,6 +96,104 @@ test('development-only demo screens on Chromium 108', async () => {
 });
 
 
+test('Arabic-Indic digits type into numeric and text fields on Chromium 108', async () => {
+  const { createServer } = await import('vite');
+  const server = await createServer({ mode: 'win7', server: { port: 0, strictPort: false }, logLevel: 'error' });
+  await server.listen();
+  const app = await electron.launch({ executablePath: process.env.ELECTRON22_EXECUTABLE,
+    args: [...(process.platform === 'linux' ? ['--no-sandbox'] : []), path.resolve(__dirname, 'fixtures/win7-demo.cjs')],
+    env: { ...process.env, WIN7_DEMO_URL: `${server.resolvedUrls.local[0]}?demo=1` },
+  });
+  try {
+    const page = await app.firstWindow();
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.getByRole('button', { name: 'نقطة البيع', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'المخزون', exact: true }).click();
+    await page.locator('button[title="تعديل"]').first().click();
+    const modal = page.locator('.modal-overlay > div');
+    // Arabic keyboards on Windows emit Eastern Arabic digits (٠-٩). Chromium
+    // silently rejects them in type=number fields (deletes work, typing does
+    // nothing) and stores them unsearchable in text fields. The global
+    // beforeinput fix must normalize them to ASCII before React sees them.
+    const numInput = modal.locator('input[type="number"]').first();
+    await numInput.click({ force: true });
+    await numInput.fill('150');
+    await numInput.press('ControlOrMeta+a');
+    await page.keyboard.insertText('٢٧٥٫٥');
+    assert.equal(await numInput.inputValue(), '275.5');
+    const barcodeInput = modal.locator('input[placeholder="امسح أو اكتب الباركود..."]');
+    await barcodeInput.click({ force: true });
+    await barcodeInput.fill('');
+    await page.keyboard.insertText('٦٢٢١٢٣٤٥');
+    assert.equal(await barcodeInput.inputValue(), '62212345');
+    assert.deepEqual(errors, []);
+  } finally {
+    await app.close();
+    await server.close();
+  }
+});
+
+test('full UI sweep on Chromium 108: every page and key modals render without errors', async () => {
+  const { createServer } = await import('vite');
+  const server = await createServer({ mode: 'win7', server: { port: 0, strictPort: false }, logLevel: 'error' });
+  await server.listen();
+  const app = await electron.launch({ executablePath: process.env.ELECTRON22_EXECUTABLE,
+    args: [...(process.platform === 'linux' ? ['--no-sandbox'] : []), path.resolve(__dirname, 'fixtures/win7-demo.cjs')],
+    env: { ...process.env, WIN7_DEMO_URL: `${server.resolvedUrls.local[0]}?demo=1` },
+  });
+  try {
+    const page = await app.firstWindow();
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.getByRole('button', { name: 'نقطة البيع', exact: true }).waitFor();
+
+    // 1) Every navigation page renders real content.
+    const pages = ['لوحة التحكم','نقطة البيع','المخزون','جرد المخزون','إدارة IMEI','الصيانة','العملاء','المبيعات','الخزائن','المالية','الحسابات الجانبية','الموردين','المشتريات','الموظفين','سجل الرقابة','الإعدادات'];
+    for (const label of pages) {
+      await page.getByRole('button', { name: label, exact: true }).click();
+      await page.waitForTimeout(400);
+      assert.ok((await page.locator('#root').innerText()).length > 200, `${label} must render content`);
+    }
+
+    // 2) Inventory: add + edit modals open, accept input, and close.
+    await page.getByRole('button', { name: 'المخزون', exact: true }).click();
+    await page.locator('button[title="تعديل"]').first().click();
+    await page.locator('.modal-overlay input[type="text"]').first().fill('اختبار');
+    await page.keyboard.press('Escape');
+    await page.locator('.modal-overlay button').first().click();
+    assert.equal(await page.locator('.modal-overlay').count(), 0, 'edit modal must close');
+
+    // 3) Settings: spare-part price toggle settles with no jitter, even on rapid clicks.
+    await page.getByRole('button', { name: 'الإعدادات', exact: true }).click();
+    await page.waitForTimeout(500);
+    const block = page.getByText('إظهار أسعار قطع الغيار في إيصال الصيانة', { exact: true });
+    const toggleBtn = block.locator('xpath=ancestor::div[contains(@class,"flex")][1]//button[@aria-pressed]');
+    const initial = await toggleBtn.getAttribute('aria-pressed');
+    await toggleBtn.click();
+    await page.waitForTimeout(800);
+    const afterOne = await toggleBtn.getAttribute('aria-pressed');
+    assert.notEqual(afterOne, initial, 'toggle must flip after one click');
+    // rapid double click returns to initial and stays stable
+    await toggleBtn.click();
+    await page.waitForTimeout(800);
+    assert.equal(await toggleBtn.getAttribute('aria-pressed'), initial, 'toggle must flip back');
+    const probe = await toggleBtn.evaluate(async (btn) => {
+      const log = [];
+      const iv = setInterval(() => log.push(btn.getAttribute('aria-pressed')), 40);
+      await new Promise(r => setTimeout(r, 1200));
+      clearInterval(iv);
+      return new Set(log).size;
+    });
+    assert.equal(probe, 1, 'toggle state must be stable (no jitter) after settling');
+    // restore original state for a clean snapshot
+    assert.deepEqual(errors, [], 'no page errors during full sweep');
+  } finally {
+    await app.close();
+    await server.close();
+  }
+});
+
 test('legacy CSS transform accepts normalized and Windows module IDs', async () => {
   const { readFile } = require('node:fs/promises');
   const { legacyCssPlugin } = require('../../build/legacy-css.cjs');
