@@ -289,7 +289,22 @@ npm run dist:win7:x64         # بناء نسخة 64-بت فقط لويندوز 
 npm run mobile:build
 ```
 
-> 📖 **دليل البناء المفصل:** للاطلاع على شرح تفصيلي حول إعدادات البناء ومتطلبات أجهزة ويندوز 7 ومسارات تخزين البيانات، راجع ملف التوثيق الشامل [BUILD_EXE.md](file:///home/muhamed/MOBPOS-V2/BUILD_EXE.md).
+> 📖 **دليل البناء المفصل:** للاطلاع على شرح تفصيلي حول إعدادات البناء ومتطلبات أجهزة ويندوز 7 ومسارات تخزين البيانات، راجع ملف التوثيق الشامل [BUILD_EXE.md](BUILD_EXE.md).
+
+### أوامر إضافية
+
+```bash
+npm run typecheck             # فحص الأنواع
+npm run electron:dev          # ديسكتوب للتطوير
+npm run mobile:dev            # تطبيق الموبايل للتطوير (من الجذر)
+npm run mobile:preview        # معاينة بناء الموبايل
+npm run verify:updates        # فحص قناة التحديث التلقائي
+
+# سيرفر التفعيل (بيشتغل على المنفذ 8787، التفاصيل في activation-server/README.md)
+cd activation-server
+npm install
+ADMIN_TOKEN=<سر-إداري-قوي> ACTIVATION_TOKEN=<توكن-العميل> npm start
+```
 
 ---
 
